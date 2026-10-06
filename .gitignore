@@ -1,0 +1,6 @@
+# Nunca subir la configuración ni datos: este repo es público.
+config_axio.json
+*.json
+*.csv
+*.xlsx
+*.pkl
