@@ -218,7 +218,46 @@ class MotorWeb:
                 'error': self.error_whatsapp,
             },
             'cierres_locales': bool(carpeta),
+            'fuentes': self._fuentes(),
         }
+
+    def _fuentes(self):
+        """Cada hoja configurada con su estado de conexión, para el menú del usuario:
+        'ok', 'error' o 'pendiente' (todavía no se ha intentado cargar). Sin URLs: en el
+        servidor las direcciones de las hojas no salen hacia el navegador."""
+        def fuente(clave, nombre, estado, detalle):
+            return {'clave': clave, 'nombre': nombre, 'estado': estado, 'detalle': detalle}
+
+        fuentes = []
+        if self.config.get('url_base_global'):
+            if self.error_matriz:
+                fuentes.append(fuente('extractos', 'Extractos', 'error', self.error_matriz))
+            elif self.df_global is not None:
+                fuentes.append(fuente('extractos', 'Extractos', 'ok', f"{len(self.df_global):,} filas".replace(',', '.')))
+            else:
+                fuentes.append(fuente('extractos', 'Extractos', 'pendiente', None))
+        for linea in self.config.get('lineas_credito', []):
+            if not str(linea.get('url', '')).strip():
+                continue
+            nombre = linea.get('nombre', linea.get('clave'))
+            roster = self.rosters.get(linea.get('clave'))
+            if nombre in self.errores_lineas:
+                fuentes.append(fuente(linea['clave'], nombre, 'error', self.errores_lineas[nombre]))
+            elif roster is not None:
+                activos = sum(len(e) for e in roster.values())
+                fuentes.append(fuente(linea['clave'], nombre, 'ok',
+                                      f"{activos:,} créditos activos".replace(',', '.')))
+            else:
+                fuentes.append(fuente(linea['clave'], nombre, 'pendiente', None))
+        if str(self.config.get('url_whatsapp', '')).strip():
+            if self.error_whatsapp:
+                fuentes.append(fuente('whatsapp', 'WhatsApp', 'error', self.error_whatsapp))
+            elif self.listo:
+                fuentes.append(fuente('whatsapp', 'WhatsApp', 'ok',
+                                      f"{len(self.whatsapp):,} contactos".replace(',', '.')))
+            else:
+                fuentes.append(fuente('whatsapp', 'WhatsApp', 'pendiente', None))
+        return fuentes
 
     def _carpeta_cierres(self):
         if not self.config.get('buscador_incluir_archivos_locales', True):

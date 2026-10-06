@@ -25,6 +25,7 @@
   const contenedor = $("#resultados");
   const barraResultados = $("#barra-resultados");
   const zonaAsociado = $("#asociado-zona");
+  const zonaUsuario = $(".usuario");
   const filtro = $("#filtro");
   const ocultarVacias = $("#ocultar-vacias");
   const dialogo = $("#detalle");
@@ -137,6 +138,8 @@
   }
 
   function pintarEstado(est) {
+    ultimoEstado = est;
+    if (!menu.hidden) pintarMenu();
     const zona = $("#fuentes");
     zona.replaceChildren();
     const m = est.matriz, l = est.lineas;
@@ -544,6 +547,84 @@
     }
     return nodo;
   }
+
+  // ------------------------------------------------------------------ menú del usuario
+  // Un clic en la foto o el nombre abre la cuenta y la lista de hojas: cuáles se
+  // conectaron, cuáles no y por qué. Donde el estado trae la URL (la versión de navegador),
+  // cada hoja se puede abrir en Google Sheets.
+  let ultimoEstado = null;
+  const menu = el("div", { class: "menu-usuario", id: "menu-usuario", hidden: true });
+  zonaUsuario.parentElement.append(menu);
+  zonaUsuario.classList.add("usuario-boton");
+  zonaUsuario.setAttribute("role", "button");
+  zonaUsuario.setAttribute("tabindex", "0");
+  zonaUsuario.setAttribute("aria-haspopup", "true");
+  zonaUsuario.setAttribute("aria-controls", "menu-usuario");
+  zonaUsuario.setAttribute("aria-expanded", "false");
+  zonaUsuario.title = "Tu cuenta y las hojas conectadas";
+
+  const ICONOS_FUENTE = { ok: "✓", error: "✕", pendiente: "…" };
+  const TEXTOS_FUENTE = { ok: "Conectada", error: "Sin conexión", pendiente: "Pendiente" };
+
+  // "No se pudo descargar... Detalle: HTTP Error 401: tu cuenta no tiene permiso..." ->
+  // "Tu cuenta no tiene permiso...". El texto completo queda en el title.
+  function motivoCorto(texto) {
+    const corto = String(texto || "").replace(/^[\s\S]*HTTP Error \d+:\s*/, "").trim();
+    return corto ? corto.charAt(0).toUpperCase() + corto.slice(1) : "";
+  }
+
+  function pintarMenu() {
+    const nombre = ($(".usuario-nombre") || {}).textContent || "";
+    const correo = zonaUsuario.dataset.correo || "";
+    const est = ultimoEstado || {};
+    const fuentes = est.fuentes || [];
+    const conectadas = fuentes.filter((f) => f.estado === "ok").length;
+
+    const lista = el("ul", { class: "menu-fuentes" });
+    if (est.cargando) lista.append(el("li", { class: "menu-nota", text: "⏳ " + (est.mensaje_carga || "Cargando datos…") }));
+    for (const f of fuentes) {
+      lista.append(el("li", { class: "fuente-" + f.estado },
+        el("span", { class: "menu-icono", title: TEXTOS_FUENTE[f.estado], text: ICONOS_FUENTE[f.estado] || "?" }),
+        el("div", { class: "menu-fuente" },
+          el("strong", { text: f.nombre }),
+          el("span", { text: (f.estado === "error" ? motivoCorto(f.detalle) : f.detalle) || TEXTOS_FUENTE[f.estado],
+            title: f.detalle || null })),
+        f.url ? el("a", { class: "boton boton-chico", href: f.url, target: "_blank", rel: "noopener noreferrer",
+          title: "Abrir la hoja en Google Sheets", text: "Abrir ↗" }) : null));
+    }
+    if (!fuentes.length && !est.cargando) lista.append(el("li", { class: "menu-nota", text: "No hay hojas configuradas." }));
+
+    menu.replaceChildren(
+      el("div", { class: "menu-cabecera" },
+        el("span", { class: "avatar", "aria-hidden": "true", text: (nombre || "?").trim().charAt(0).toUpperCase() }),
+        el("div", { class: "menu-quien" }, el("strong", { text: nombre }), correo ? el("span", { text: correo }) : null)),
+      el("p", { class: "menu-titulo", text: fuentes.length
+        ? `Hojas conectadas · ${conectadas} de ${fuentes.length}` : "Hojas conectadas" }),
+      lista,
+      ES_ADMIN ? el("div", { class: "menu-pie" },
+        el("button", { class: "boton boton-chico", type: "button", text: "↻ Refrescar datos", disabled: Boolean(est.cargando),
+          onclick: refrescar })) : null);
+  }
+
+  function abrirMenu(abrir) {
+    menu.hidden = !abrir;
+    zonaUsuario.setAttribute("aria-expanded", String(abrir));
+    if (abrir) {
+      pintarMenu();
+      cargarEstado();
+    }
+  }
+
+  zonaUsuario.addEventListener("click", (ev) => { ev.stopPropagation(); abrirMenu(menu.hidden); });
+  zonaUsuario.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); abrirMenu(menu.hidden); }
+  });
+  document.addEventListener("click", (ev) => {
+    if (!menu.hidden && !menu.contains(ev.target)) abrirMenu(false);
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !menu.hidden) { abrirMenu(false); zonaUsuario.focus(); }
+  });
 
   // ------------------------------------------------------------------ eventos
   form.addEventListener("submit", (ev) => { ev.preventDefault(); buscar(); });

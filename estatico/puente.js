@@ -326,6 +326,7 @@
     $("#sesion-correo").textContent = usuario.email || "";
     $("#avatar-usuario").textContent = inicial;
     $("#nombre-usuario").textContent = nombre;
+    $(".usuario").dataset.correo = usuario.email || "";   // lo muestra el menú del usuario
     $("#btn-cambiar").textContent = "Cerrar sesión";
     $("#btn-cambiar").title = "Cierra la sesión de Google en Axio y borra los datos de la memoria";
   }

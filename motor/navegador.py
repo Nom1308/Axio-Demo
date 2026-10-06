@@ -163,6 +163,20 @@ def recargar():
     return json.dumps(_motor.estado())
 
 
+def _estado_con_enlaces():
+    """El estado del servidor más el enlace de cada hoja, para abrirla desde el menú del
+    usuario. En el servidor las URLs no salen al navegador; aquí sí, porque quien usa la
+    pestaña ya tiene el config y entra a cada hoja con sus propios permisos."""
+    estado = _motor.estado()
+    config = _motor.config
+    enlaces = {'extractos': config.get('url_base_global'), 'whatsapp': config.get('url_whatsapp')}
+    enlaces.update({l.get('clave'): l.get('url') for l in config.get('lineas_credito', [])})
+    for f in estado.get('fuentes', []):
+        url = str(enlaces.get(f['clave']) or '').strip()
+        f['url'] = url if url.startswith('https://') else None
+    return estado
+
+
 def _json(datos, estado=200):
     return estado, TIPO_JSON, json.dumps(datos, ensure_ascii=False).encode('utf-8')
 
@@ -176,7 +190,7 @@ def atender(url):
     ruta = [unquote(p) for p in partes.path.strip('/').split('/')]
 
     if ruta == ['api', 'estado']:
-        return _json(_motor.estado())
+        return _json(_estado_con_enlaces())
 
     if ruta == ['api', 'buscar']:
         termino = re.sub(r'\s+', ' ', parse_qs(partes.query).get('q', [''])[0]).strip()
