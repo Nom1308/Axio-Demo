@@ -1,0 +1,14 @@
+/* Solo lo que la demo agrega a estilos.css (que es copia exacta del de Axio Web). */
+
+[hidden] { display: none !important; }
+
+.boton-archivo { position: relative; cursor: pointer; text-align: center; }
+.boton-archivo input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.arrastre { margin: -6px 0 0; text-align: center; font-size: 12px; color: var(--texto-3); }
+.estado-motor { margin: 0; text-align: center; font-size: 13px; color: var(--texto-2); min-height: 1.4em; }
+.estado-motor.listo { color: var(--verde); }
+.nota-demo { margin: 22px 0 0; line-height: 1.5; }
+
+#portada { transition: box-shadow .2s, transform .2s; }
+#portada.arrastrando { box-shadow: 0 0 0 2px var(--celeste), 0 24px 60px -18px rgba(47, 125, 246, .8); transform: scale(1.01); }

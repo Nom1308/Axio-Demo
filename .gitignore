@@ -4,3 +4,6 @@ config_axio.json
 *.csv
 *.xlsx
 *.pkl
+*.db
+*.log
+__pycache__/

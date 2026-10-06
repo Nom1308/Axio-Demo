@@ -1,0 +1,15 @@
+axio/__init__.py
+axio/nucleo/__init__.py
+axio/nucleo/almacen.py
+axio/nucleo/cache_nube.py
+axio/nucleo/config.py
+axio/nucleo/entorno.py
+axio/nucleo/registro.py
+axio/nucleo/rutas.py
+axio/nucleo/utils.py
+axio/nucleo/version.py
+axio/dominio/__init__.py
+axio/dominio/buscador.py
+axio/dominio/indice.py
+web/__init__.py
+web/servicio.py

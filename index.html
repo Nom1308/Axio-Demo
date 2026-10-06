@@ -1,215 +1,101 @@
 <!doctype html>
 <html lang="es">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Axio · Prueba técnica</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<style>
-  :root {
-    --marino: #0B1A5C; --azul-vivo: #2F7DF6; --celeste: #4FA3FF; --dorado: #FCB400;
-    --degradado: linear-gradient(135deg, #1E3A8A 0%, #2453C7 45%, #3B8BFF 100%);
-    --fondo: #030A24; --vidrio: rgba(12, 26, 72, .48); --campo: rgba(156, 200, 255, .055);
-    --borde: rgba(156, 200, 255, .11); --borde-fuerte: rgba(156, 200, 255, .20);
-    --texto: #F2F6FF; --texto-2: rgba(214, 228, 255, .66); --texto-3: rgba(214, 228, 255, .40);
-    --verde: #34D399; --rojo: #FF6B6B; --resaltado: rgba(47, 125, 246, .16);
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-height: 100vh; color: var(--texto); background: var(--fondo);
-    font-family: "Segoe UI", system-ui, sans-serif;
-    background-image:
-      radial-gradient(900px 500px at 10% -10%, rgba(47, 125, 246, .25), transparent 60%),
-      radial-gradient(700px 400px at 100% 0%, rgba(79, 163, 255, .14), transparent 60%);
-  }
-  main { max-width: 1200px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -.02em; }
-  h1 span { color: var(--dorado); }
-  .sub { color: var(--texto-2); margin: 0 0 24px; }
-  .tarjeta {
-    background: var(--vidrio); border: 1px solid var(--borde); border-radius: 18px;
-    padding: 20px; margin-bottom: 18px; backdrop-filter: blur(18px);
-  }
-  .aviso { font-size: 13px; color: var(--texto-2); border-left: 3px solid var(--dorado); padding-left: 12px; }
-  label.archivo {
-    display: inline-block; cursor: pointer; padding: 11px 18px; border-radius: 12px;
-    background: var(--degradado); font-weight: 600;
-  }
-  label.archivo input { display: none; }
-  .fila { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  input[type=search] {
-    flex: 1; min-width: 220px; padding: 12px 14px; border-radius: 12px; font-size: 15px;
-    background: var(--campo); border: 1px solid var(--borde-fuerte); color: var(--texto); outline: none;
-  }
-  input[type=search]:focus { border-color: var(--celeste); }
-  button {
-    padding: 12px 20px; border-radius: 12px; border: 0; font-weight: 600; font-size: 15px;
-    background: var(--degradado); color: var(--texto); cursor: pointer;
-  }
-  button:disabled { opacity: .4; cursor: default; }
-  ul.fuentes { list-style: none; padding: 0; margin: 14px 0 0; font-size: 14px; }
-  ul.fuentes li { padding: 4px 0; color: var(--texto-2); }
-  .ok { color: var(--verde); } .err { color: var(--rojo); } .car { color: var(--celeste); }
-  h2 { font-size: 16px; margin: 0 0 10px; }
-  h2 small { color: var(--texto-3); font-weight: 400; }
-  .tabla { overflow-x: auto; border-radius: 12px; border: 1px solid var(--borde); }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { padding: 8px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--borde); }
-  th { background: rgba(11, 26, 92, .7); color: var(--texto-2); font-weight: 600; position: sticky; top: 0; }
-  tr:hover td { background: var(--resaltado); }
-  .vacio { color: var(--texto-3); }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="csrf" content="">
+  <title>Axio</title>
+  <link rel="icon" href="estatico/icono.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="estatico/estilos.css">
+  <link rel="stylesheet" href="estatico/demo.css">
 </head>
-<body>
-<main>
-  <h1>Axio <span>·</span> prueba técnica</h1>
-  <p class="sub">Buscador 100% en el navegador, con los datos reales descargados directo de Google Sheets.</p>
+<body class="pagina-login" data-admin="1">
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
-  <section class="tarjeta">
-    <div class="fila">
-      <label class="archivo">Cargar config_axio.json
-        <input type="file" id="archivo" accept=".json,application/json">
-      </label>
-      <span id="estado" class="vacio">Ningún archivo cargado</span>
+  <!-- Portada: en el servidor aquí va el login; en la demo, el archivo de configuración. -->
+  <main id="portada" class="tarjeta-login">
+    <div class="login-marca">
+      <span class="logo logo-grande" aria-hidden="true"></span>
+      <h1>Axio</h1>
+      <p class="subtitulo">Comprobantes, cartera y líneas de crédito en un solo lugar</p>
     </div>
-    <ul class="fuentes" id="fuentes"></ul>
-    <p class="aviso">El archivo se lee aquí mismo, en tu navegador: no se sube a ningún servidor.
-      Los datos solo viven en esta pestaña; al cerrarla o recargarla desaparecen.</p>
-  </section>
 
-  <section class="tarjeta">
-    <form class="fila" id="form">
-      <input type="search" id="termino" placeholder="Cédula, nombre, valor, banco…" disabled>
-      <button id="buscar" disabled>Buscar</button>
-    </form>
-  </section>
+    <p id="error-portada" class="aviso aviso-error" role="alert" hidden></p>
 
-  <div id="resultados"></div>
-</main>
+    <div class="form-login">
+      <label class="boton boton-principal boton-bloque boton-archivo">
+        Cargar config_axio.json
+        <input type="file" id="archivo-config" accept=".json,application/json">
+      </label>
+      <p class="arrastre">o arrastra el archivo aquí</p>
+      <p id="estado-motor" class="estado-motor" aria-live="polite">⏳ Preparando el motor de búsqueda…</p>
+    </div>
 
-<script>
-'use strict';
-const LIMITE_POR_FUENTE = 200;
-const PALABRAS_ENCABEZADO = ['FECH', 'FEC', 'DATE', 'CEDULA', 'VALOR', 'MONTO', 'CREDIT', 'DEBITO', 'BANCO'];
-const fuentes = [];   // { nombre, columnas, filas, normalizadas }
+    <p class="aviso aviso-info nota-demo">
+      <strong>Prueba técnica.</strong> El archivo se lee en tu navegador y no se sube a ningún servidor.
+      Los datos se descargan directo de Google Sheets y solo viven en esta pestaña: al cerrarla o
+      recargarla no queda nada guardado.
+    </p>
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const normalizar = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-const soloDigitos = (s) => String(s ?? '').replace(/\D/g, '');
+    <p class="pie-login"><span class="candado" aria-hidden="true"></span> Información protegida por la Ley 1581 de 2012</p>
+  </main>
 
-// Igual que descargar_base_global en Python: /edit... -> /export?format=csv&gid=...
-function urlCsv(url) {
-  const gid = (url.match(/gid=(\d+)/) || [])[1];
-  return url.replace(/\/edit.*$/, '/export?format=csv') + (gid ? '&gid=' + gid : '');
-}
+  <!-- Desde aquí, la misma página de Axio Web (web/plantillas/index.html). -->
+  <header class="barra" data-app hidden>
+    <div class="marca">
+      <span class="logo" aria-hidden="true"></span>
+      <strong>Axio</strong>
+    </div>
+    <div class="barra-derecha">
+      <span class="usuario">
+        <span class="avatar" aria-hidden="true">D</span>
+        <span class="usuario-nombre">Demo</span>
+        <span class="etiqueta-admin">Prueba</span>
+      </span>
+      <button type="button" id="btn-cambiar" class="boton boton-texto" title="Recarga la página y borra los datos de la memoria">Cambiar archivo</button>
+    </div>
+  </header>
 
-// Si los encabezados reales no están en la fila 1, busca en las primeras 30 la que
-// más se parezca a un encabezado (misma regla que la versión de escritorio).
-function detectarEncabezado(matriz) {
-  const coincidencias = (fila) => PALABRAS_ENCABEZADO.filter(
-    (k) => fila.some((c) => String(c).toUpperCase().includes(k))).length;
-  let mejor = 0, idx = 0;
-  for (let i = 0; i < Math.min(30, matriz.length); i++) {
-    const n = coincidencias(matriz[i]);
-    if (n > mejor) { mejor = n; idx = i; }
-  }
-  if (mejor < 2) idx = 0;
-  const columnas = matriz[idx].map((c, i) => String(c).trim() || `Columna ${i + 1}`);
-  const filas = matriz.slice(idx + 1).filter((f) => f.some((c) => String(c).trim() !== ''));
-  return { columnas, filas };
-}
+  <main class="contenido" data-app hidden>
+    <section class="portada">
+      <h1>Encuentra cualquier <span class="degradado">comprobante</span></h1>
+      <p>Busca por cédula, recibo, nombre o monto en la Matriz_Nube y las líneas de crédito.</p>
+    </section>
 
-async function descargar(nombre, url, li) {
-  li.innerHTML = `<span class="car">⟳</span> ${esc(nombre)}: descargando…`;
-  try {
-    const resp = await fetch(urlCsv(url));
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const texto = await resp.text();
-    const matriz = Papa.parse(texto, { skipEmptyLines: false }).data;
-    if (!matriz.length) throw new Error('hoja vacía');
-    const { columnas, filas } = detectarEncabezado(matriz);
-    const normalizadas = filas.map((f) => f.map(normalizar));
-    fuentes.push({ nombre, columnas, filas, normalizadas });
-    li.innerHTML = `<span class="ok">✓</span> ${esc(nombre)}: ${filas.length.toLocaleString('es')} filas`;
-  } catch (e) {
-    li.innerHTML = `<span class="err">✗</span> ${esc(nombre)}: ${esc(e.message)}`;
-  }
-}
+    <div class="panel-busqueda">
+      <form id="form-busqueda" class="caja-busqueda" role="search">
+        <span class="icono-lupa" aria-hidden="true"></span>
+        <input id="q" type="search" placeholder="Cédula, recibo, nombre, monto o rango (500000-700000, >1000000)…"
+               autocomplete="off" spellcheck="false" maxlength="200" aria-label="Buscar">
+        <button type="submit" id="btn-buscar" class="boton boton-principal">Buscar</button>
+      </form>
+      <div id="recientes" class="recientes" hidden></div>
+      <section id="fuentes" class="fuentes" aria-live="polite"></section>
+    </div>
 
-$('archivo').addEventListener('change', async (ev) => {
-  const archivo = ev.target.files[0];
-  if (!archivo) return;
-  fuentes.length = 0;
-  $('fuentes').innerHTML = '';
-  $('resultados').innerHTML = '';
-  let config;
-  try {
-    config = JSON.parse(await archivo.text());
-  } catch {
-    $('estado').innerHTML = '<span class="err">El archivo no es un JSON válido</span>';
-    return;
-  }
-  const lista = [];
-  if (config.url_base_global) lista.push(['Matriz_Nube', config.url_base_global]);
-  for (const l of config.lineas_credito || []) {
-    if (l.url && l.url.includes('docs.google.com/spreadsheets')) lista.push([l.nombre || l.clave, l.url]);
-  }
-  if (!lista.length) {
-    $('estado').innerHTML = '<span class="err">El archivo no trae links de Google Sheets</span>';
-    return;
-  }
-  $('estado').textContent = `${archivo.name} · ${lista.length} hojas`;
-  const t0 = performance.now();
-  await Promise.all(lista.map(([n, u]) => {
-    const li = document.createElement('li');
-    $('fuentes').appendChild(li);
-    return descargar(n, u, li);
-  }));
-  const seg = ((performance.now() - t0) / 1000).toFixed(1);
-  $('estado').textContent = `${archivo.name} · ${fuentes.length} de ${lista.length} hojas listas en ${seg} s`;
-  ev.target.value = '';
-  const listo = fuentes.length > 0;
-  $('termino').disabled = $('buscar').disabled = !listo;
-  if (listo) $('termino').focus();
-});
+    <div id="barra-resultados" class="barra-resultados" hidden>
+      <p id="resumen" class="resumen"></p>
+      <div class="acciones">
+        <input id="filtro" type="search" placeholder="Filtrar estos resultados…" aria-label="Filtrar resultados">
+        <label class="interruptor"><input type="checkbox" id="ocultar-vacias" checked> Ocultar columnas vacías</label>
+        <button id="btn-exportar" class="boton boton-exportar">Exportar a Excel</button>
+      </div>
+    </div>
 
-// Una fila coincide si TODOS los términos aparecen en alguna de sus celdas. Los términos
-// numéricos también se comparan sin puntos ni comas (1.250.000 = 1250000).
-function filaCoincide(norm, terminos) {
-  return terminos.every(({ texto, digitos }) => norm.some((celda) =>
-    celda.includes(texto) || (digitos && soloDigitos(celda).includes(digitos))));
-}
+    <p id="estado-busqueda" class="estado-busqueda" aria-live="polite"></p>
+    <div id="resultados"></div>
+  </main>
 
-$('form').addEventListener('submit', (ev) => {
-  ev.preventDefault();
-  const crudo = $('termino').value.trim();
-  if (!crudo) return;
-  const terminos = normalizar(crudo).split(/\s+/).map((t) => ({
-    texto: t, digitos: /^[\d.,$]+$/.test(t) && soloDigitos(t).length >= 3 ? soloDigitos(t) : '',
-  }));
-  const t0 = performance.now();
-  let html = '', total = 0;
-  for (const f of fuentes) {
-    const idx = [];
-    for (let i = 0; i < f.normalizadas.length; i++) {
-      if (filaCoincide(f.normalizadas[i], terminos)) idx.push(i);
-    }
-    if (!idx.length) continue;
-    total += idx.length;
-    const mostradas = idx.slice(0, LIMITE_POR_FUENTE);
-    html += `<section class="tarjeta"><h2>${esc(f.nombre)} <small>${idx.length} resultado(s)` +
-      (idx.length > mostradas.length ? `, mostrando ${mostradas.length}` : '') + `</small></h2>` +
-      `<div class="tabla"><table><thead><tr>${f.columnas.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>` +
-      mostradas.map((i) => `<tr>${f.columnas.map((_, j) => `<td>${esc(f.filas[i][j])}</td>`).join('')}</tr>`).join('') +
-      `</tbody></table></div></section>`;
-  }
-  const ms = Math.round(performance.now() - t0);
-  $('resultados').innerHTML = total
-    ? `<p class="sub">${total} resultado(s) en ${ms} ms</p>` + html
-    : `<section class="tarjeta vacio">Sin resultados para “${esc(crudo)}”.</section>`;
-});
-</script>
+  <dialog id="detalle" class="detalle" aria-labelledby="detalle-titulo">
+    <div class="detalle-cabecera">
+      <h2 id="detalle-titulo">Detalle del resultado</h2>
+      <button class="boton boton-texto boton-cerrar" data-cerrar aria-label="Cerrar">✕</button>
+    </div>
+    <div id="detalle-cuerpo" class="detalle-cuerpo"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="estatico/puente.js"></script>
 </body>
 </html>
