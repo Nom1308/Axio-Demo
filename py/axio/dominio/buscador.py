@@ -1453,6 +1453,9 @@ def descargar_linea_credito(url, clave=None):
             'observacion_estado': _texto_o_none(fila_celdas, idx_obs_estado),
             'fecha_ultimo_pago': _valor_o_none(fila_celdas, idx_fecha_ultimo_pago),
             'saldo_actual': _valor_o_none(fila_celdas, idx_saldo_actual),
+            # La fila COMPLETA de la obligación, para verla tal cual en su detalle: solo
+            # las celdas con algo, en el orden de la hoja, con su hipervínculo si lo tiene.
+            'campos': _campos_de_fila(encabezados, fila_celdas),
         }
         lista = roster.setdefault(cedula_norm, [])
         # Una misma persona puede tener dos créditos activos en la misma congregación (uno
@@ -1464,6 +1467,24 @@ def descargar_linea_credito(url, clave=None):
         if not any(_clave_dedupe(e) == _clave_dedupe(entrada) for e in lista):
             lista.append(entrada)
     return roster
+
+
+def _campos_de_fila(encabezados, fila_celdas):
+    """[(encabezado, valor, hipervínculo o None)] de las celdas con datos de una fila. Los
+    encabezados de las hojas reales traen saltos de línea ('TIPO CREDITO\\nLink Ultimo
+    Registro'): se dejan en una sola línea. Las columnas sin encabezado se nombran por
+    su letra para no perder el dato."""
+    campos = []
+    for i, celda in enumerate(fila_celdas):
+        valor = celda.value
+        if valor is None or str(valor).strip() in ('', 'nan', 'NaN'):
+            continue
+        encabezado = ' '.join(str(encabezados[i]).split()) if i < len(encabezados) and encabezados[i] else ''
+        if not encabezado:
+            encabezado = f"Columna {get_column_letter(i + 1)}"
+        enlace = celda.hyperlink.target if celda.hyperlink is not None else None
+        campos.append((encabezado, valor, enlace))
+    return campos
 
 
 # ==============================================================================

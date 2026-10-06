@@ -465,18 +465,19 @@ td.estado { padding-left: 16px; padding-right: 0; width: 18px; }
 
 /* La fila completa toma el color de su estado de pago, como en la Matriz_Nube. Un tono
    suave para que el texto se siga leyendo; al pasar el mouse se intensifica. */
-tbody tr.fila-ingresado          { background: rgba(52, 211, 153, .17); }
-tbody tr.fila-gestion_cartera    { background: rgba(251, 191, 36, .18); }
-tbody tr.fila-pendiente_recaudo  { background: rgba(255, 77, 79, .19); }
-tbody tr.fila-referencia_erronea { background: rgba(255, 126, 182, .19); }
-tbody tr.fila-ingresado:hover          { background: rgba(52, 211, 153, .28); }
-tbody tr.fila-gestion_cartera:hover    { background: rgba(251, 191, 36, .29); }
-tbody tr.fila-pendiente_recaudo:hover  { background: rgba(255, 77, 79, .30); }
-tbody tr.fila-referencia_erronea:hover { background: rgba(255, 126, 182, .30); }
-tbody tr.fila-ingresado td:first-child          { box-shadow: inset 3px 0 0 #34D399; }
-tbody tr.fila-gestion_cartera td:first-child    { box-shadow: inset 3px 0 0 #FBBF24; }
-tbody tr.fila-pendiente_recaudo td:first-child  { box-shadow: inset 3px 0 0 #FF4D4F; }
-tbody tr.fila-referencia_erronea td:first-child { box-shadow: inset 3px 0 0 #FF7EB6; }
+tbody tr.fila-ingresado          { background: rgba(34, 197, 94, .50); }
+tbody tr.fila-gestion_cartera    { background: rgba(245, 158, 11, .50); }
+tbody tr.fila-pendiente_recaudo  { background: rgba(239, 68, 68, .50); }
+tbody tr.fila-referencia_erronea { background: rgba(236, 72, 153, .48); }
+tbody tr.fila-ingresado:hover          { background: rgba(34, 197, 94, .64); }
+tbody tr.fila-gestion_cartera:hover    { background: rgba(245, 158, 11, .60); }
+tbody tr.fila-pendiente_recaudo:hover  { background: rgba(239, 68, 68, .60); }
+tbody tr.fila-referencia_erronea:hover { background: rgba(236, 72, 153, .58); }
+tbody tr[class^="fila-"] td { color: var(--texto); border-bottom-color: rgba(0, 0, 0, .12); }
+tbody tr.fila-ingresado td:first-child          { box-shadow: inset 4px 0 0 #16A34A; }
+tbody tr.fila-gestion_cartera td:first-child    { box-shadow: inset 4px 0 0 #D97706; }
+tbody tr.fila-pendiente_recaudo td:first-child  { box-shadow: inset 4px 0 0 #DC2626; }
+tbody tr.fila-referencia_erronea td:first-child { box-shadow: inset 4px 0 0 #DB2777; }
 
 /* ==========================================================================
    ASOCIADO: resumen arriba de los resultados cuando se busca una cédula
@@ -572,6 +573,20 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 .credito-datos div { padding: 8px 11px; border-radius: 10px; background: var(--campo); border: 1px solid var(--borde); }
 .credito-datos dt { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--texto-3); }
 .credito-datos dd { margin: 3px 0 0; font-size: 13.5px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* Tarjeta de crédito que abre la obligación completa. */
+.credito-clic { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.credito-clic:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -16px rgba(16, 185, 129, .8); }
+.credito-clic:focus-visible { outline: 2px solid var(--verde); outline-offset: 2px; }
+.credito:not(.credito-tarjeta).credito-clic:hover { background: var(--campo); }
+.credito-ver { display: block; margin-top: 10px; font-size: 12px; font-weight: 650; color: var(--verde); text-align: right; }
+
+/* Detalle de la obligación */
+.estado-activo { background: linear-gradient(135deg, #059669, #10B981); }
+.estado-mora { background: linear-gradient(135deg, #D97706, #F59E0B); }
+.obligacion-resumen { margin: 0; }
+.obligacion-resumen dd { font-size: 15px; }
+.campo-acciones { display: flex; gap: 4px; }
 .insignia {
   font-size: 10px; font-weight: 800; letter-spacing: .08em; color: var(--verde);
   padding: 3px 8px; border-radius: 99px; background: rgba(52, 211, 153, .12); border: 1px solid rgba(52, 211, 153, .35);
@@ -589,6 +604,7 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 .campo input:hover { background: var(--campo); }
 .campo input:focus { border-color: rgba(47, 125, 246, .5); }
 .campo .boton-chico { opacity: .55; }
+.campo .campo-acciones a.boton-chico { opacity: 1; }
 .campo:hover .boton-chico { opacity: 1; }
 .pie-detalle { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
 

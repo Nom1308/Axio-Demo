@@ -44,6 +44,17 @@ def _nombre_visible(fuente):
     return NOMBRES_VISIBLES_FUENTE.get(fuente, fuente)
 
 
+def _valor_de_campo(columna, valor):
+    """Como _formatear_valor_celda, salvo las cédulas: van sin separador de miles para
+    poder copiarlas tal cual (12345678, no 12,345,678)."""
+    if 'CEDULA' in columna.upper() or 'CÉDULA' in columna.upper():
+        if isinstance(valor, float) and valor == int(valor):
+            valor = int(valor)
+        if isinstance(valor, int):
+            return str(valor)
+    return _formatear_valor_celda(valor)
+
+
 def _cedula_con_puntos(cedula_limpia):
     return f"{int(cedula_limpia):,}".replace(',', '.') if cedula_limpia.isdigit() else cedula_limpia
 
@@ -451,6 +462,11 @@ class MotorWeb:
                                   if e.get('fecha_ultimo_pago') is not None else None),
             'saldo_actual': (_formatear_valor_celda(e['saldo_actual'])
                              if e.get('saldo_actual') is not None else None),
+            # Toda la fila de la obligación, para su detalle. Una celda que es en sí misma
+            # una dirección web también se ofrece como enlace.
+            'campos': [{'columna': columna, 'valor': _valor_de_campo(columna, valor),
+                        'enlace': _enlace_seguro(enlace or valor)}
+                       for columna, valor, enlace in e.get('campos') or []],
         }
 
     # ------------------------------------------------------------------ exportar

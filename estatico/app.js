@@ -403,7 +403,26 @@
     }
   }
 
+  function pintarCampos(lista) {
+    const campos = el("div", { class: "campos" });
+    for (const c of lista) {
+      const entrada = el("input", { readonly: true, "aria-label": c.columna });
+      entrada.value = c.valor || "—";
+      campos.append(el("div", { class: "campo" },
+        el("span", { class: "nombre", text: c.columna }),
+        entrada,
+        el("div", { class: "campo-acciones" },
+          c.enlace ? el("a", { class: "boton boton-chico", href: c.enlace, target: "_blank", rel: "noopener noreferrer", title: "Abrir enlace", text: "↗" }) : null,
+          el("button", { class: "boton boton-chico", type: "button", title: "Copiar", text: "📋", onclick: () => copiar(c.valor, "Copiado.") }))));
+    }
+    return campos;
+  }
+
+  let ultimoDetalle = null;   // el pago abierto, para volver a él desde una obligación
+
   function pintarDetalle(d) {
+    ultimoDetalle = d;
+    $("#detalle-titulo").textContent = "Detalle del resultado";
     const partes = [el("p", { class: "fuente-detalle", text: "📂 " + d.fuente })];
 
     if (d.estado_pago) {
@@ -453,16 +472,7 @@
     }
     partes.push(creditos);
 
-    const campos = el("div", { class: "campos" });
-    for (const c of d.campos) {
-      const entrada = el("input", { readonly: true, "aria-label": c.columna });
-      entrada.value = c.valor || "—";
-      campos.append(el("div", { class: "campo" },
-        el("span", { class: "nombre", text: c.columna }),
-        entrada,
-        el("button", { class: "boton boton-chico", type: "button", title: "Copiar", text: "📋", onclick: () => copiar(c.valor, "Copiado.") })));
-    }
-    partes.push(el("div", null, el("h3", { class: "gris", style: "margin:4px 0 8px;font-size:13px", text: "Todos los campos" }), campos));
+    partes.push(el("div", null, el("h3", { class: "gris", style: "margin:4px 0 8px;font-size:13px", text: "Todos los campos" }), pintarCampos(d.campos)));
 
     const textoCompleto = d.campos.map((c) => `${c.columna}: ${c.valor}`).join("\n");
     partes.push(el("div", { class: "pie-detalle" },
@@ -470,6 +480,73 @@
       el("button", { class: "boton boton-principal", type: "button", text: "Cerrar", onclick: () => dialogo.close() })));
 
     cuerpoDetalle.replaceChildren(...partes);
+    dialogo.scrollTop = 0;
+  }
+
+  // ------------------------------------------------------------------ detalle de una obligación
+  // La fila completa del crédito en la hoja de su línea, presentada como el detalle de un
+  // pago: estado arriba, resumen, enlaces y todos los campos con su botón de copiar.
+  function buscarCampo(campos, ...palabras) {
+    const c = (campos || []).find((x) => palabras.every((p) => x.columna.toUpperCase().includes(p)));
+    return c ? c.valor : null;
+  }
+
+  function abrirObligacion(nombreLinea, e) {
+    const desdePago = dialogo.open && ultimoDetalle ? ultimoDetalle : null;
+    if (!dialogo.open) dialogo.showModal();
+    $("#detalle-titulo").textContent = "Detalle de la obligación";
+
+    const partes = [el("p", { class: "fuente-detalle", text: "💳 " + nombreLinea })];
+
+    // Al día / en mora, como lo marca la hoja de la línea.
+    const pago = buscarCampo(e.campos, "ESTADO PAGO AUTOMATICO") || buscarCampo(e.campos, "MORA/DIA")
+      || buscarCampo(e.campos, "ESTADO PAGO") || "";
+    const enMora = /MORA/i.test(pago) || e.en_mora === true;
+    const textoPago = pago ? pago.replace(/_/g, " ").toLowerCase().replace(/^./, (x) => x.toUpperCase()) : "";
+    partes.push(el("div", { class: "estado-pago " + (enMora ? "estado-mora" : "estado-activo") },
+      `${enMora ? "🟠" : "🟢"} Crédito activo${textoPago ? " · " + textoPago : ""}`));
+
+    const descripcion = [e.congregacion, e.cco ? "CCO " + e.cco : null, e.distrito ? "Distrito " + e.distrito : null].filter(Boolean);
+    const cabecera = el("div", { class: "tarjeta" },
+      el("h3", { text: "📄 Obligación" }),
+      el("p", null, el("strong", { text: e.tipo_credito || nombreLinea })),
+      descripcion.length ? el("p", { class: "gris", text: descripcion.join("  ·  ") }) : null,
+      e.nombre ? el("p", { class: "gris", text: "👤 " + e.nombre }) : null);
+    const enlaces = el("div", { class: "fila-flex" });
+    if (e.link_registro) enlaces.append(el("a", { class: "boton boton-chico", href: e.link_registro, target: "_blank", rel: "noopener noreferrer", text: "🔗 Último registro" }));
+    if (e.link_obligacion && e.link_obligacion !== e.link_registro) {
+      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación" }));
+    }
+    if (enlaces.childElementCount) cabecera.append(enlaces);
+    partes.push(cabecera);
+
+    const resumen = [
+      ["Saldo actual", e.saldo_actual ? "$ " + e.saldo_actual : (e.saldo ? "$ " + e.saldo : null)],
+      ["Último pago", e.fecha_ultimo_pago],
+      ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
+      ["Altura", buscarCampo(e.campos, "ALTURA")],
+      ["Observación", e.observacion_estado],
+      ["Tarifa", e.tarifa ? "$ " + e.tarifa : null],
+      ["Meses en mora", e.meses_mora],
+    ].filter(([, v]) => v);
+    if (resumen.length) {
+      partes.push(el("dl", { class: "credito-datos obligacion-resumen" },
+        ...resumen.map(([etiqueta, valor]) => el("div", null, el("dt", { text: etiqueta }), el("dd", { text: valor })))));
+    }
+
+    const campos = e.campos || [];
+    partes.push(el("div", null,
+      el("h3", { class: "gris", style: "margin:4px 0 8px;font-size:13px", text: `Todos los campos de la hoja · ${campos.length}` }),
+      pintarCampos(campos)));
+
+    const textoCompleto = [`${nombreLinea}`, ...campos.map((c) => `${c.columna}: ${c.valor}`)].join("\n");
+    partes.push(el("div", { class: "pie-detalle" },
+      desdePago ? el("button", { class: "boton", type: "button", text: "← Volver al pago", onclick: () => pintarDetalle(desdePago) }) : null,
+      el("button", { class: "boton", type: "button", text: "📋 Copiar todo", onclick: () => copiar(textoCompleto, "Obligación copiada.") }),
+      el("button", { class: "boton boton-principal", type: "button", text: "Cerrar", onclick: () => dialogo.close() })));
+
+    cuerpoDetalle.replaceChildren(...partes);
+    dialogo.scrollTop = 0;
   }
 
   function botonWhatsapp(enlace) {
@@ -507,12 +584,14 @@
     if (e.cco) descripcion.push("CCO " + e.cco);
     if (e.distrito) descripcion.push("Distrito " + e.distrito);
 
+    // Los enlaces no abren el detalle: solo su propia pestaña.
+    const sinBurbuja = (ev) => ev.stopPropagation();
     const enlaces = el("div", { class: "credito-enlaces" });
     if (e.link_registro) {
-      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_registro, target: "_blank", rel: "noopener noreferrer", text: "🔗 Último registro" }));
+      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_registro, target: "_blank", rel: "noopener noreferrer", text: "🔗 Último registro", onclick: sinBurbuja }));
     }
     if (e.link_obligacion && e.link_obligacion !== e.link_registro) {
-      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación" }));
+      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación", onclick: sinBurbuja }));
     }
 
     const fila = el("div", { class: "credito-cabecera" },
@@ -521,7 +600,14 @@
         el("strong", { text: nombreLinea + (e.tipo_credito && e.tipo_credito !== nombreLinea ? " · " + e.tipo_credito : "") }),
         descripcion.length ? el("span", { text: descripcion.join("  ·  ") }) : null),
       enlaces.childElementCount ? enlaces : null);
-    const nodo = el("div", { class: comoTarjeta ? "credito credito-tarjeta" : "credito" }, fila);
+    const conDetalle = Boolean(e.campos && e.campos.length);
+    const nodo = el("div", {
+      class: (comoTarjeta ? "credito credito-tarjeta" : "credito") + (conDetalle ? " credito-clic" : ""),
+      role: conDetalle ? "button" : null, tabindex: conDetalle ? "0" : null,
+      title: conDetalle ? "Ver la obligación completa" : null,
+      onclick: conDetalle ? () => abrirObligacion(nombreLinea, e) : null,
+      onkeydown: conDetalle ? (ev) => { if (ev.key === "Enter") abrirObligacion(nombreLinea, e); } : null,
+    }, fila);
 
     // Resumen de la obligación: lo que se mira primero en la hoja de la línea.
     const datos = [
@@ -545,6 +631,7 @@
       if (e.observacion_general) extra.append(el("em", { text: "📝 General: " + e.observacion_general }));
       nodo.append(extra);
     }
+    if (conDetalle) nodo.append(el("span", { class: "credito-ver", text: "Ver obligación completa ›" }));
     return nodo;
   }
 

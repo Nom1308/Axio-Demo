@@ -39,7 +39,8 @@ ARCHIVO_LINEAS_META = "lineas_credito.json"
 # las copias viejas se ignoren solas en vez de leerse mal.
 # 2: las entradas de las líneas de crédito traen tipo de crédito, observación, fecha del
 #    último pago y saldo actual.
-VERSION_CACHE = 2
+# 3: y la fila completa de cada obligación (campos), para su detalle.
+VERSION_CACHE = 3
 
 
 def _carpeta():
