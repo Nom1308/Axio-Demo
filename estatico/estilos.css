@@ -423,6 +423,51 @@ td.estado { padding-left: 16px; padding-right: 0; width: 18px; }
 .e-pendiente_recaudo { background: #FF4D4F; box-shadow: 0 0 0 3px rgba(255, 77, 79, .18), 0 0 10px rgba(255, 77, 79, .6); }
 .e-referencia_erronea { background: #FF7EB6; box-shadow: 0 0 0 3px rgba(255, 126, 182, .18), 0 0 10px rgba(255, 126, 182, .6); }
 
+/* La fila completa toma el color de su estado de pago, como en la Matriz_Nube. Un tono
+   suave para que el texto se siga leyendo; al pasar el mouse se intensifica. */
+tbody tr.fila-ingresado          { background: rgba(52, 211, 153, .17); }
+tbody tr.fila-gestion_cartera    { background: rgba(251, 191, 36, .18); }
+tbody tr.fila-pendiente_recaudo  { background: rgba(255, 77, 79, .19); }
+tbody tr.fila-referencia_erronea { background: rgba(255, 126, 182, .19); }
+tbody tr.fila-ingresado:hover          { background: rgba(52, 211, 153, .28); }
+tbody tr.fila-gestion_cartera:hover    { background: rgba(251, 191, 36, .29); }
+tbody tr.fila-pendiente_recaudo:hover  { background: rgba(255, 77, 79, .30); }
+tbody tr.fila-referencia_erronea:hover { background: rgba(255, 126, 182, .30); }
+tbody tr.fila-ingresado td:first-child          { box-shadow: inset 3px 0 0 #34D399; }
+tbody tr.fila-gestion_cartera td:first-child    { box-shadow: inset 3px 0 0 #FBBF24; }
+tbody tr.fila-pendiente_recaudo td:first-child  { box-shadow: inset 3px 0 0 #FF4D4F; }
+tbody tr.fila-referencia_erronea td:first-child { box-shadow: inset 3px 0 0 #FF7EB6; }
+
+/* ==========================================================================
+   ASOCIADO: resumen arriba de los resultados cuando se busca una cédula
+   ========================================================================== */
+.asociado {
+  margin: 18px 0; padding: 20px 22px; border-radius: var(--radio);
+  background: var(--vidrio); border: 1px solid rgba(52, 211, 153, .28);
+  box-shadow: var(--sombra-chica), var(--brillo), 0 0 0 1px rgba(52, 211, 153, .06), 0 18px 50px -30px rgba(52, 211, 153, .55);
+  animation: aparecer .45s cubic-bezier(.2, .8, .2, 1) both;
+}
+.asociado-cabecera { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.asociado-avatar {
+  flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+  font-family: var(--fuente-titulo); font-size: 20px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #0F9F6E, #34D399); box-shadow: 0 10px 24px -10px rgba(52, 211, 153, .8);
+}
+.asociado-nombre { flex: 1; min-width: 180px; display: grid; gap: 2px; }
+.asociado-nombre strong { font-family: var(--fuente-titulo); font-size: 18px; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.asociado-nombre span { color: var(--texto-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.asociado-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.asociado-titulo {
+  margin: 18px 0 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--verde);
+}
+/* En columnas y no en grilla: las tarjetas tienen alturas muy distintas (una con saldo y
+   fechas, otra con solo el nombre) y así encajan sin dejar huecos. */
+.asociado-creditos { columns: 3 300px; column-gap: 10px; }
+.asociado-creditos .credito-tarjeta { break-inside: avoid; margin-bottom: 10px; }
+
+.boton-whatsapp { color: #fff; background: linear-gradient(135deg, #128C7E, #25D366); border-color: transparent; box-shadow: 0 8px 20px -10px rgba(37, 211, 102, .9); }
+.boton-whatsapp:hover { filter: brightness(1.08); color: #fff; }
+
 /* ==========================================================================
    DETALLE
    ========================================================================== */
@@ -473,6 +518,20 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 
 .credito { padding: 12px 0; border-top: 1px solid var(--borde); }
 .credito:first-of-type { border-top: 0; padding-top: 2px; }
+.credito-tarjeta, .credito-tarjeta:first-of-type {
+  padding: 14px 16px; border: 1px solid rgba(52, 211, 153, .22); border-left: 3px solid var(--verde); border-radius: 14px;
+  background: linear-gradient(135deg, rgba(52, 211, 153, .09), rgba(52, 211, 153, .02));
+}
+.credito-cabecera { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.credito-cabecera .insignia { margin-top: 2px; }
+.credito-titulo { flex: 1; min-width: 160px; display: grid; gap: 2px; }
+.credito-titulo strong { font-size: 14.5px; overflow-wrap: anywhere; }
+.credito-titulo span { color: var(--texto-2); font-size: 12.5px; overflow-wrap: anywhere; }
+.credito-enlaces { display: flex; gap: 6px; flex-wrap: wrap; }
+.credito-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 12px 0 0; }
+.credito-datos div { padding: 8px 11px; border-radius: 10px; background: var(--campo); border: 1px solid var(--borde); }
+.credito-datos dt { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--texto-3); }
+.credito-datos dd { margin: 3px 0 0; font-size: 13.5px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .insignia {
   font-size: 10px; font-weight: 800; letter-spacing: .08em; color: var(--verde);
   padding: 3px 8px; border-radius: 99px; background: rgba(52, 211, 153, .12); border: 1px solid rgba(52, 211, 153, .35);

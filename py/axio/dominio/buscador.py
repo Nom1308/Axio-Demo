@@ -1338,10 +1338,26 @@ def descargar_linea_credito(url, clave=None):
         columnas_ya_asignadas.add(elegido)
         return elegido
 
+    def _buscar_columna_con_todas(palabras):
+        """Como _buscar_columna, pero exige que el encabezado tenga TODAS las palabras."""
+        for i, en_mayus in cols_por_mayus.items():
+            if i not in columnas_ya_asignadas and all(p in en_mayus for p in palabras):
+                columnas_ya_asignadas.add(i)
+                return i
+        return None
+
     idx_cedula = _buscar_columna(ALIASES_CEDULA)
     idx_cco = _buscar_columna(['CCO', 'CODIGO', 'CÓDIGO'])
     idx_congregacion = _buscar_columna(['CONGREGA', 'IGLESIA'])
     idx_distrito = _buscar_columna(['DTO', 'DISTRITO'])
+    # Columnas del resumen de la obligación (V11). Van ANTES que la de estado: el
+    # encabezado 'OBSERVACIÓN (Activos/Inactivos)' también contiene 'ACTIV' y, si se
+    # buscara después, podría quedarse con la columna que decide si el crédito está activo.
+    idx_tipo_credito = _buscar_columna(['TIPO CREDITO', 'TIPO CRÉDITO', 'TIPO DE CREDITO', 'TIPO DE CRÉDITO'])
+    idx_obs_estado = (_buscar_columna_con_todas(['OBSERVACI', 'ACTIV'])
+                      if clave not in CLAVES_LINEAS_CON_INFO_EXTRA else None)
+    idx_fecha_ultimo_pago = _buscar_columna(['ULTIMO PAGO', 'ÚLTIMO PAGO'])
+    idx_saldo_actual = _buscar_columna(['SALDO ACTUAL DE LA TABLA'])
     if clave in CLAVES_LINEAS_CON_INFO_EXTRA:
         idx_estado = None
         idx_tarifa = _buscar_columna(['TARIFA'])
@@ -1412,6 +1428,13 @@ def descargar_linea_credito(url, clave=None):
                     link_obligacion = v.strip()
                     break
 
+        # El tipo de crédito suele llevar un hipervínculo al último registro del crédito.
+        link_registro = None
+        if idx_tipo_credito is not None and idx_tipo_credito < len(fila_celdas):
+            celda_tipo = fila_celdas[idx_tipo_credito]
+            if celda_tipo.hyperlink is not None:
+                link_registro = celda_tipo.hyperlink.target
+
         cco_raw = _texto_o_none(fila_celdas, idx_cco)
         distrito_raw = _texto_o_none(fila_celdas, idx_distrito)
         entrada = {
@@ -1425,9 +1448,86 @@ def descargar_linea_credito(url, clave=None):
             'meses_mora': _valor_o_none(fila_celdas, idx_mora),
             'observacion_directivos': _texto_o_none(fila_celdas, idx_obs_directivos),
             'observacion_general': _texto_o_none(fila_celdas, idx_obs_general),
+            'tipo_credito': _texto_o_none(fila_celdas, idx_tipo_credito),
+            'link_registro': link_registro,
+            'observacion_estado': _texto_o_none(fila_celdas, idx_obs_estado),
+            'fecha_ultimo_pago': _valor_o_none(fila_celdas, idx_fecha_ultimo_pago),
+            'saldo_actual': _valor_o_none(fila_celdas, idx_saldo_actual),
         }
         lista = roster.setdefault(cedula_norm, [])
-        clave_dedupe = entrada['cco'] if entrada['cco'] else (entrada['nombre'], entrada['congregacion'])
-        if not any((e['cco'] if e['cco'] else (e['nombre'], e['congregacion'])) == clave_dedupe for e in lista):
+        # Una misma persona puede tener dos créditos activos en la misma congregación (uno
+        # de Libre Inversión y una ampliación, por ejemplo): el tipo y el saldo los separan.
+        # Lo que sí se une es la misma fila repetida en la hoja.
+        def _clave_dedupe(e):
+            return (e['cco'] if e['cco'] else (e['nombre'], e['congregacion']),
+                    e.get('tipo_credito'), str(e.get('saldo_actual')))
+        if not any(_clave_dedupe(e) == _clave_dedupe(entrada) for e in lista):
             lista.append(entrada)
     return roster
+
+
+# ==============================================================================
+# DIRECTORIO DE WHATSAPP -- la hoja con el celular de cada asociado (V11)
+# ==============================================================================
+def normalizar_celular_whatsapp(texto):
+    """Devuelve el número listo para wa.me (57 + celular de 10 dígitos que empieza por 3),
+    o None si la celda no trae un celular colombiano reconocible. Acepta espacios,
+    puntos, guiones, paréntesis y el +57 delante; si la celda trae dos números, toma el
+    primero."""
+    if texto is None:
+        return None
+    limpio = re.sub(r'[\s.\-()]', '', str(texto))
+    m = re.search(r'(?:\+?57)?(3\d{9})(?!\d)', limpio)
+    return '57' + m.group(1) if m else None
+
+
+def descargar_directorio_whatsapp(url):
+    """Descarga la hoja de celulares y devuelve
+    {cédula normalizada: {'celular': '573001234567', 'nombre': 'Pérez Gómez Aníbal' o None}}.
+
+    Busca el encabezado en las primeras filas: la columna de cédula es la que se llama
+    exactamente CEDULA (la hoja también trae 'CEDULA - NOMBRE', que no sirve), la del
+    número la que dice WHATSAPP y la del nombre, la que dice NOMBRE sin decir CEDULA.
+    Solo quedan las personas con un celular válido."""
+    if not url or not url.strip():
+        return {}
+    url = url.strip()
+    try:
+        if "docs.google.com/spreadsheets" in url:
+            gid = ""
+            if "gid=" in url:
+                gid = "&gid=" + url.split("gid=")[1].split("&")[0]
+            url = re.sub(r'/edit.*$', '/export?format=csv' + gid, url)
+        df = pd.read_csv(url, header=None, dtype=str, keep_default_na=False)
+    except Exception as e:
+        texto = str(e)
+        if '401' in texto or '403' in texto:
+            raise ValueError("Google no deja leer la hoja de WhatsApp: compártela como "
+                             "«Cualquier persona con el enlace · Lector», igual que las demás.")
+        raise ValueError(f"No se pudo descargar la hoja de WhatsApp. Detalle: {e}")
+
+    for i in range(min(10, len(df))):
+        encabezados = [str(v).strip().upper() for v in df.iloc[i]]
+        idx_cedula = next((j for j, h in enumerate(encabezados) if h in ('CEDULA', 'CÉDULA')), None)
+        if idx_cedula is None:
+            idx_cedula = next((j for j, h in enumerate(encabezados)
+                               if ('CEDULA' in h or 'CÉDULA' in h) and 'NOMBRE' not in h), None)
+        idx_celular = next((j for j, h in enumerate(encabezados) if 'WHATSAPP' in h), None)
+        idx_nombre = next((j for j, h in enumerate(encabezados)
+                           if 'NOMBRE' in h and 'CEDULA' not in h and 'CÉDULA' not in h), None)
+        if idx_cedula is not None and idx_celular is not None:
+            break
+    else:
+        raise ValueError("La hoja de WhatsApp no tiene las columnas CEDULA y CelularWhatsApp.")
+
+    directorio = {}
+    for fila in df.iloc[i + 1:].itertuples(index=False):
+        cedula = str(fila[idx_cedula]).strip()
+        celular = normalizar_celular_whatsapp(fila[idx_celular])
+        if not cedula or not celular:
+            continue
+        cedula_norm = limpiar_cedula(cedula)
+        if cedula_norm and cedula_norm != '0':
+            nombre = str(fila[idx_nombre]).strip() if idx_nombre is not None else ''
+            directorio.setdefault(cedula_norm, {'celular': celular, 'nombre': nombre or None})
+    return directorio

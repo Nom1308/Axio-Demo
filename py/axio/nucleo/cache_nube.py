@@ -37,7 +37,9 @@ ARCHIVO_LINEAS_META = "lineas_credito.json"
 
 # Formato de la caché. Si algún día cambia lo que se guarda, subir este número hace que
 # las copias viejas se ignoren solas en vez de leerse mal.
-VERSION_CACHE = 1
+# 2: las entradas de las líneas de crédito traen tipo de crédito, observación, fecha del
+#    último pago y saldo actual.
+VERSION_CACHE = 2
 
 
 def _carpeta():

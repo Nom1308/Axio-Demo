@@ -36,6 +36,9 @@ def cargar_config():
         # Líneas de crédito para el cruce por cédula en el detalle -- mismo patrón que
         # directorio_cartera, valor de fábrica solo la primera vez.
         "lineas_credito": [dict(l) for l in LINEAS_CREDITO_DEFECTO],
+        # Hoja con el celular de WhatsApp de cada asociado (columnas CEDULA y
+        # CelularWhatsApp). Opcional: vacía, el detalle no muestra el botón de WhatsApp.
+        "url_whatsapp": "",
         "historial_busqueda_global": [],
         # Si se busca también en los cierres .xlsx locales (carpeta_cierres).
         "buscador_incluir_archivos_locales": True,

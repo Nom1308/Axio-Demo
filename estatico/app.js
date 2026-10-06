@@ -24,6 +24,7 @@
   const estadoBusqueda = $("#estado-busqueda");
   const contenedor = $("#resultados");
   const barraResultados = $("#barra-resultados");
+  const zonaAsociado = $("#asociado-zona");
   const filtro = $("#filtro");
   const ocultarVacias = $("#ocultar-vacias");
   const dialogo = $("#detalle");
@@ -144,17 +145,24 @@
       zona.append(el("span", { text: "⏳ " + (est.mensaje_carga || "Cargando datos...") }));
     }
     if (!m.configurada) {
-      zona.append(el("span", { class: "ambar", text: "⚠️ No hay URL de Matriz_Nube en config_axio.json del servidor." }));
+      zona.append(el("span", { class: "ambar", text: "⚠️ No hay URL de los Extractos (Matriz_Nube) en config_axio.json del servidor." }));
     } else if (m.error) {
-      zona.append(el("span", { class: "error", text: "❌ Matriz_Nube no se pudo cargar" }));
+      zona.append(el("span", { class: "error", text: "❌ Los Extractos no se pudieron cargar" }));
     } else if (m.filas) {
-      zona.append(el("span", { text: `☁️ Matriz_Nube: ${formatoMiles.format(m.filas)} filas · ${haceCuanto(m.hora)}` }));
+      zona.append(el("span", { text: `☁️ Extractos: ${formatoMiles.format(m.filas)} filas · ${haceCuanto(m.hora)}` }));
     }
     if (l.configuradas) {
       const errores = Object.keys(l.errores || {});
       zona.append(el("span", {
         class: errores.length ? "ambar" : null,
         text: `💳 Líneas de crédito: ${l.cargadas.length}${l.hora ? " · " + haceCuanto(l.hora) : ""}${errores.length ? ` (${errores.length} con error)` : ""}`,
+      }));
+    }
+    const w = est.whatsapp;
+    if (w && w.configurado) {
+      zona.append(el("span", {
+        class: w.error ? "ambar" : null,
+        text: w.error ? "💬 WhatsApp: sin acceso a la hoja" : `💬 WhatsApp: ${formatoMiles.format(w.contactos)} contactos`,
       }));
     }
     if (est.cierres_locales) zona.append(el("span", { text: "📂 Incluye cierres locales" }));
@@ -167,7 +175,8 @@
     }
 
     const avisos = [];
-    if (m.error) avisos.push(["aviso-error", "Matriz_Nube: " + m.error]);
+    if (m.error) avisos.push(["aviso-error", "Extractos: " + m.error]);
+    if (w && w.error) avisos.push(["aviso-ambar", "WhatsApp: " + w.error]);
     if (m.aviso) avisos.push(["aviso-info", m.aviso]);
     for (const [nombre, err] of Object.entries(l.errores || {})) avisos.push(["aviso-ambar", `Línea «${nombre}»: ${err}`]);
     if (avisos.length) {
@@ -257,6 +266,11 @@
     contenedor.replaceChildren();
     if (!busqueda) return;
 
+    // Si se buscó una cédula, primero va el resumen de la persona (sus créditos activos en
+    // todas las líneas y su WhatsApp), arriba de la barra de resultados. Después, lo de siempre.
+    zonaAsociado.replaceChildren();
+    if (busqueda.asociado) zonaAsociado.append(pintarAsociado(busqueda.asociado));
+
     if (!busqueda.grupos.length) {
       barraResultados.hidden = true;
       estadoBusqueda.className = "estado-busqueda";
@@ -325,7 +339,8 @@
     const cuerpo = el("tbody");
     for (const f of filas) {
       const coinciden = new Set(f.m);
-      const tr = el("tr", { tabindex: "0", onclick: () => abrirDetalle(f.i), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i); } });
+      // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
+      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", onclick: () => abrirDetalle(f.i), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i); } });
       if (conEstado) {
         tr.append(el("td", { class: "estado" }, f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
       }
@@ -419,7 +434,8 @@
         el("strong", { text: "🪪 Cédula:" }),
         el("span", { class: "cedula-valor", text: d.cedula }),
         el("button", { class: "boton boton-principal boton-chico", type: "button", text: "📋 Copiar cédula",
-          onclick: () => copiar(d.cedula_limpia || d.cedula, "Cédula copiada, lista para pegar en Siasoft.") })));
+          onclick: () => copiar(d.cedula_limpia || d.cedula, "Cédula copiada, lista para pegar en Siasoft.") }),
+        d.whatsapp ? botonWhatsapp(d.whatsapp) : null));
     }
 
     const creditos = el("div", { class: "tarjeta" }, el("h3", { text: "💳 Líneas de crédito" }));
@@ -453,19 +469,67 @@
     cuerpoDetalle.replaceChildren(...partes);
   }
 
-  function pintarCredito(nombreLinea, e) {
-    const descripcion = [nombreLinea];
+  function botonWhatsapp(enlace) {
+    return el("a", { class: "boton boton-whatsapp boton-chico", href: enlace, target: "_blank", rel: "noopener noreferrer",
+      title: "Abrir el chat de WhatsApp de esta persona", text: "💬 WhatsApp" });
+  }
+
+  function pintarAsociado(a) {
+    const inicial = (a.nombre || "?").trim().charAt(0).toUpperCase();
+    const cabecera = el("div", { class: "asociado-cabecera" },
+      el("span", { class: "asociado-avatar", "aria-hidden": "true", text: inicial }),
+      el("div", { class: "asociado-nombre" },
+        el("strong", { text: a.nombre || "Asociado" }),
+        el("span", { text: "🪪 CC " + a.cedula })),
+      el("div", { class: "asociado-acciones" },
+        el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
+          onclick: () => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.") }),
+        a.whatsapp ? botonWhatsapp(a.whatsapp) : null));
+
+    const creditos = el("div", { class: "asociado-creditos" });
+    for (const linea of a.lineas) {
+      for (const e of linea.entradas) creditos.append(pintarCredito(linea.linea, e, true));
+    }
+    const titulo = a.total_creditos
+      ? `💳 ${a.total_creditos} crédito${a.total_creditos === 1 ? "" : "s"} activo${a.total_creditos === 1 ? "" : "s"}`
+      : "💳 Sin créditos activos en las líneas de crédito";
+    return el("section", { class: "asociado" }, cabecera,
+      el("h3", { class: "asociado-titulo", text: titulo }),
+      a.total_creditos ? creditos : null);
+  }
+
+  function pintarCredito(nombreLinea, e, comoTarjeta) {
+    const descripcion = [];
     if (e.congregacion) descripcion.push(e.congregacion);
     if (e.cco) descripcion.push("CCO " + e.cco);
     if (e.distrito) descripcion.push("Distrito " + e.distrito);
 
-    const fila = el("div", { class: "fila-flex" },
-      el("span", { class: "insignia", text: "ACTIVO" }),
-      el("strong", { text: descripcion.join("  —  "), style: "flex:1" }));
-    if (e.link_obligacion) {
-      fila.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación" }));
+    const enlaces = el("div", { class: "credito-enlaces" });
+    if (e.link_registro) {
+      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_registro, target: "_blank", rel: "noopener noreferrer", text: "🔗 Último registro" }));
     }
-    const nodo = el("div", { class: "credito" }, fila);
+    if (e.link_obligacion && e.link_obligacion !== e.link_registro) {
+      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación" }));
+    }
+
+    const fila = el("div", { class: "credito-cabecera" },
+      el("span", { class: "insignia", text: "ACTIVO" }),
+      el("div", { class: "credito-titulo" },
+        el("strong", { text: nombreLinea + (e.tipo_credito && e.tipo_credito !== nombreLinea ? " · " + e.tipo_credito : "") }),
+        descripcion.length ? el("span", { text: descripcion.join("  ·  ") }) : null),
+      enlaces.childElementCount ? enlaces : null);
+    const nodo = el("div", { class: comoTarjeta ? "credito credito-tarjeta" : "credito" }, fila);
+
+    // Resumen de la obligación: lo que se mira primero en la hoja de la línea.
+    const datos = [
+      ["Observación", e.observacion_estado],
+      ["Último pago", e.fecha_ultimo_pago],
+      ["Saldo actual", e.saldo_actual ? "$ " + e.saldo_actual : null],
+    ].filter(([, v]) => v);
+    if (datos.length) {
+      nodo.append(el("dl", { class: "credito-datos" },
+        ...datos.map(([etiqueta, valor]) => el("div", null, el("dt", { text: etiqueta }), el("dd", { text: valor })))));
+    }
 
     if (e.tarifa || e.saldo || e.meses_mora || e.observacion_directivos || e.observacion_general) {
       const extra = el("div", { class: "extra" });

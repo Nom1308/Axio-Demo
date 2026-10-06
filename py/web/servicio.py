@@ -11,6 +11,7 @@ así que se puede probar sin levantar el servidor.
 from collections import OrderedDict
 from datetime import datetime
 import io
+import re
 import secrets
 import threading
 
@@ -18,7 +19,8 @@ from axio.dominio.buscador import (
     CLAVES_LINEAS_CON_INFO_EXTRA, DIRECTORIO_CARTERA_DEFECTO, LIMITE_FILAS_DIBUJADAS,
     _formatear_valor_celda, asegurar_columna_cedula, aviso_columna_cedula,
     buscar_comprobante_global, buscar_encargado_cartera, clasificar_estado_pago,
-    descargar_base_global, descargar_linea_credito, generar_excel_resultados_busqueda,
+    descargar_base_global, descargar_directorio_whatsapp, descargar_linea_credito,
+    generar_excel_resultados_busqueda,
     obtener_cedula_de_fila, obtener_distrito_de_fila, sugerir_termino_parecido,
 )
 from axio.nucleo.cache_nube import (
@@ -32,6 +34,18 @@ from axio.nucleo.utils import limpiar_cedula
 # Cuántas búsquedas se recuerdan para abrir su detalle o exportarlas. Cada una guarda sus
 # resultados completos; cien alcanza de sobra para una oficina y acota la memoria.
 MAX_BUSQUEDAS_GUARDADAS = 100
+
+# En la web la Matriz_Nube se presenta como «Extractos», que es como la llama la gente.
+# Solo cambia lo que se ve: por dentro (caché, escritorio, Excel) sigue siendo Matriz_Nube.
+NOMBRES_VISIBLES_FUENTE = {'Matriz_Nube': 'Extractos'}
+
+
+def _nombre_visible(fuente):
+    return NOMBRES_VISIBLES_FUENTE.get(fuente, fuente)
+
+
+def _cedula_con_puntos(cedula_limpia):
+    return f"{int(cedula_limpia):,}".replace(',', '.') if cedula_limpia.isdigit() else cedula_limpia
 
 
 def _hora_iso(momento):
@@ -61,6 +75,8 @@ class MotorWeb:
         self.rosters = {}
         self.hora_lineas = None
         self.errores_lineas = {}
+        self.whatsapp = {}
+        self.error_whatsapp = None
 
         self.listo = False
         self.cargando = False
@@ -106,6 +122,7 @@ class MotorWeb:
                 aviso = aviso_columna_cedula(df)
 
             rosters, hora_lineas, errores = self._cargar_lineas(config)
+            whatsapp, error_whatsapp = self._cargar_whatsapp(config)
 
             # Todo se reemplaza de una vez al final: mientras se descargaba, las búsquedas
             # siguieron usando la copia anterior completa, nunca una mitad nueva.
@@ -113,6 +130,7 @@ class MotorWeb:
             self.df_global, self.hora_matriz, self.error_matriz = df, hora, error
             self.aviso_matriz = aviso
             self.rosters, self.hora_lineas, self.errores_lineas = rosters, hora_lineas, errores
+            self.whatsapp, self.error_whatsapp = whatsapp, error_whatsapp
             self.cache_normalizado = {}
             self.listo = True
         except Exception as e:
@@ -157,6 +175,22 @@ class MotorWeb:
         guardar_lineas_credito(rosters, lineas)
         return rosters, datetime.now(), errores
 
+    def _cargar_whatsapp(self, config):
+        """La hoja es chica: se baja en cada carga, sin caché en disco."""
+        url = str(config.get('url_whatsapp', '')).strip()
+        if not url:
+            return {}, None
+        self.mensaje_carga = "Descargando la hoja de WhatsApp..."
+        try:
+            return descargar_directorio_whatsapp(url), None
+        except Exception as e:
+            logger.exception("No se pudo cargar la hoja de WhatsApp")
+            return {}, str(e)
+
+    def _enlace_whatsapp(self, cedula_limpia):
+        contacto = self.whatsapp.get(cedula_limpia) if cedula_limpia else None
+        return f"https://wa.me/{contacto['celular']}" if contacto else None
+
     # ------------------------------------------------------------------ estado
     def estado(self):
         carpeta = self._carpeta_cierres()
@@ -177,6 +211,11 @@ class MotorWeb:
                 'cargadas': sorted(self.rosters.keys()),
                 'hora': _hora_iso(self.hora_lineas),
                 'errores': self.errores_lineas,
+            },
+            'whatsapp': {
+                'configurado': bool(str(self.config.get('url_whatsapp', '')).strip()),
+                'contactos': len(self.whatsapp),
+                'error': self.error_whatsapp,
             },
             'cierres_locales': bool(carpeta),
         }
@@ -215,6 +254,32 @@ class MotorWeb:
             'total': sum(totales.values()) if totales else len(resultados),
             'grupos': self._agrupar(resultados, totales),
             'sugerencia': sugerencia,
+            'asociado': self._asociado(termino),
+        }
+
+    def _asociado(self, termino):
+        """Si lo buscado es una cédula, el resumen de la persona que va ARRIBA de los
+        resultados: sus créditos activos en todas las líneas y su WhatsApp. None si no es
+        una cédula o si no aparece en ninguna de las dos cosas."""
+        if not re.fullmatch(r'[\d.\s]+', termino):
+            return None
+        cedula = limpiar_cedula(termino)
+        if len(cedula) < 5:
+            return None
+        lineas = self._lineas_de_cedula(cedula) if self.rosters else []
+        whatsapp = self._enlace_whatsapp(cedula)
+        if not lineas and not whatsapp:
+            return None
+        nombre = next((e['nombre'] for l in lineas for e in l['entradas'] if e.get('nombre')), None)
+        if not nombre:
+            nombre = (self.whatsapp.get(cedula) or {}).get('nombre')
+        return {
+            'cedula': _cedula_con_puntos(cedula),
+            'cedula_limpia': cedula,
+            'nombre': nombre,
+            'whatsapp': whatsapp,
+            'lineas': lineas,
+            'total_creditos': sum(len(l['entradas']) for l in lineas),
         }
 
     def _guardar_busqueda(self, termino, resultados, usuario):
@@ -243,7 +308,7 @@ class MotorWeb:
             g = grupos.get(r['fuente'])
             if g is None:
                 g = grupos[r['fuente']] = {
-                    'fuente': r['fuente'],
+                    'fuente': _nombre_visible(r['fuente']),
                     'columnas': list(r['columnas']),
                     'total': totales.get(r['fuente'], 0),
                     'filas': [],
@@ -286,14 +351,16 @@ class MotorWeb:
         else:
             motivo_sin_lineas = "Las líneas de crédito no se pudieron cargar. Un administrador puede revisar el error con «Refrescar datos»."
 
+        cedula_limpia = limpiar_cedula(cedula) if cedula is not None else None
         return {
-            'fuente': r['fuente'],
+            'fuente': _nombre_visible(r['fuente']),
             'estado_pago': clasificar_estado_pago(fila),
             'distrito': _formatear_valor_celda(distrito) if distrito is not None else None,
             'encargado': ({'nombre': persona.get('nombre', ''), 'cargo': persona.get('cargo', ''),
                            'extension': persona.get('extension', '')} if persona else None),
             'cedula': _formatear_valor_celda(cedula) if cedula is not None else None,
-            'cedula_limpia': limpiar_cedula(cedula) if cedula is not None else None,
+            'cedula_limpia': cedula_limpia,
+            'whatsapp': self._enlace_whatsapp(cedula_limpia),
             'lineas': lineas,
             'motivo_sin_lineas': motivo_sin_lineas,
             'campos': [{'columna': str(c), 'valor': _formatear_valor_celda(fila.get(c, ''))}
@@ -338,6 +405,13 @@ class MotorWeb:
             'en_mora': en_mora,
             'observacion_directivos': e.get('observacion_directivos'),
             'observacion_general': e.get('observacion_general'),
+            'tipo_credito': e.get('tipo_credito'),
+            'link_registro': _enlace_seguro(e.get('link_registro')),
+            'observacion_estado': e.get('observacion_estado'),
+            'fecha_ultimo_pago': (_formatear_valor_celda(e['fecha_ultimo_pago'])
+                                  if e.get('fecha_ultimo_pago') is not None else None),
+            'saldo_actual': (_formatear_valor_celda(e['saldo_actual'])
+                             if e.get('saldo_actual') is not None else None),
         }
 
     # ------------------------------------------------------------------ exportar
