@@ -3,11 +3,20 @@
  * app.js es el mismo del servidor; lo único distinto es que sus llamadas a /api/... pasan
  * por window.axioFetch (definido aquí) en vez de por la red. axioFetch devuelve objetos
  * Response normales, así que app.js no nota la diferencia.
+ *
+ * Con un clientId en ajustes.js, la portada pide "Iniciar sesión con Google": cada persona
+ * entra con su cuenta y el Python de la pestaña descarga las hojas con SU token, o sea con
+ * sus permisos. Las hojas pueden ser privadas. El token vive solo en la memoria de esta
+ * pestaña y dura una hora; nunca se guarda.
  */
 (function () {
   "use strict";
 
   const $ = (sel) => document.querySelector(sel);
+  const AJUSTES = window.AXIO_AJUSTES || {};
+  const CON_GOOGLE = Boolean(AJUSTES.clientId);
+  // drive.readonly: leer las hojas (y el config en Drive) con los permisos de la persona.
+  const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly";
   const trabajador = new Worker("estatico/trabajador.js");
   const pendientes = new Map();
   let siguienteId = 1;
@@ -15,6 +24,9 @@
   let cargando = false;            // descargando las hojas: /api/... se responde desde aquí
   let mensaje = "Preparando el motor de búsqueda…";
   let interfazIniciada = false;
+  let usuario = null;              // datos de la cuenta de Google, si inició sesión
+  let token = null;
+  let venceToken = 0;
 
   // Las búsquedas recientes de app.js van a sessionStorage (actualizar.py lo cambia), que
   // el navegador ya borra al cerrar la pestaña. Por si acaso, también se borran al abrir y
@@ -36,7 +48,9 @@
       if (!motorListo) $("#estado-motor").textContent = "⏳ " + mensaje;
     } else if (m.tipo === "motor-listo") {
       motorListo = true;
-      $("#estado-motor").textContent = "✓ Motor listo. Carga tu archivo para empezar.";
+      $("#estado-motor").textContent = CON_GOOGLE && !usuario
+        ? "✓ Motor listo. Inicia sesión para empezar."
+        : "✓ Motor listo. Carga tu archivo para empezar.";
       $("#estado-motor").classList.add("listo");
     } else if (m.tipo === "error-motor") {
       mostrarErrorPortada("No se pudo preparar el motor: " + m.error + ". Revisa tu conexión a internet y recarga la página.");
@@ -70,11 +84,16 @@
     };
   }
 
-  async function cargarDatos(datos) {
+  // 'antes' corre con la bandera de carga ya puesta: así app.js ve "cargando" desde el
+  // primer instante aunque primero haya que renovar el token de Google.
+  async function cargarDatos(datos, antes) {
     cargando = true;
     try {
+      if (antes) await antes();
       const r = await pedir(datos);
       if (r.error) mostrarErrorCarga(r.error);
+    } catch (e) {
+      mostrarErrorCarga(e.message);
     } finally {
       cargando = false;
     }
@@ -84,7 +103,7 @@
     const metodo = (opciones.method || "GET").toUpperCase();
     if (metodo === "POST" && url === "/api/refrescar") {
       if (cargando) return respuestaJson({ iniciada: false, mensaje: "Ya hay una descarga en curso." });
-      cargarDatos({ accion: "recargar" });
+      cargarDatos({ accion: "recargar" }, usuario ? tokenVigente : null);
       return respuestaJson({ iniciada: true, mensaje: "Descargando los datos de nuevo..." });
     }
     if (cargando) {
@@ -136,11 +155,20 @@
     if (!archivo) return;
     mostrarErrorPortada("");
     const quien = `«${archivo.name}» (${archivo.size.toLocaleString("es-CO")} bytes)`;
-    let texto, config;
+    let texto;
     try {
       texto = decodificar(await leerBytes(archivo)).trim();
     } catch (e) {
       mostrarErrorPortada(`No se pudo leer ${quien}: ${e.message}. Prueba con Chrome o Edge actualizados.`);
+      return;
+    }
+    usarTexto(texto, quien);
+  }
+
+  function usarTexto(texto, quien) {
+    let config;
+    if (CON_GOOGLE && !usuario) {
+      mostrarErrorPortada("Primero inicia sesión con Google: las hojas se leen con tus permisos.");
       return;
     }
     if (!texto) {
@@ -191,6 +219,134 @@
     usarArchivo(ev.dataTransfer.files[0]);
   });
 
-  // "Cambiar archivo": recargar la página borra todo lo que había en memoria.
-  $("#btn-cambiar").addEventListener("click", () => window.location.reload());
+  // ------------------------------------------------------------------ sesión de Google
+  function esperarGoogle() {
+    return new Promise((resolver, rechazar) => {
+      const inicio = Date.now();
+      (function mirar() {
+        if (window.google && google.accounts && google.accounts.oauth2) return resolver();
+        if (Date.now() - inicio > 15000) {
+          return rechazar(new Error("no cargó el inicio de sesión de Google. Revisa tu conexión o si la red de la empresa bloquea accounts.google.com"));
+        }
+        setTimeout(mirar, 100);
+      })();
+    });
+  }
+
+  let clienteToken = null;
+  let alRecibirToken = () => {};
+  let alFallarToken = () => {};
+
+  // Pide un token a Google. Con prompt "" no vuelve a preguntar si la sesión sigue activa.
+  async function pedirToken(prompt) {
+    await esperarGoogle();
+    if (!clienteToken) {
+      clienteToken = google.accounts.oauth2.initTokenClient({
+        client_id: AJUSTES.clientId,
+        scope: ALCANCES,
+        hd: AJUSTES.dominio || undefined,
+        callback: (r) => alRecibirToken(r),
+        error_callback: (e) => alFallarToken(e),
+      });
+    }
+    return new Promise((resolver, rechazar) => {
+      alRecibirToken = (r) => {
+        if (r.error) return rechazar(new Error(r.error_description || r.error));
+        token = r.access_token;
+        venceToken = Date.now() + (Number(r.expires_in || 3600) - 120) * 1000;
+        resolver(token);
+      };
+      alFallarToken = (e) => rechazar(new Error(e && e.type === "popup_closed"
+        ? "se cerró la ventana de Google antes de terminar"
+        : (e && (e.message || e.type)) || "Google no respondió"));
+      clienteToken.requestAccessToken({ prompt });
+    });
+  }
+
+  // El trabajador descarga las hojas: necesita el token para mandarlo en cada petición.
+  const enviarToken = () => pedir({ accion: "token", token });
+
+  async function tokenVigente() {
+    if (!token || Date.now() >= venceToken) {
+      await pedirToken("");
+      await enviarToken();
+    }
+    return token;
+  }
+
+  const conToken = (url) => fetch(url, { headers: { Authorization: "Bearer " + token } });
+
+  async function iniciarSesion() {
+    const boton = $("#btn-google");
+    mostrarErrorPortada("");
+    boton.disabled = true;
+    try {
+      await pedirToken("");
+      const r = await conToken("https://www.googleapis.com/oauth2/v3/userinfo");
+      if (!r.ok) throw new Error(`Google respondió ${r.status} al consultar tu cuenta`);
+      const datos = await r.json();
+      if (AJUSTES.dominio && String(datos.hd || "").toLowerCase() !== AJUSTES.dominio.toLowerCase()) {
+        google.accounts.oauth2.revoke(token, () => {});
+        token = null;
+        throw new Error(`entra con tu correo de ${AJUSTES.dominio} (entraste con ${datos.email})`);
+      }
+      usuario = datos;
+      await enviarToken();
+      mostrarSesion();
+      if (AJUSTES.configDriveId) {
+        $("#estado-motor").textContent = "⏳ Leyendo la configuración de Axio en Drive…";
+        await cargarConfigDeDrive();
+      } else {
+        $("#paso-archivo").hidden = false;
+        $("#estado-motor").textContent = "Ahora carga el config_axio.json.";
+      }
+    } catch (e) {
+      mostrarErrorPortada("No se pudo iniciar sesión: " + e.message + ".");
+      boton.disabled = false;
+    }
+  }
+
+  async function cargarConfigDeDrive() {
+    const id = encodeURIComponent(AJUSTES.configDriveId);
+    const r = await conToken(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true`);
+    if (r.status === 403 || r.status === 404) {
+      throw new Error("tu cuenta no tiene acceso al archivo de configuración de Axio en Drive. Pide acceso a quien lo administra");
+    }
+    if (!r.ok) throw new Error(`Drive respondió ${r.status} al leer la configuración`);
+    usarTexto(decodificar(new Uint8Array(await r.arrayBuffer())).trim(), "La configuración guardada en Drive");
+  }
+
+  function mostrarSesion() {
+    const nombre = usuario.given_name || usuario.name || usuario.email;
+    const inicial = (nombre || "?").trim().charAt(0).toUpperCase();
+    $("#paso-google").hidden = true;
+    $("#paso-sesion").hidden = false;
+    $("#sesion-avatar").textContent = inicial;
+    $("#sesion-nombre").textContent = usuario.name || nombre;
+    $("#sesion-correo").textContent = usuario.email || "";
+    $("#avatar-usuario").textContent = inicial;
+    $("#nombre-usuario").textContent = nombre;
+    $("#btn-cambiar").textContent = "Cerrar sesión";
+    $("#btn-cambiar").title = "Cierra la sesión de Google en Axio y borra los datos de la memoria";
+  }
+
+  if (CON_GOOGLE) {
+    $("#paso-google").hidden = false;
+    $("#paso-archivo").hidden = true;
+    $("#nota-portada").replaceChildren(
+      Object.assign(document.createElement("strong"), { textContent: "Con tu cuenta de la empresa." }),
+      " Axio lee las hojas con tus permisos de Google: solo ves lo que tu cuenta puede ver. " +
+      "Los datos viven solo en esta pestaña; al cerrarla o recargarla no queda nada guardado.");
+    $("#btn-google").addEventListener("click", iniciarSesion);
+  }
+
+  // "Cambiar archivo" / "Cerrar sesión": recargar la página borra todo lo que había en
+  // memoria. Con sesión, además se le devuelve el token a Google para que deje de valer.
+  $("#btn-cambiar").addEventListener("click", () => {
+    if (token && window.google && google.accounts && google.accounts.oauth2) {
+      google.accounts.oauth2.revoke(token, () => window.location.reload());
+    } else {
+      window.location.reload();
+    }
+  });
 })();

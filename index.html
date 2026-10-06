@@ -13,7 +13,8 @@
 <body class="pagina-login" data-admin="1">
   <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
-  <!-- Portada: en el servidor aquí va el login; en la demo, el archivo de configuración. -->
+  <!-- Portada: iniciar sesión con Google (si hay clientId en ajustes.js) y/o cargar el
+       config_axio.json. En el servidor aquí va el login con usuario y contraseña. -->
   <main id="portada" class="tarjeta-login">
     <div class="login-marca">
       <span class="logo logo-grande" aria-hidden="true"></span>
@@ -24,15 +25,29 @@
     <p id="error-portada" class="aviso aviso-error" role="alert" hidden></p>
 
     <div class="form-login">
-      <label class="boton boton-principal boton-bloque boton-archivo">
-        Cargar config_axio.json
-        <input type="file" id="archivo-config" accept=".json,application/json">
-      </label>
-      <p class="arrastre">o arrastra el archivo aquí</p>
+      <div id="paso-google" hidden>
+        <button type="button" id="btn-google" class="boton boton-google boton-bloque">
+          <span class="logo-g" aria-hidden="true"></span> Iniciar sesión con Google
+        </button>
+      </div>
+
+      <div id="paso-sesion" class="sesion-portada" hidden>
+        <span id="sesion-avatar" class="avatar" aria-hidden="true"></span>
+        <span class="sesion-texto"><strong id="sesion-nombre"></strong><span id="sesion-correo"></span></span>
+      </div>
+
+      <div id="paso-archivo">
+        <label class="boton boton-principal boton-bloque boton-archivo">
+          Cargar config_axio.json
+          <input type="file" id="archivo-config" accept=".json,application/json">
+        </label>
+        <p class="arrastre">o arrastra el archivo aquí</p>
+      </div>
+
       <p id="estado-motor" class="estado-motor" aria-live="polite">⏳ Preparando el motor de búsqueda…</p>
     </div>
 
-    <p class="aviso aviso-info nota-demo">
+    <p id="nota-portada" class="aviso aviso-info nota-demo">
       <strong>Prueba técnica.</strong> El archivo se lee en tu navegador y no se sube a ningún servidor.
       Los datos se descargan directo de Google Sheets y solo viven en esta pestaña: al cerrarla o
       recargarla no queda nada guardado.
@@ -49,8 +64,8 @@
     </div>
     <div class="barra-derecha">
       <span class="usuario">
-        <span class="avatar" aria-hidden="true">D</span>
-        <span class="usuario-nombre">Demo</span>
+        <span id="avatar-usuario" class="avatar" aria-hidden="true">D</span>
+        <span id="nombre-usuario" class="usuario-nombre">Demo</span>
         <span class="etiqueta-admin">Prueba</span>
       </span>
       <button type="button" id="btn-cambiar" class="boton boton-texto" title="Recarga la página y borra los datos de la memoria">Cambiar archivo</button>
@@ -98,6 +113,8 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
+  <script src="estatico/ajustes.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async></script>
   <script src="estatico/puente.js"></script>
 </body>
 </html>

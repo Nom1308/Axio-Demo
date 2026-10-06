@@ -61,7 +61,10 @@ self.onmessage = async (ev) => {
   const { id, accion } = ev.data;
   try {
     const nav = await motor;
-    if (accion === "configurar" || accion === "recargar") {
+    if (accion === "token") {
+      nav.fijar_token(ev.data.token || "");
+      postMessage({ tipo: "respuesta", id });
+    } else if (accion === "configurar" || accion === "recargar") {
       const estado = accion === "configurar" ? nav.configurar(ev.data.config) : nav.recargar();
       postMessage({ tipo: "respuesta", id, estado: JSON.parse(estado) });
     } else if (accion === "api") {

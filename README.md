@@ -11,6 +11,25 @@ El buscador de Axio Web completo (búsqueda, detalle con encargado de Cartera y 
 
 La primera vez tarda un poco más: el navegador descarga Python y pandas (~30 MB). Después quedan en caché.
 
+## Iniciar sesión con Google
+
+Con un `clientId` en [estatico/ajustes.js](estatico/ajustes.js), la portada muestra **«Iniciar sesión con Google»**:
+
+- Cada persona entra con su correo corporativo y Axio lee las hojas **con sus permisos**. Las hojas pueden ser privadas.
+- Si `configDriveId` apunta al `config_axio.json` guardado en Drive, se lee de ahí. Si está vacío, se pide el archivo después de entrar.
+- `dominio` limita la entrada a los correos de la empresa.
+- El token vive solo en la memoria de la pestaña, dura una hora y se anula al «Cerrar sesión».
+
+Sin `clientId`, la página funciona como antes: se carga el config a mano y las hojas tienen que estar compartidas por enlace.
+
+### Crear el ID de cliente (una vez, lo hace sistemas)
+
+1. [console.cloud.google.com](https://console.cloud.google.com): crear el proyecto «Axio» con la cuenta corporativa.
+2. **APIs y servicios → Biblioteca**: habilitar **Google Drive API** y **Google Sheets API**.
+3. **Pantalla de consentimiento de OAuth**: tipo **Interno**.
+4. **Credenciales → ID de cliente de OAuth**, tipo **Aplicación web**. Orígenes autorizados de JavaScript: `https://nom1308.github.io` y `http://localhost:8000`.
+5. Poner el ID en `estatico/ajustes.js`. No es secreto.
+
 ## Qué hay en el repo
 
 | Ruta | Qué es |

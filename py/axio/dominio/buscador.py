@@ -1502,8 +1502,9 @@ def descargar_directorio_whatsapp(url):
     except Exception as e:
         texto = str(e)
         if '401' in texto or '403' in texto:
-            raise ValueError("Google no deja leer la hoja de WhatsApp: compártela como "
-                             "«Cualquier persona con el enlace · Lector», igual que las demás.")
+            raise ValueError("No hay permiso para leer la hoja de WhatsApp: pide acceso a quien la "
+                             "administra. Sin inicio de sesión con Google, la hoja tiene que estar "
+                             "compartida como «Cualquier persona con el enlace · Lector».")
         raise ValueError(f"No se pudo descargar la hoja de WhatsApp. Detalle: {e}")
 
     for i in range(min(10, len(df))):

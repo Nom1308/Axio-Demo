@@ -4,6 +4,9 @@ Corre dentro de Pyodide, en un Web Worker (ver estatico/trabajador.js). Hace lo 
 web/app.py en el servidor -- recibe /api/... y devuelve la respuesta -- pero sin Flask,
 sin usuarios y sin red: el "servidor" es esta misma pestaña.
 
+Con sesión de Google, cada descarga lleva el token de la persona (ver fijar_token): las
+hojas se leen con SUS permisos y pueden ser privadas.
+
 Tres diferencias con el servidor, todas por el entorno:
   - No hay hilos en el navegador: la carga de datos se hace de una vez, al recibir el
     config, en vez de en un hilo aparte.
@@ -62,6 +65,18 @@ class _Respuesta:
         self.close()
 
 
+# Token de Google de quien inició sesión (ver estatico/puente.js). Con él, cada descarga a
+# Google va con los permisos de esa persona y las hojas pueden ser privadas. Vacío: las
+# descargas son anónimas y solo funcionan con hojas compartidas por enlace.
+_token_google = ''
+_HOSTS_GOOGLE = ('docs.google.com', 'sheets.googleapis.com', 'www.googleapis.com')
+
+
+def fijar_token(token):
+    global _token_google
+    _token_google = token or ''
+
+
 def _urlopen_navegador(url, data=None, timeout=None, **_):
     import js
     if isinstance(url, urllib.request.Request):
@@ -69,12 +84,19 @@ def _urlopen_navegador(url, data=None, timeout=None, **_):
     xhr = js.XMLHttpRequest.new()
     xhr.open('GET', url, False)
     xhr.responseType = 'arraybuffer'
+    if _token_google and urlsplit(url).hostname in _HOSTS_GOOGLE:
+        xhr.setRequestHeader('Authorization', 'Bearer ' + _token_google)
     try:
         xhr.send()
     except Exception as e:
         raise urllib.error.URLError(f"sin conexión con {urlsplit(url).netloc} ({e})")
     if xhr.status == 0:
         raise urllib.error.URLError(f"sin conexión con {urlsplit(url).netloc}")
+    if xhr.status in (401, 403, 404) and 'google' in (urlsplit(url).hostname or ''):
+        motivo = ("tu cuenta de Google no tiene permiso para ver esta hoja; pide acceso a quien la administra"
+                  if _token_google else
+                  "la hoja no está compartida por enlace; inicia sesión con Google o pide acceso")
+        raise urllib.error.HTTPError(url, xhr.status, motivo, None, None)
     if xhr.status >= 400:
         raise urllib.error.HTTPError(url, xhr.status, f"HTTP {xhr.status}", None, None)
     datos = bytes(js.Uint8Array.new(xhr.response).to_py())
