@@ -16,7 +16,11 @@
   const AJUSTES = window.AXIO_AJUSTES || {};
   const CON_GOOGLE = Boolean(AJUSTES.clientId);
   // drive.readonly: leer las hojas (y el config en Drive) con los permisos de la persona.
-  const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly";
+  // spreadsheets: editar celdas desde la tabla de una obligación (estatico/hojas.js). Axio
+  // solo escribe cuando la persona edita una celda, y Google aplica sus permisos: quien
+  // solo puede ver una hoja, no puede escribirle.
+  const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
+  const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
   const trabajador = new Worker("estatico/trabajador.js");
   const pendientes = new Map();
   let siguienteId = 1;
@@ -27,6 +31,7 @@
   let usuario = null;              // datos de la cuenta de Google, si inició sesión
   let token = null;
   let venceToken = 0;
+  let respuestaToken = null;       // para saber qué permisos aceptó la persona
 
   // Las búsquedas recientes de app.js van a sessionStorage (actualizar.py lo cambia), que
   // el navegador ya borra al cerrar la pestaña. Por si acaso, también se borran al abrir y
@@ -253,6 +258,7 @@
       alRecibirToken = (r) => {
         if (r.error) return rechazar(new Error(r.error_description || r.error));
         token = r.access_token;
+        respuestaToken = r;
         venceToken = Date.now() + (Number(r.expires_in || 3600) - 120) * 1000;
         resolver(token);
       };
@@ -275,6 +281,15 @@
   }
 
   const conToken = (url) => fetch(url, { headers: { Authorization: "Bearer " + token } });
+
+  // Lo que estatico/hojas.js necesita de la sesión, sin ver nada más de este módulo.
+  window.axioGoogle = {
+    conectado: () => Boolean(usuario && token),
+    token: tokenVigente,
+    // Google deja a la persona desmarcar permisos en la pantalla de consentimiento: si no
+    // aceptó el de hojas de cálculo, la tabla se abre en solo lectura.
+    puedeEscribir: () => Boolean(respuestaToken && window.google && google.accounts.oauth2.hasGrantedAllScopes(respuestaToken, ALCANCE_HOJAS)),
+  };
 
   async function iniciarSesion() {
     const boton = $("#btn-google");

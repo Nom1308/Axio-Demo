@@ -403,6 +403,15 @@
     }
   }
 
+  // Enlace a una hoja o archivo de Google. La versión de navegador (con sesión de Google)
+  // define window.axioMejorarEnlace para agregarle la vista previa al pasar el mouse y
+  // abrir la tabla dentro de Axio; en el servidor queda como un enlace normal.
+  function enlaceHoja(texto, url, extra) {
+    const a = el("a", { class: "boton boton-chico", href: url, target: "_blank", rel: "noopener noreferrer", text: texto, ...(extra || {}) });
+    if (typeof window.axioMejorarEnlace === "function") window.axioMejorarEnlace(a, url);
+    return a;
+  }
+
   function pintarCampos(lista) {
     const campos = el("div", { class: "campos" });
     for (const c of lista) {
@@ -412,7 +421,7 @@
         el("span", { class: "nombre", text: c.columna }),
         entrada,
         el("div", { class: "campo-acciones" },
-          c.enlace ? el("a", { class: "boton boton-chico", href: c.enlace, target: "_blank", rel: "noopener noreferrer", title: "Abrir enlace", text: "↗" }) : null,
+          c.enlace ? enlaceHoja("↗", c.enlace, { title: "Abrir enlace" }) : null,
           el("button", { class: "boton boton-chico", type: "button", title: "Copiar", text: "📋", onclick: () => copiar(c.valor, "Copiado.") }))));
     }
     return campos;
@@ -513,10 +522,8 @@
       descripcion.length ? el("p", { class: "gris", text: descripcion.join("  ·  ") }) : null,
       e.nombre ? el("p", { class: "gris", text: "👤 " + e.nombre }) : null);
     const enlaces = el("div", { class: "fila-flex" });
-    if (e.link_registro) enlaces.append(el("a", { class: "boton boton-chico", href: e.link_registro, target: "_blank", rel: "noopener noreferrer", text: "🔗 Último registro" }));
-    if (e.link_obligacion && e.link_obligacion !== e.link_registro) {
-      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación" }));
-    }
+    if (e.link_registro) enlaces.append(enlaceHoja("🔗 Último registro", e.link_registro));
+    if (e.link_obligacion && e.link_obligacion !== e.link_registro) enlaces.append(enlaceHoja("🔗 Ver obligación", e.link_obligacion));
     if (enlaces.childElementCount) cabecera.append(enlaces);
     partes.push(cabecera);
 
@@ -588,10 +595,10 @@
     const sinBurbuja = (ev) => ev.stopPropagation();
     const enlaces = el("div", { class: "credito-enlaces" });
     if (e.link_registro) {
-      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_registro, target: "_blank", rel: "noopener noreferrer", text: "🔗 Último registro", onclick: sinBurbuja }));
+      enlaces.append(enlaceHoja("🔗 Último registro", e.link_registro, { onclick: sinBurbuja }));
     }
     if (e.link_obligacion && e.link_obligacion !== e.link_registro) {
-      enlaces.append(el("a", { class: "boton boton-chico", href: e.link_obligacion, target: "_blank", rel: "noopener noreferrer", text: "🔗 Ver obligación", onclick: sinBurbuja }));
+      enlaces.append(enlaceHoja("🔗 Ver obligación", e.link_obligacion, { onclick: sinBurbuja }));
     }
 
     const fila = el("div", { class: "credito-cabecera" },
