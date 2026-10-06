@@ -109,19 +109,56 @@
     if (zona) zona.append(Object.assign(document.createElement("p"), { className: "aviso aviso-error", textContent: "No se pudieron cargar los datos: " + texto }));
   }
 
+  // FileReader y no archivo.text(): funciona también en navegadores viejos.
+  function leerBytes(archivo) {
+    return new Promise((resolver, rechazar) => {
+      const lector = new FileReader();
+      lector.onload = () => resolver(new Uint8Array(lector.result));
+      lector.onerror = () => rechazar(lector.error || new Error("no se pudo leer"));
+      lector.readAsArrayBuffer(archivo);
+    });
+  }
+
+  // El config puede llegar en otra codificación si alguien lo abrió y guardó con el Bloc
+  // de notas (UTF-16) o con un editor viejo (ANSI/Windows-1252). Se acepta cualquiera.
+  function decodificar(bytes) {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+    if (bytes.length > 1 && bytes[1] === 0 && bytes[0] !== 0) return new TextDecoder("utf-16le").decode(bytes);
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^﻿/, "");
+    } catch (_) {
+      return new TextDecoder("windows-1252").decode(bytes);
+    }
+  }
+
   async function usarArchivo(archivo) {
     if (!archivo) return;
     mostrarErrorPortada("");
+    const quien = `«${archivo.name}» (${archivo.size.toLocaleString("es-CO")} bytes)`;
     let texto, config;
     try {
-      texto = await archivo.text();
+      texto = decodificar(await leerBytes(archivo)).trim();
+    } catch (e) {
+      mostrarErrorPortada(`No se pudo leer ${quien}: ${e.message}. Prueba con Chrome o Edge actualizados.`);
+      return;
+    }
+    if (!texto) {
+      mostrarErrorPortada(`${quien} está vacío. Pide de nuevo el config_axio.json.`);
+      return;
+    }
+    if (texto.startsWith("<")) {
+      mostrarErrorPortada(`${quien} es una página web, no el archivo de configuración. Pasa a veces al descargarlo de un correo o de Drive: pide el config_axio.json por USB o carpeta compartida.`);
+      return;
+    }
+    try {
       config = JSON.parse(texto);
-    } catch (_) {
-      mostrarErrorPortada("Ese archivo no es un JSON válido. Elige tu config_axio.json.");
+    } catch (e) {
+      mostrarErrorPortada(`${quien} no es un JSON válido (${e.message}). Probablemente se dañó al enviarlo o al abrirlo con otro programa: pide una copia nueva y no lo abras antes de cargarlo.`);
       return;
     }
     if (!config || typeof config !== "object" || !String(config.url_base_global || "").includes("docs.google.com")) {
-      mostrarErrorPortada("Ese archivo no parece un config_axio.json: no trae la URL de la Matriz_Nube en Google Sheets.");
+      mostrarErrorPortada(`${quien} es un JSON, pero no trae la URL de la Matriz_Nube en Google Sheets («url_base_global»). ¿Es el config_axio.json correcto?`);
       return;
     }
     if (!motorListo) mensaje = "Preparando el motor de búsqueda (solo la primera vez tarda)…";
