@@ -434,9 +434,21 @@
     $("#detalle-titulo").textContent = "Detalle del resultado";
     const partes = [el("p", { class: "fuente-detalle", text: "📂 " + d.fuente })];
 
-    if (d.estado_pago) {
-      partes.push(el("div", { class: "estado-pago", style: `background:${d.estado_pago.color}` },
-        `${d.estado_pago.icono} ${d.estado_pago.etiqueta}`));
+    // El estado puede cambiar sin volver a buscar (al gestionar el pago, ver abajo).
+    const estado = el("div", { class: "estado-pago" });
+    const mostrarEstado = (e) => {
+      estado.style.display = e ? "" : "none";
+      if (e) { estado.style.background = e.color; estado.textContent = `${e.icono} ${e.etiqueta}`; }
+    };
+    mostrarEstado(d.estado_pago);
+    partes.push(estado);
+
+    // La versión de navegador (con sesión de Google) agrega aquí cómo gestionar el pago en
+    // la Matriz_Nube: RWS, nota de Cartera, crédito, nota de Recaudo. En el servidor no
+    // aparece nada.
+    if (typeof window.axioGestionPago === "function") {
+      const gestion = window.axioGestionPago(d, mostrarEstado);
+      if (gestion) partes.push(gestion);
     }
 
     // Encargado de Cartera: lo primero que se quiere ver.
