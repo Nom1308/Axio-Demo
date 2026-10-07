@@ -512,6 +512,47 @@
     return c ? c.valor : null;
   }
 
+  // ------------------------------------------------------------------ colores de las líneas
+  // Los mismos que pone el formato condicional de las hojas de las líneas de crédito.
+  // La fila va en rojo o verde según «ESTADO: MORA/DIA»: esa es la columna que manda, no
+  // «ESTADO PAGO AUTOMATICO», que en varias hojas dice «al día» con la fila en rojo.
+  const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toUpperCase();
+
+  function estadoCredito(e) {
+    const valor = buscarCampo(e.campos, "MORA/DIA") || buscarCampo(e.campos, "ESTADO PAGO AUTOMATICO") || "";
+    const v = sinTildes(valor);
+    if (/MORA/.test(v) || (!v && e.en_mora === true)) return { mora: true, texto: "En mora" };
+    if (/DIA/.test(v) || (!v && e.en_mora === false)) return { mora: false, texto: "Al día" };
+    return { mora: null, texto: "Activo" };
+  }
+
+  // Columna «OBSERVACIÓN (Activos/Inactivos)»: cada novedad con su color en la hoja.
+  const NOVEDADES_CREDITO = {
+    "PAZ Y SALVO": ["#F1C232", "#1f1f1f"],
+    "ACUERDO DE PAGO": ["#0B5394", "#fff"],
+    "REFINANCIACION": ["#A2C4C9", "#1f1f1f"],
+    "RETANQUEO": ["#F9CB9C", "#1f1f1f"],
+    "AMPLIACION": ["#8E7CC3", "#1f1f1f"],
+    "DESCUENTO DE ANTICIPO": ["#990000", "#fff"],
+    "AUXILIO DE RETIRO MINISTERIO": ["#274E13", "#fff"],
+  };
+
+  function etiquetasCredito(e) {
+    const etiquetas = [];
+    const novedad = sinTildes(e.observacion_estado);
+    const color = NOVEDADES_CREDITO[novedad];
+    if (color) {
+      etiquetas.push(el("span", { class: "etiqueta-hoja", style: `background:${color[0]};color:${color[1]}`,
+        text: e.observacion_estado, title: "Observación en la hoja de la línea" }));
+    }
+    // «PENDIENTES AREA CARTERA» = LLAMAR: en la hoja, la celda de al lado va en morado.
+    if (sinTildes(buscarCampo(e.campos, "PENDIENTES AREA CARTERA")) === "LLAMAR") {
+      etiquetas.push(el("span", { class: "etiqueta-hoja", style: "background:#B4A7D6;color:#1f1f1f",
+        text: "📞 Llamar", title: "Pendiente del área de Cartera" }));
+    }
+    return etiquetas;
+  }
+
   function abrirObligacion(nombreLinea, e) {
     const desdePago = dialogo.open && ultimoDetalle ? ultimoDetalle : null;
     if (!dialogo.open) dialogo.showModal();
@@ -520,12 +561,11 @@
     const partes = [el("p", { class: "fuente-detalle", text: "💳 " + nombreLinea })];
 
     // Al día / en mora, como lo marca la hoja de la línea.
-    const pago = buscarCampo(e.campos, "ESTADO PAGO AUTOMATICO") || buscarCampo(e.campos, "MORA/DIA")
-      || buscarCampo(e.campos, "ESTADO PAGO") || "";
-    const enMora = /MORA/i.test(pago) || e.en_mora === true;
-    const textoPago = pago ? pago.replace(/_/g, " ").toLowerCase().replace(/^./, (x) => x.toUpperCase()) : "";
-    partes.push(el("div", { class: "estado-pago " + (enMora ? "estado-mora" : "estado-activo") },
-      `${enMora ? "🟠" : "🟢"} Crédito activo${textoPago ? " · " + textoPago : ""}`));
+    const estado = estadoCredito(e);
+    partes.push(el("div", { class: "estado-pago " + (estado.mora ? "estado-mora" : "estado-activo") },
+      `${estado.mora ? "🔴" : "🟢"} Crédito activo${estado.mora !== null ? " · " + estado.texto : ""}`));
+    const etiquetas = etiquetasCredito(e);
+    if (etiquetas.length) partes.push(el("div", { class: "etiquetas-credito" }, ...etiquetas));
 
     const descripcion = [e.congregacion, e.cco ? "CCO " + e.cco : null, e.distrito ? "Distrito " + e.distrito : null].filter(Boolean);
     const cabecera = el("div", { class: "tarjeta" },
@@ -589,11 +629,13 @@
     for (const linea of a.lineas) {
       for (const e of linea.entradas) creditos.append(pintarCredito(linea.linea, e, true));
     }
+    const enMora = a.lineas.reduce((n, l) => n + l.entradas.filter((e) => estadoCredito(e).mora).length, 0);
     const titulo = a.total_creditos
       ? `💳 ${a.total_creditos} crédito${a.total_creditos === 1 ? "" : "s"} activo${a.total_creditos === 1 ? "" : "s"}`
       : "💳 Sin créditos activos en las líneas de crédito";
     return el("section", { class: "asociado" }, cabecera,
-      el("h3", { class: "asociado-titulo", text: titulo }),
+      el("h3", { class: "asociado-titulo" }, titulo,
+        enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null),
       a.total_creditos ? creditos : null);
   }
 
@@ -613,15 +655,18 @@
       enlaces.append(enlaceHoja("🔗 Ver obligación", e.link_obligacion, { onclick: sinBurbuja }));
     }
 
+    const estado = estadoCredito(e);
+    const etiquetas = etiquetasCredito(e);
     const fila = el("div", { class: "credito-cabecera" },
-      el("span", { class: "insignia", text: "ACTIVO" }),
+      el("span", { class: "insignia" + (estado.mora ? " insignia-mora" : ""), text: estado.texto.toUpperCase() }),
       el("div", { class: "credito-titulo" },
         el("strong", { text: nombreLinea + (e.tipo_credito && e.tipo_credito !== nombreLinea ? " · " + e.tipo_credito : "") }),
-        descripcion.length ? el("span", { text: descripcion.join("  ·  ") }) : null),
+        descripcion.length ? el("span", { text: descripcion.join("  ·  ") }) : null,
+        etiquetas.length ? el("div", { class: "etiquetas-credito" }, ...etiquetas) : null),
       enlaces.childElementCount ? enlaces : null);
     const conDetalle = Boolean(e.campos && e.campos.length);
     const nodo = el("div", {
-      class: (comoTarjeta ? "credito credito-tarjeta" : "credito") + (conDetalle ? " credito-clic" : ""),
+      class: (comoTarjeta ? "credito credito-tarjeta" : "credito") + (estado.mora ? " credito-mora" : "") + (conDetalle ? " credito-clic" : ""),
       role: conDetalle ? "button" : null, tabindex: conDetalle ? "0" : null,
       title: conDetalle ? "Ver la obligación completa" : null,
       onclick: conDetalle ? () => abrirObligacion(nombreLinea, e) : null,

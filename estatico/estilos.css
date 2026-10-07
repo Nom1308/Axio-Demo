@@ -591,6 +591,26 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
   font-size: 10px; font-weight: 800; letter-spacing: .08em; color: var(--verde);
   padding: 3px 8px; border-radius: 99px; background: rgba(52, 211, 153, .12); border: 1px solid rgba(52, 211, 153, .35);
 }
+/* Crédito en mora: rojo, como lo pinta la hoja de la línea («ESTADO: MORA/DIA»). */
+.estado-pago.estado-mora { background: linear-gradient(135deg, #B91C1C, #EF4444); }
+.insignia-mora { color: #FF8A8A; background: rgba(255, 107, 107, .14); border-color: rgba(255, 107, 107, .45); }
+.credito-tarjeta.credito-mora, .credito-tarjeta.credito-mora:first-of-type {
+  border-color: rgba(255, 107, 107, .3); border-left-color: var(--rojo);
+  background: linear-gradient(135deg, rgba(255, 107, 107, .12), rgba(255, 107, 107, .02));
+}
+.credito-mora.credito-clic:hover { box-shadow: 0 12px 28px -16px rgba(239, 68, 68, .85); }
+.credito-mora .credito-ver { color: var(--rojo); }
+.asociado-mora {
+  margin-left: 10px; padding: 2px 9px; border-radius: 99px; color: #FF8A8A;
+  background: rgba(255, 107, 107, .12); border: 1px solid rgba(255, 107, 107, .35); letter-spacing: .05em;
+}
+/* Observación y pendientes con el mismo color que en la hoja. */
+.etiquetas-credito { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.etiquetas-credito .etiqueta-hoja {
+  display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, .5);
+}
+
 .extra { background: var(--campo); border: 1px solid var(--borde); border-radius: 12px; padding: 10px 13px; margin-top: 9px; font-size: 13px; }
 .extra .mora-si { color: var(--rojo); font-weight: 700; }
 .extra .mora-no { color: var(--verde); font-weight: 700; }
