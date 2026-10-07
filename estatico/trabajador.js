@@ -73,6 +73,9 @@ self.onmessage = async (ev) => {
       proxy.destroy();
       const cuerpo = aBytes(cuerpoPy).buffer;
       postMessage({ tipo: "respuesta", id, codigo, tipoContenido: tipo, cuerpo }, [cuerpo]);
+    } else if (accion === "excel") {
+      const d = ev.data;
+      postMessage({ tipo: "respuesta", id, datos: JSON.parse(nav.leer_excel(d.archivo, d.hoja || "", d.filas, d.columnas)) });
     }
   } catch (e) {
     // Un error de Python trae su traceback completo; a la pantalla solo va la última línea.

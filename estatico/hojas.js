@@ -69,6 +69,8 @@
     return cacheArchivos.get(id);
   }
   const esHojaDeCalculo = (a) => a.mimeType === "application/vnd.google-apps.spreadsheet";
+  // Un .xlsx guardado en Drive: Google lo abre en su editor, pero la API de Sheets no lo lee.
+  const esExcel = (a) => /spreadsheetml|ms-excel/.test(a.mimeType || "");
 
   // ------------------------------------------------------------------ vista previa
   // popover="manual": se dibuja en la capa superior, encima del detalle (que es un <dialog>).
@@ -101,14 +103,14 @@
       const archivo = await datosArchivo(id);
       if (enlaceActual !== a) return;
       const fecha = archivo.modifiedTime ? new Date(archivo.modifiedTime).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" }) : "";
-      const editable = archivo.capabilities && archivo.capabilities.canEdit && google().puedeEscribir();
+      const editable = esHojaDeCalculo(archivo) && archivo.capabilities && archivo.capabilities.canEdit && google().puedeEscribir();
       const miniatura = archivo.thumbnailLink
         ? nodo("img", { class: "hoja-previa-img", src: archivo.thumbnailLink, alt: "", referrerpolicy: "no-referrer",
             onerror: (ev) => ev.target.replaceWith(nodo("div", { class: "hoja-previa-sin", text: "Sin miniatura" })) })
         : nodo("div", { class: "hoja-previa-sin", text: "Sin miniatura" });
       tarjeta.replaceChildren(
         nodo("div", { class: "hoja-previa-titulo" },
-          nodo("span", { class: esHojaDeCalculo(archivo) ? "icono-sheets" : "icono-archivo", "aria-hidden": "true" }),
+          nodo("span", { class: esHojaDeCalculo(archivo) || esExcel(archivo) ? "icono-sheets" : "icono-archivo", "aria-hidden": "true" }),
           nodo("strong", { text: archivo.name, title: archivo.name })),
         miniatura,
         nodo("div", { class: "hoja-previa-pie" },
@@ -117,7 +119,9 @@
           esHojaDeCalculo(archivo)
             ? nodo("span", { class: editable ? "hoja-previa-editable" : "hoja-previa-lectura",
                 text: editable ? "✏️ Puedes editarla · clic para abrir" : "👁️ Solo lectura · clic para abrir" })
-            : nodo("span", { text: "Clic para abrir" })));
+            : esExcel(archivo)
+              ? nodo("span", { class: "hoja-previa-lectura", text: "📄 Archivo de Excel · solo lectura · clic para abrir" })
+              : nodo("span", { text: "Clic para abrir" })));
       ubicar(a);
     } catch (e) {
       if (enlaceActual !== a) return;
@@ -137,10 +141,13 @@
     ventana.replaceChildren(cabeceraVisor(null), nodo("div", { class: "visor-cuerpo" }, nodo("p", { class: "visor-nota", text: "⏳ Abriendo la hoja…" })));
     if (!ventana.open) ventana.showModal();
     try {
-      const [archivo, libro] = await Promise.all([
-        datosArchivo(id),
-        apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=${encodeURIComponent("sheets.properties(sheetId,title,index,gridProperties(rowCount,columnCount))")}`),
-      ]);
+      const archivo = await datosArchivo(id);
+      if (esExcel(archivo)) {
+        visor = { id, archivo, excel: true, hojas: [], hoja: null, editable: false };
+        await cargarHoja();
+        return;
+      }
+      const libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=${encodeURIComponent("sheets.properties(sheetId,title,index,gridProperties(rowCount,columnCount))")}`);
       const hojas = libro.sheets.map((h) => h.properties);
       const hoja = hojas.find((h) => h.sheetId === gid) || hojas[0];
       visor = { id, archivo, hojas, hoja, editable: Boolean(archivo.capabilities && archivo.capabilities.canEdit && google().puedeEscribir()) };
@@ -155,9 +162,9 @@
     const cabecera = nodo("div", { class: "visor-cabecera" },
       nodo("span", { class: "icono-sheets", "aria-hidden": "true" }),
       nodo("strong", { class: "visor-titulo", text: v ? v.archivo.name : "Hoja de Google", title: v ? v.archivo.name : null }),
-      v ? nodo("span", { class: v.editable ? "visor-insignia editable" : "visor-insignia", text: v.editable ? "Puedes editar" : "Solo lectura" }) : null,
+      v ? nodo("span", { class: v.editable ? "visor-insignia editable" : "visor-insignia", text: v.editable ? "Puedes editar" : v.excel ? "Excel · solo lectura" : "Solo lectura" }) : null,
       estado,
-      v ? nodo("a", { class: "boton boton-chico", href: v.archivo.webViewLink || `https://docs.google.com/spreadsheets/d/${v.id}/edit#gid=${v.hoja.sheetId}`,
+      v ? nodo("a", { class: "boton boton-chico", href: v.archivo.webViewLink || `https://docs.google.com/spreadsheets/d/${v.id}/edit${v.hoja && !v.excel ? "#gid=" + v.hoja.sheetId : ""}`,
         target: "_blank", rel: "noopener noreferrer", text: "Abrir en Google Sheets ↗" }) : null,
       nodo("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", text: "✕", onclick: () => ventana.close() }));
     arrastrable(cabecera);
@@ -171,20 +178,34 @@
 
   async function cargarHoja() {
     const v = visor;
-    const filas = Math.min(v.hoja.gridProperties.rowCount || MAX_FILAS, MAX_FILAS);
-    const cols = Math.min(v.hoja.gridProperties.columnCount || 26, MAX_COLUMNAS);
-    const r = `'${v.hoja.title.replace(/'/g, "''")}'!A1:${letra(cols - 1)}${filas}`;
-    const campos = "sheets(merges,data(columnMetadata(pixelSize),rowMetadata(pixelSize),rowData(values(" +
-      "formattedValue,hyperlink,userEnteredValue,effectiveValue(numberValue)," +
-      "effectiveFormat(backgroundColor,horizontalAlignment,textFormat(bold,italic,foregroundColor,fontSize))))))";
-    ventana.replaceChildren(cabeceraVisor(v), pestanas(v), nodo("div", { class: "visor-cuerpo" }, nodo("p", { class: "visor-nota", text: "⏳ Cargando " + v.hoja.title + "…" })));
-    const libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}?ranges=${encodeURIComponent(r)}&includeGridData=true&fields=${encodeURIComponent(campos)}`);
-    const datos = (libro.sheets[0].data || [])[0] || {};
-    v.datos = datos;
+    ventana.replaceChildren(cabeceraVisor(v), pestanas(v), nodo("div", { class: "visor-cuerpo" },
+      nodo("p", { class: "visor-nota", text: "⏳ Cargando " + (v.hoja ? v.hoja.title : v.archivo.name) + "…" })));
+    let libro, filas, cols;
+    if (v.excel) {
+      const r = await google().leerExcel(v.id, v.hoja ? v.hoja.title : "", MAX_FILAS, MAX_COLUMNAS);
+      v.hojas = r.hojas.map((titulo, i) => ({ sheetId: i, title: titulo }));
+      v.hoja = v.hojas.find((h) => h.title === r.hoja) || v.hojas[0];
+      v.recortada = r.recortada;
+      libro = r.libro;
+      const rowData = libro.sheets[0].data[0].rowData;
+      filas = rowData.length;
+      cols = Math.max(1, ...rowData.map((f) => f.values.length));
+      ventana.querySelector(".visor-pestanas").replaceWith(pestanas(v));
+    } else {
+      filas = Math.min(v.hoja.gridProperties.rowCount || MAX_FILAS, MAX_FILAS);
+      cols = Math.min(v.hoja.gridProperties.columnCount || 26, MAX_COLUMNAS);
+      const r = `'${v.hoja.title.replace(/'/g, "''")}'!A1:${letra(cols - 1)}${filas}`;
+      const campos = "sheets(merges,data(columnMetadata(pixelSize),rowMetadata(pixelSize),rowData(values(" +
+        "formattedValue,hyperlink,userEnteredValue,effectiveValue(numberValue)," +
+        "effectiveFormat(backgroundColor,horizontalAlignment,textFormat(bold,italic,foregroundColor,fontSize))))))";
+      libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}?ranges=${encodeURIComponent(r)}&includeGridData=true&fields=${encodeURIComponent(campos)}`);
+      v.recortada = (v.hoja.gridProperties.rowCount || 0) > MAX_FILAS || (v.hoja.gridProperties.columnCount || 0) > MAX_COLUMNAS;
+    }
+    v.datos = (libro.sheets[0].data || [])[0] || {};
     v.merges = libro.sheets[0].merges || [];
-    v.recortada = (v.hoja.gridProperties.rowCount || 0) > MAX_FILAS || (v.hoja.gridProperties.columnCount || 0) > MAX_COLUMNAS;
     ventana.querySelector(".visor-cuerpo").replaceChildren(tabla(v, filas, cols));
-    avisar(v.editable ? "Doble clic en una celda para escribir" : "", "gris");
+    avisar(v.editable ? "Doble clic en una celda para escribir"
+      : v.excel ? "Es un archivo de Excel guardado en Drive: para editarlo, ábrelo en Google Sheets" : "", "gris");
   }
 
   function pestanas(v) {

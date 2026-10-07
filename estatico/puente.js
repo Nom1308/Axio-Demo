@@ -289,6 +289,14 @@
     // Google deja a la persona desmarcar permisos en la pantalla de consentimiento: si no
     // aceptó el de hojas de cálculo, la tabla se abre en solo lectura.
     puedeEscribir: () => Boolean(respuestaToken && window.google && google.accounts.oauth2.hasGrantedAllScopes(respuestaToken, ALCANCE_HOJAS)),
+    // Un .xlsx guardado en Drive: lo baja y lo lee el Python del trabajador (con el token
+    // de esta sesión) y lo devuelve con la forma de la API de Sheets. Ver leer_excel.
+    leerExcel: async (archivo, hoja, filas, columnas) => {
+      await tokenVigente();
+      const r = await pedir({ accion: "excel", archivo, hoja, filas, columnas });
+      if (r.error) throw new Error(r.error);
+      return r.datos;
+    },
   };
 
   async function iniciarSesion() {

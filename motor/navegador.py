@@ -195,6 +195,130 @@ def _estado_con_enlaces():
     return estado
 
 
+# ------------------------------------------------------------------ archivos de Excel en Drive
+# Algunas obligaciones apuntan a un .xlsx guardado en Drive, no a una hoja de Google: la API
+# de Sheets no los lee ("must not be an Office file"). Se bajan por la API de Drive y se leen
+# con openpyxl, devolviendo la MISMA forma que la API de Sheets (rowData, merges...) para que
+# estatico/hojas.js los dibuje con el mismo código. Solo lectura.
+_cache_excel = {}          # id -> bytes del archivo (cambiar de pestaña no lo vuelve a bajar)
+_MAX_CACHE_EXCEL = 6
+
+
+def _color_excel(color):
+    """'FFRRGGBB' de openpyxl -> {red, green, blue} de 0 a 1. Los colores de tema se ignoran."""
+    rgb = getattr(color, 'rgb', None) if color is not None else None
+    if not isinstance(rgb, str) or len(rgb) != 8 or getattr(color, 'type', 'rgb') != 'rgb':
+        return None
+    try:
+        r, g, b = (int(rgb[i:i + 2], 16) / 255 for i in (2, 4, 6))
+    except ValueError:
+        return None
+    return {'red': r, 'green': g, 'blue': b}
+
+
+def _miles(n, decimales=0):
+    texto = f"{abs(n):,.{decimales}f}".replace(',', '_').replace('.', ',').replace('_', '.')
+    return ('-' if n < 0 else '') + texto
+
+
+def _texto_excel(valor, formato):
+    """El valor como se vería en Excel, en formato colombiano (1.200.000 y 05/10/2026)."""
+    from datetime import date, datetime, time
+    if valor is None:
+        return ''
+    if isinstance(valor, datetime):
+        return valor.strftime('%d/%m/%Y') if not (valor.hour or valor.minute) else valor.strftime('%d/%m/%Y %H:%M')
+    if isinstance(valor, date):
+        return valor.strftime('%d/%m/%Y')
+    if isinstance(valor, time):
+        return valor.strftime('%H:%M')
+    if isinstance(valor, bool):
+        return 'VERDADERO' if valor else 'FALSO'
+    if isinstance(valor, (int, float)):
+        formato = formato or 'General'
+        if '%' in formato:
+            return _miles(valor * 100, 2 if '.0' in formato else 0) + '%'
+        decimales = len(formato.split('.')[1].split(';')[0].rstrip('_)" ')) if '.0' in formato else 0
+        if formato == 'General':
+            decimales = 0 if float(valor).is_integer() else min(4, len(repr(float(valor)).split('.')[1]))
+            texto = _miles(valor, decimales) if abs(valor) >= 1000 else (f"{valor:.{decimales}f}".replace('.', ','))
+        else:
+            texto = _miles(valor, decimales) if ('#,##' in formato or '$' in formato) else f"{valor:.{decimales}f}".replace('.', ',')
+        return ('$ ' + texto) if '$' in formato else texto
+    return str(valor)
+
+
+def leer_excel(id_archivo, nombre_hoja, max_filas, max_columnas):
+    """JSON con {hojas: [...títulos], hoja, libro: <forma de la API de Sheets>}."""
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    if id_archivo not in _cache_excel:
+        url = f"https://www.googleapis.com/drive/v3/files/{id_archivo}?alt=media&supportsAllDrives=true"
+        with urllib.request.urlopen(url) as resp:
+            _cache_excel[id_archivo] = resp.read()
+        while len(_cache_excel) > _MAX_CACHE_EXCEL:
+            _cache_excel.pop(next(iter(_cache_excel)))
+    wb = load_workbook(io.BytesIO(_cache_excel[id_archivo]), data_only=True)
+    visibles = [ws for ws in wb.worksheets if ws.sheet_state == 'visible'] or wb.worksheets
+    ws = next((w for w in visibles if w.title == nombre_hoja), visibles[0])
+    filas = min(ws.max_row or 1, max_filas)
+    columnas = min(ws.max_column or 1, max_columnas)
+
+    alineaciones = {'left': 'LEFT', 'center': 'CENTER', 'centerContinuous': 'CENTER', 'right': 'RIGHT'}
+    datos_filas = []
+    for fila in ws.iter_rows(min_row=1, max_row=filas, max_col=columnas):
+        valores = []
+        for c in fila:
+            formato = {}
+            relleno = c.fill
+            if relleno is not None and relleno.fill_type == 'solid':
+                fondo = _color_excel(relleno.fgColor)
+                if fondo:
+                    formato['backgroundColor'] = fondo
+            fuente = c.font
+            texto = {}
+            if fuente is not None:
+                if fuente.b:
+                    texto['bold'] = True
+                if fuente.i:
+                    texto['italic'] = True
+                letra = _color_excel(fuente.color)
+                if letra:
+                    texto['foregroundColor'] = letra
+            if texto:
+                formato['textFormat'] = texto
+            horizontal = c.alignment.horizontal if c.alignment is not None else None
+            if horizontal in alineaciones:
+                formato['horizontalAlignment'] = alineaciones[horizontal]
+            celda = {'formattedValue': _texto_excel(c.value, c.number_format), 'effectiveFormat': formato}
+            if isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
+                celda['effectiveValue'] = {'numberValue': c.value}
+            if c.hyperlink is not None and c.hyperlink.target:
+                celda['hyperlink'] = c.hyperlink.target
+            valores.append(celda)
+        datos_filas.append({'values': valores})
+
+    anchos = []
+    for i in range(1, columnas + 1):
+        dim = ws.column_dimensions.get(get_column_letter(i))
+        ancho = dim.width if dim is not None and dim.width else 8.43
+        anchos.append({'pixelSize': round(ancho * 7 + 5)})
+    altos = []
+    for i in range(1, filas + 1):
+        dim = ws.row_dimensions.get(i)
+        altos.append({'pixelSize': round(dim.height * 4 / 3) if dim is not None and dim.height else 21})
+    merges = [{'startRowIndex': r.min_row - 1, 'endRowIndex': r.max_row,
+               'startColumnIndex': r.min_col - 1, 'endColumnIndex': r.max_col}
+              for r in ws.merged_cells.ranges if r.min_row <= filas and r.min_col <= columnas]
+    return json.dumps({
+        'hojas': [w.title for w in visibles],
+        'hoja': ws.title,
+        'recortada': (ws.max_row or 0) > max_filas or (ws.max_column or 0) > max_columnas,
+        'libro': {'sheets': [{'merges': merges, 'data': [{
+            'columnMetadata': anchos, 'rowMetadata': altos, 'rowData': datos_filas}]}]},
+    }, ensure_ascii=False)
+
+
 def _json(datos, estado=200):
     return estado, TIPO_JSON, json.dumps(datos, ensure_ascii=False).encode('utf-8')
 
