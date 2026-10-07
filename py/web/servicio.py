@@ -451,6 +451,8 @@ class MotorWeb:
             'link_obligacion': _enlace_seguro(e.get('link_obligacion')),
             'tarifa': _formatear_valor_celda(e['tarifa']) if e.get('tarifa') is not None else None,
             'saldo': _formatear_valor_celda(e['saldo']) if e.get('saldo') is not None else None,
+            'columna_tarifa': e.get('columna_tarifa'),
+            'columna_saldo': e.get('columna_saldo'),
             'meses_mora': meses,
             'en_mora': en_mora,
             'observacion_directivos': e.get('observacion_directivos'),

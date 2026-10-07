@@ -1269,6 +1269,24 @@ def descargar_base_global(url, config):
 # que descargar_base_global), así que sirve tanto para 'Congregación' (con
 # CCO y nombre de congregación) como para una línea personal que solo traiga
 # Cédula y Nombre.
+def _columna_cedula_sin_titulo(filas, encabezados, muestra=300):
+    """Índice de la columna SIN título cuyos valores son cédulas (al menos el 60% de las
+    celdas con algo: solo dígitos y separadores, de 5 a 11 cifras), o None."""
+    mejor, mejor_proporcion = None, 0.6
+    for i, titulo in enumerate(encabezados):
+        if titulo:
+            continue
+        valores = [str(f[i].value).strip() for f in filas[1:muestra + 1]
+                   if i < len(f) and f[i].value is not None and str(f[i].value).strip()]
+        if len(valores) < 3:
+            continue
+        parecidas = sum(1 for v in valores
+                        if re.fullmatch(r'[\d.,\s]+', v) and 5 <= len(limpiar_cedula(v)) <= 11)
+        if parecidas / len(valores) >= mejor_proporcion:
+            mejor, mejor_proporcion = i, parecidas / len(valores)
+    return mejor
+
+
 def descargar_linea_credito(url, clave=None):
     """Descarga y normaliza el roster de UNA línea de crédito. Devuelve un
     dict {cedula_normalizada: [{'cco','congregacion','nombre','distrito',
@@ -1318,6 +1336,13 @@ def descargar_linea_credito(url, clave=None):
             continue
         encabezados_candidatos = [str(c.value).strip() if c.value is not None else '' for c in filas_candidatas[0]]
         tiene_cedula = any(alias in str(h).upper() for h in encabezados_candidatos for alias in ALIASES_CEDULA)
+        if not tiene_cedula:
+            # Seguro de Vida (2026) trae la cédula en una columna SIN título: se reconoce
+            # por su contenido, igual que en la Matriz_Nube (asegurar_columna_cedula).
+            idx = _columna_cedula_sin_titulo(filas_candidatas, encabezados_candidatos)
+            if idx is not None:
+                encabezados_candidatos[idx] = 'CEDULA'
+                tiene_cedula = True
         if tiene_cedula:
             ws, filas, encabezados = hoja_candidata, filas_candidatas, encabezados_candidatos
             break
@@ -1360,7 +1385,8 @@ def descargar_linea_credito(url, clave=None):
     idx_saldo_actual = _buscar_columna(['SALDO ACTUAL DE LA TABLA'])
     if clave in CLAVES_LINEAS_CON_INFO_EXTRA:
         idx_estado = None
-        idx_tarifa = _buscar_columna(['TARIFA'])
+        # Como el saldo: con varias ('TARIFA A JUNIO', 'TARIFA A AGOSTO'), la última es la vigente.
+        idx_tarifa = _buscar_columna(['TARIFA'], usar_ultimo=True)
         idx_saldo = _buscar_columna(['SALDO'], usar_ultimo=True)
         idx_mora = _buscar_columna(['MORA'])
         idx_obs_directivos = _buscar_columna(['OBSERVACION DIRECTIVOS', 'OBSERVACIÓN DIRECTIVOS'])
@@ -1445,6 +1471,9 @@ def descargar_linea_credito(url, clave=None):
             'link_obligacion': link_obligacion,
             'tarifa': _valor_o_none(fila_celdas, idx_tarifa),
             'saldo': _valor_o_none(fila_celdas, idx_saldo),
+            # El título de la columna, porque dice a qué mes corresponde ('SALDO A AGOSTO 2026').
+            'columna_tarifa': encabezados[idx_tarifa] if idx_tarifa is not None else None,
+            'columna_saldo': encabezados[idx_saldo] if idx_saldo is not None else None,
             'meses_mora': _valor_o_none(fila_celdas, idx_mora),
             'observacion_directivos': _texto_o_none(fila_celdas, idx_obs_directivos),
             'observacion_general': _texto_o_none(fila_celdas, idx_obs_general),

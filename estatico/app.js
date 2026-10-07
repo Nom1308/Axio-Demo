@@ -580,12 +580,13 @@
     partes.push(cabecera);
 
     const resumen = [
-      ["Saldo actual", e.saldo_actual ? "$ " + e.saldo_actual : (e.saldo ? "$ " + e.saldo : null)],
+      [e.saldo_actual ? "Saldo actual" : etiquetaColumna(e.columna_saldo, "Saldo actual"),
+        e.saldo_actual ? "$ " + e.saldo_actual : (e.saldo ? "$ " + e.saldo : null)],
       ["Último pago", e.fecha_ultimo_pago],
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
       ["Altura", buscarCampo(e.campos, "ALTURA")],
       ["Observación", e.observacion_estado],
-      ["Tarifa", e.tarifa ? "$ " + e.tarifa : null],
+      [etiquetaColumna(e.columna_tarifa, "Tarifa"), e.tarifa ? "$ " + e.tarifa : null],
       ["Meses en mora", e.meses_mora],
     ].filter(([, v]) => v);
     if (resumen.length) {
@@ -639,6 +640,12 @@
       a.total_creditos ? creditos : null);
   }
 
+  // 'SALDO A AGOSTO 2026' -> 'Saldo a agosto 2026': el título de la hoja dice de qué mes es.
+  function etiquetaColumna(titulo, porDefecto) {
+    const t = String(titulo || "").replace(/\s+/g, " ").trim();
+    return t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : porDefecto;
+  }
+
   function pintarCredito(nombreLinea, e, comoTarjeta) {
     const descripcion = [];
     if (e.congregacion) descripcion.push(e.congregacion);
@@ -687,11 +694,12 @@
     if (e.tarifa || e.saldo || e.meses_mora || e.observacion_directivos || e.observacion_general) {
       const extra = el("div", { class: "extra" });
       const cifras = el("div", { class: "fila-flex" });
-      if (e.tarifa) cifras.append(el("span", { text: "💵 Tarifa: " + e.tarifa }));
-      if (e.saldo) cifras.append(el("span", { text: "💰 Saldo: " + e.saldo }));
+      if (e.tarifa) cifras.append(el("span", { text: `💵 ${etiquetaColumna(e.columna_tarifa, "Tarifa")}: ${e.tarifa}` }));
+      if (e.saldo) cifras.append(el("span", { text: `💰 ${etiquetaColumna(e.columna_saldo, "Saldo")}: ${e.saldo}` }));
       if (e.meses_mora) cifras.append(el("span", { class: e.en_mora ? "mora-si" : "mora-no", text: "📅 Meses en mora: " + e.meses_mora }));
       extra.append(cifras);
-      if (e.observacion_directivos) extra.append(el("em", { text: "📝 Directivos: " + e.observacion_directivos }));
+      // La hoja la titula «OBSERVACION DIRECTIVOS (NO REPORTAR)»: es de uso interno.
+      if (e.observacion_directivos) extra.append(el("em", { text: "📝 Directivos (no reportar): " + e.observacion_directivos }));
       if (e.observacion_general) extra.append(el("em", { text: "📝 General: " + e.observacion_general }));
       nodo.append(extra);
     }
