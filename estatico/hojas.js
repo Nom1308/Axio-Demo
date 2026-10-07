@@ -233,8 +233,9 @@
       combinadas.set(m.startRowIndex + ":" + m.startColumnIndex,
         { filas: Math.min(m.endRowIndex, filas) - m.startRowIndex, cols: Math.min(m.endColumnIndex, cols) - m.startColumnIndex });
     }
-    const anchos = (datos.columnMetadata || []).map((c) => Math.max(40, Math.min(c.pixelSize || 100, 360)));
-    const grupoCols = nodo("colgroup", null, nodo("col", { style: "width:42px" }));
+    // Un poco más anchas que en la hoja: las celdas tienen más aire alrededor del texto.
+    const anchos = (datos.columnMetadata || []).map((c) => Math.max(64, Math.min(Math.round((c.pixelSize || 100) * 1.12) + 12, 420)));
+    const grupoCols = nodo("colgroup", null, nodo("col", { style: "width:46px" }));
     for (let c = 0; c < cols; c++) grupoCols.append(nodo("col", { style: `width:${anchos[c] || 100}px` }));
 
     const cabeza = nodo("tr", null, nodo("th", { class: "visor-esquina" }));
@@ -243,7 +244,7 @@
     for (let f = 0; f < filas; f++) {
       const valores = (filasDatos[f] || {}).values || [];
       const alto = ((datos.rowMetadata || [])[f] || {}).pixelSize;
-      const tr = nodo("tr", alto && alto > 21 ? { style: `height:${Math.min(alto, 120)}px` } : null, nodo("th", { text: String(f + 1) }));
+      const tr = nodo("tr", alto && alto > 36 ? { style: `height:${Math.min(alto, 120)}px` } : null, nodo("th", { text: String(f + 1) }));
       for (let c = 0; c < cols; c++) {
         if (cubiertas.has(f + ":" + c)) continue;
         const celda = valores[c] || {};
@@ -262,16 +263,20 @@
     const formato = celda.effectiveFormat || {};
     const texto = formato.textFormat || {};
     const estilos = [];
+    // Google devuelve blanco explícito en cada celda sin color: se omite, así la fila se
+    // puede resaltar al pasar el mouse.
     const fondo = color(formato.backgroundColor);
-    if (fondo) estilos.push("background:" + fondo);
+    if (fondo && fondo !== "rgb(255,255,255)") estilos.push("background:" + fondo);
     const letraColor = color(texto.foregroundColor);
     if (letraColor && letraColor !== "rgb(0,0,0)") estilos.push("color:" + letraColor);
     if (texto.bold) estilos.push("font-weight:700");
     if (texto.italic) estilos.push("font-style:italic");
-    const alineacion = formato.horizontalAlignment || (celda.effectiveValue && "numberValue" in celda.effectiveValue ? "RIGHT" : "LEFT");
+    const esNumero = Boolean(celda.effectiveValue && "numberValue" in celda.effectiveValue);
+    const alineacion = formato.horizontalAlignment || (esNumero ? "RIGHT" : "LEFT");
     estilos.push("text-align:" + alineacion.toLowerCase());
 
     const td = nodo("td", {
+      class: esNumero ? "num" : null,
       style: estilos.join(";"), colspan: comb && comb.cols > 1 ? comb.cols : null, rowspan: comb && comb.filas > 1 ? comb.filas : null,
       tabindex: v.editable ? "0" : null, "data-f": f, "data-c": c,
       title: celda.userEnteredValue && celda.userEnteredValue.formulaValue ? "Fórmula: " + celda.userEnteredValue.formulaValue : null,

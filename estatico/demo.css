@@ -61,18 +61,19 @@
 
 /* Ventana con la tabla: se puede mover (por la cabecera) y cambiar de tamaño (esquina). */
 .visor-hoja {
-  width: min(1000px, 96vw); height: min(640px, 88vh); max-width: 100vw; max-height: 100vh;
-  padding: 0; border: 1px solid var(--borde-fuerte); border-radius: 16px; overflow: hidden; resize: both;
+  width: min(1180px, 96vw); height: min(780px, 90vh); max-width: 100vw; max-height: 100vh;
+  padding: 0; border: 1px solid var(--borde-fuerte); border-radius: 18px; overflow: hidden; resize: both;
   background: var(--vidrio-solido); color: var(--texto); box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .7);
 }
-.visor-hoja[open] { display: flex; flex-direction: column; }
-.visor-hoja::backdrop { background: rgba(3, 10, 36, .35); }
+.visor-hoja[open] { display: flex; flex-direction: column; animation: visor-entra .22s cubic-bezier(.2, .8, .2, 1); }
+@keyframes visor-entra { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+.visor-hoja::backdrop { background: rgba(3, 10, 36, .45); backdrop-filter: blur(3px); }
 .visor-cabecera {
-  display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: grab; user-select: none;
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: grab; user-select: none;
   border-bottom: 1px solid var(--borde); flex-wrap: wrap;
 }
 .visor-cabecera:active { cursor: grabbing; }
-.visor-titulo { font-size: 14.5px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.visor-titulo { font-size: 15px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visor-insignia {
   font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px;
   color: var(--texto-2); background: var(--campo); border: 1px solid var(--borde);
@@ -82,45 +83,63 @@
 .visor-estado.ok { color: var(--verde); }
 .visor-estado.error { color: var(--rojo); }
 .visor-estado.ambar { color: var(--ambar); }
-.visor-pestanas { display: flex; gap: 4px; padding: 6px 12px 0; overflow-x: auto; border-bottom: 1px solid var(--borde); }
+
+/* Pestañas de la hoja, como pastillas */
+.visor-pestanas { display: flex; gap: 6px; padding: 10px 16px; overflow-x: auto; border-bottom: 1px solid var(--borde); }
 .visor-pestanas.vacio { display: none; }
 .visor-pestana {
-  padding: 6px 14px; font-size: 12.5px; border-radius: 8px 8px 0 0; border: 1px solid transparent; border-bottom: 0;
-  background: transparent; color: var(--texto-2); cursor: pointer; white-space: nowrap;
+  padding: 6px 14px; font-size: 12.5px; border-radius: 99px; border: 1px solid var(--borde);
+  background: var(--campo); color: var(--texto-2); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s;
 }
-.visor-pestana.activa { background: #fff; color: #188038; font-weight: 700; border-color: var(--borde); }
-.visor-cuerpo { flex: 1; min-height: 0; overflow: auto; background: #fff; }
-.visor-nota { margin: 14px; color: #5f6368; font-size: 13px; }
-.visor-nota.error { color: #c5221f; }
+.visor-pestana:hover { background: var(--campo-hover); color: var(--texto); }
+.visor-pestana.activa { background: #fff; color: #1E3A8A; font-weight: 700; border-color: transparent; box-shadow: 0 4px 14px -6px rgba(0, 0, 0, .45); }
 
-/* La tabla, con el aspecto de Google Sheets */
+/* El cuerpo es un lienzo; la hoja va encima como una tarjeta de papel. */
+.visor-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 16px; background: var(--campo); }
+.visor-nota { margin: 6px 2px; color: var(--texto-2); font-size: 13px; }
+.visor-nota.error { color: var(--rojo); }
+.visor-tabla-envoltura {
+  width: max-content; min-width: min(100%, 480px); background: #fff; border-radius: 14px; overflow: clip;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 18px 40px -22px rgba(0, 0, 0, .55);
+}
+.visor-tabla-envoltura > .visor-nota { margin: 0; padding: 10px 16px; color: #64748b; font-size: 12px; border-top: 1px solid #eef1f6; background: #fafbfd; }
+
 .visor-tabla {
-  border-collapse: collapse; table-layout: fixed; width: max-content; min-width: 0;
-  font: 12.5px/1.35 Arial, "Segoe UI", sans-serif; color: #000; background: #fff;
+  border-collapse: separate; border-spacing: 0; table-layout: fixed; width: max-content; min-width: 0;
+  font: 13px/1.45 var(--fuente); color: #1e293b; background: #fff; font-variant-numeric: tabular-nums;
 }
 .visor-tabla th, .visor-tabla td {
-  border: 1px solid #e2e3e3; padding: 3px 6px; height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  text-transform: none; letter-spacing: normal; position: static; font-size: 12.5px;
+  border: 0; border-bottom: 1px solid #eef1f6; border-right: 1px solid #f3f5f9;
+  padding: 8px 12px; height: 36px; vertical-align: middle; white-space: normal; overflow-wrap: anywhere;
+  text-transform: none; letter-spacing: normal; position: static; font-size: 13px;
 }
+.visor-tabla td.num { white-space: nowrap; }
 .visor-tabla thead th {
-  position: sticky; top: 0; z-index: 2; background: #f8f9fa; color: #5f6368; font-weight: 400; text-align: center; font-size: 11.5px;
+  position: sticky; top: -16px; z-index: 2; height: 30px; padding: 6px 12px; background: #f8fafc; color: #94a3b8;
+  font-weight: 600; font-size: 11px; letter-spacing: .04em; text-align: center; border-bottom: 1px solid #e5e9f0;
 }
 .visor-tabla tbody th {
-  position: sticky; left: 0; z-index: 1; background: #f8f9fa; color: #5f6368; font-weight: 400; text-align: center; font-size: 11.5px;
+  position: sticky; left: -16px; z-index: 1; padding: 6px 4px; background: #fafbfd; color: #a3adbd;
+  font-weight: 500; font-size: 11px; text-align: center; border-right: 1px solid #eef1f6;
 }
-.visor-tabla .visor-esquina { left: 0; z-index: 3; }
+.visor-tabla .visor-esquina { left: -16px; z-index: 3; }
 .visor-tabla tbody tr { cursor: default; background: transparent; }
 .visor-tabla tbody tr:hover { background: transparent; }
 .visor-tabla tbody tr:hover td:first-child { box-shadow: none; }
-.visor-tabla td a { color: #1155cc; }
-.visor-tabla td[tabindex]:focus { outline: 2px solid #1a73e8; outline-offset: -2px; }
-.visor-tabla td.celda-editando { padding: 0; outline: 2px solid #1a73e8; outline-offset: -2px; overflow: visible; }
+.visor-tabla tbody tr:hover td { background-color: #f4f7ff; }
+.visor-tabla tbody tr:hover th { color: #2F7DF6; background: #eef3ff; }
+.visor-tabla tbody tr:last-child > * { border-bottom: 0; }
+.visor-tabla td a { color: #2563eb; font-weight: 500; text-decoration: none; }
+.visor-tabla td a:hover { text-decoration: underline; }
+.visor-tabla td[tabindex] { cursor: cell; }
+.visor-tabla td[tabindex]:focus { outline: 2px solid #2F7DF6; outline-offset: -2px; border-radius: 4px; }
+.visor-tabla td.celda-editando { padding: 0; outline: 2px solid #2F7DF6; outline-offset: -2px; overflow: visible; }
 .visor-entrada {
-  width: 100%; height: 100%; min-height: 22px; border: 0; border-radius: 0; padding: 3px 6px;
-  font: inherit; color: #000; background: #fff; box-shadow: none;
+  width: 100%; height: 100%; min-height: 36px; border: 0; border-radius: 0; padding: 8px 12px;
+  font: inherit; color: #1e293b; background: #fff; box-shadow: 0 6px 18px -8px rgba(47, 125, 246, .5);
 }
 .visor-entrada:focus { outline: none; }
-.visor-tabla td.celda-guardando { color: #80868b; }
+.visor-tabla td.celda-guardando { color: #94a3b8; }
 .visor-tabla td.celda-guardada { animation: celda-ok 1.6s ease; }
 /* ==========================================================================
    Gestión de un pago de los Extractos (estatico/pagos.js)
