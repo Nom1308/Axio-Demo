@@ -77,10 +77,14 @@ def fijar_token(token):
     _token_google = token or ''
 
 
-def _urlopen_navegador(url, data=None, timeout=None, **_):
+# Una exportación grande (Libre Inversión Mayor pesa ~6 MB en xlsx) a veces falla sin
+# respuesta: Google corta o devuelve un error sin cabeceras CORS, y el navegador lo ve como
+# "sin conexión" (estado 0). Suele salir bien al segundo intento.
+_INTENTOS_DESCARGA = 3
+
+
+def _pedir(url):
     import js
-    if isinstance(url, urllib.request.Request):
-        url = url.full_url
     xhr = js.XMLHttpRequest.new()
     xhr.open('GET', url, False)
     xhr.responseType = 'arraybuffer'
@@ -88,10 +92,24 @@ def _urlopen_navegador(url, data=None, timeout=None, **_):
         xhr.setRequestHeader('Authorization', 'Bearer ' + _token_google)
     try:
         xhr.send()
-    except Exception as e:
-        raise urllib.error.URLError(f"sin conexión con {urlsplit(url).netloc} ({e})")
-    if xhr.status == 0:
-        raise urllib.error.URLError(f"sin conexión con {urlsplit(url).netloc}")
+    except Exception:
+        return None
+    return xhr if xhr.status != 0 else None
+
+
+def _urlopen_navegador(url, data=None, timeout=None, **_):
+    if isinstance(url, urllib.request.Request):
+        url = url.full_url
+    xhr = None
+    for _intento in range(_INTENTOS_DESCARGA):
+        xhr = _pedir(url)
+        if xhr is not None and xhr.status < 500 and xhr.status != 429:
+            break
+    if xhr is None:
+        raise urllib.error.URLError(
+            f"{urlsplit(url).netloc} no respondió después de {_INTENTOS_DESCARGA} intentos. "
+            "Si el resto de las hojas cargó, es momentáneo: prueba «Refrescar datos»")
+    import js
     if xhr.status in (401, 403, 404) and 'google' in (urlsplit(url).hostname or ''):
         motivo = ("tu cuenta de Google no tiene permiso para ver esta hoja; pide acceso a quien la administra"
                   if _token_google else
