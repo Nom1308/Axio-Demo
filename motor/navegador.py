@@ -115,6 +115,9 @@ def _urlopen_navegador(url, data=None, timeout=None, **_):
     if url in _precarga:
         estado, datos, url_final, tipo = _precarga.pop(url)
         return _Respuesta(url_final, estado, datos, tipo)
+    if EN_NAVEGADOR:
+        import js
+        js.console.warn('[Axio] Sin precarga, se baja de a una: ' + re.sub(r'/export.*$', '', url))
     xhr = None
     for _intento in range(_INTENTOS_DESCARGA):
         xhr = _pedir(url)
@@ -162,6 +165,10 @@ class MotorNavegador(MotorWeb):
 
     @mensaje_carga.setter
     def mensaje_carga(self, valor):
+        # Con las hojas ya bajadas por el trabajador, axio dice "Descargando…" pero lo que
+        # hace es leerlas: se avisa como lo que es.
+        if valor and _precarga and valor.startswith('Descargando'):
+            valor = 'Leyendo' + valor[len('Descargando'):].replace('...', ' (ya descargada)…')
         self._mensaje_carga = valor
         _avisar(valor)
 

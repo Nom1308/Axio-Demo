@@ -119,7 +119,9 @@ async function precargar(urls) {
     }
   };
   await Promise.all(Array.from({ length: Math.min(DESCARGAS_A_LA_VEZ, urls.length) }, tomar));
-  console.info(`[Axio] Descargas: ${((performance.now() - inicio) / 1000).toFixed(1)} s en total`);
+  const total = ((performance.now() - inicio) / 1000).toFixed(1);
+  console.info(`[Axio] Descargas: ${total} s en total`);
+  avisar(`${bajadas.length} de ${urls.length} hojas descargadas en ${total} s` + (motorListo ? ". Leyéndolas…" : ". Terminando de preparar el motor…"));
   return bajadas;
 }
 
