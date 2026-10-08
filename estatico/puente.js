@@ -21,7 +21,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-08h");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-08i");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -50,6 +50,7 @@
     const m = ev.data;
     if (m.tipo === "progreso") {
       mensaje = m.mensaje;
+      window.dispatchEvent(new CustomEvent("axio-progreso", { detail: { mensaje } }));
       if (!motorListo) $("#estado-motor").textContent = "⏳ " + mensaje;
     } else if (m.tipo === "motor-listo") {
       motorListo = true;
@@ -91,16 +92,21 @@
 
   // 'antes' corre con la bandera de carga ya puesta: así app.js ve "cargando" desde el
   // primer instante aunque primero haya que renovar el token de Google.
+  // Avisa del inicio y del fin de cada carga (estatico/juego.js entretiene mientras tanto).
   async function cargarDatos(datos, antes) {
     cargando = true;
+    let error = null;
+    window.dispatchEvent(new CustomEvent("axio-carga-inicio", { detail: { accion: datos.accion } }));
     try {
       if (antes) await antes();
       const r = await pedir(datos);
-      if (r.error) mostrarErrorCarga(r.error);
+      if (r.error) { error = r.error; mostrarErrorCarga(r.error); }
     } catch (e) {
+      error = e.message;
       mostrarErrorCarga(e.message);
     } finally {
       cargando = false;
+      window.dispatchEvent(new CustomEvent("axio-carga-fin", { detail: { accion: datos.accion, error } }));
     }
   }
 
@@ -208,7 +214,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-08h";
+    script.src = "estatico/app.js?v=2026-10-08i";
     document.body.append(script);
   }
 
