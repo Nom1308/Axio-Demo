@@ -208,7 +208,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js";
+    script.src = "estatico/app.js?v=2026-10-08b";
     document.body.append(script);
   }
 
