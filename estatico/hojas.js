@@ -215,6 +215,11 @@
       nombre,
       nodo("span", { class: "visor-fx", "aria-hidden": "true", text: "fx" }),
       formula,
+      nodo("button", { class: "visor-copiar", type: "button", title: "Copia la selección (Ctrl+C). Arrastra o usa Shift para elegir varias celdas",
+        text: "📋 Copiar", onclick: () => { copiarRango(v, rangoSeleccionado(v)); enfocarCuerpo(); } }),
+      nodo("button", { class: "visor-copiar visor-copiar-encabezado", type: "button", hidden: true,
+        title: "Copia las filas de arriba de la hoja (las inmovilizadas): cédula, nombre, PR, celular...",
+        text: "📋 Copiar encabezado", onclick: () => copiarEncabezado(v) }),
       nodo("div", { class: "visor-zoom", role: "group", "aria-label": "Zoom" },
         nodo("button", { type: "button", title: "Alejar (Ctrl + rueda)", "aria-label": "Alejar", text: "−", onclick: () => pasoZoom(-1) }),
         valorZoom,
@@ -268,6 +273,8 @@
     const cuerpo = ventana.querySelector(".visor-cuerpo");
     cuerpo.replaceChildren(tabla(v, filas, cols));
     prepararCuerpo(v, cuerpo);
+    const botonEncabezado = ventana.querySelector(".visor-copiar-encabezado");
+    if (botonEncabezado) botonEncabezado.hidden = !v.fijasF;
     seleccionar(v, 0, 0, false);
     enfocarCuerpo();
     avisar(v.editable ? "Doble clic o Enter en una celda para escribir"
@@ -344,7 +351,7 @@
       text: letra(c), "data-j": j, class: j < fijasC ? "fija" + (j === fijasC - 1 ? " fin-fijas-c" : "") : null,
       style: j < fijasC ? `left:${izquierda[j]}px` : null })));
 
-    v.visF = visF; v.visC = visC; v.mapa = new Map();
+    v.visF = visF; v.visC = visC; v.mapa = new Map(); v.fijasF = fijasF; v.ancla = null;
     const cuerpo = nodo("tbody");
     visF.forEach((f, i) => {
       const fija = i < fijasF;
@@ -446,34 +453,71 @@
   const enfocarCuerpo = () => { const c = ventana.querySelector(".visor-cuerpo"); if (c) c.focus({ preventScroll: true }); };
   const columnaDeLetras = (s) => [...s.toUpperCase()].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
 
-  function seleccionar(v, i, j, desplazar = true) {
+  // extender: la selección va desde el ancla (donde empezó) hasta (i, j), como Shift en Sheets.
+  function seleccionar(v, i, j, desplazar = true, extender = false) {
     i = Math.max(0, Math.min(v.visF.length - 1, i));
     j = Math.max(0, Math.min(v.visC.length - 1, j));
     const td = v.mapa.get(i + ":" + j);
     if (!td) return;
     v.sel = { i, j };
-    ventana.querySelectorAll(".visor-tabla .sel, .visor-tabla .activa").forEach((e) => e.classList.remove("sel", "activa"));
+    if (!extender || !v.ancla) v.ancla = { i, j };
+    ventana.querySelectorAll(".visor-tabla .sel, .visor-tabla .activa, .visor-tabla .rango").forEach((e) => e.classList.remove("sel", "activa", "rango"));
     td.classList.add("sel");
-    // Resalta la letra y el número de la celda (todas las que abarca si está combinada).
-    const ti = Number(td.dataset.i), tj = Number(td.dataset.j);
-    const filasCelda = Number(td.getAttribute("rowspan") || 1), colsCelda = Number(td.getAttribute("colspan") || 1);
-    for (let k = 0; k < colsCelda; k++) { const th = ventana.querySelector(`.visor-tabla thead th[data-j="${tj + k}"]`); if (th) th.classList.add("activa"); }
-    for (let k = 0; k < filasCelda; k++) { const th = ventana.querySelector(`.visor-tabla tbody th[data-i="${ti + k}"]`); if (th) th.classList.add("activa"); }
+    // Resalta el rango y sus letras y números (las celdas combinadas entran completas).
+    const r = rangoSeleccionado(v);
+    const celdasRango = new Set();
+    for (let a = r.i0; a <= r.i1; a++) {
+      for (let b = r.j0; b <= r.j1; b++) celdasRango.add(v.mapa.get(a + ":" + b));
+    }
+    if (celdasRango.size > 1) celdasRango.forEach((celda) => celda && celda.classList.add("rango"));
+    for (let b = r.j0; b <= r.j1; b++) { const th = ventana.querySelector(`.visor-tabla thead th[data-j="${b}"]`); if (th) th.classList.add("activa"); }
+    for (let a = r.i0; a <= r.i1; a++) { const th = ventana.querySelector(`.visor-tabla tbody th[data-i="${a}"]`); if (th) th.classList.add("activa"); }
     const nombre = ventana.querySelector(".visor-nombre");
-    const ref = letra(Number(td.dataset.c)) + (Number(td.dataset.f) + 1);
-    if (nombre && document.activeElement !== nombre) nombre.value = colsCelda > 1 || filasCelda > 1
-      ? ref + ":" + letra(v.visC[tj + colsCelda - 1]) + (v.visF[ti + filasCelda - 1] + 1) : ref;
+    if (nombre && document.activeElement !== nombre) nombre.value = refRango(v, r);
     const formula = ventana.querySelector(".visor-formula");
     if (formula) { formula.textContent = textoEditable(td._celda); formula.title = formula.textContent; }
     if (desplazar) td.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   // Mueve la selección; si cae dentro de la misma celda combinada, sigue hasta salir de ella.
-  function mover(v, di, dj) {
+  function mover(v, di, dj, extender = false) {
     const actual = v.mapa.get(v.sel.i + ":" + v.sel.j);
     let { i, j } = v.sel;
     do { i += di; j += dj; } while (v.mapa.get(i + ":" + j) === actual && i >= 0 && j >= 0 && i < v.visF.length && j < v.visC.length);
-    seleccionar(v, i, j);
+    seleccionar(v, i, j, true, extender);
+  }
+
+  // El rectángulo entre el ancla y la celda activa (en posiciones visibles), agrandado hasta
+  // que ninguna celda combinada quede partida.
+  function rangoSeleccionado(v) {
+    const a = v.ancla || v.sel;
+    const r = { i0: Math.min(a.i, v.sel.i), i1: Math.max(a.i, v.sel.i), j0: Math.min(a.j, v.sel.j), j1: Math.max(a.j, v.sel.j) };
+    for (let cambio = true; cambio;) {
+      cambio = false;
+      for (let i = r.i0; i <= r.i1; i++) {
+        for (let j = r.j0; j <= r.j1; j++) {
+          const td = v.mapa.get(i + ":" + j);
+          if (!td) continue;
+          const ti = Number(td.dataset.i), tj = Number(td.dataset.j);
+          const fi = ti + Number(td.getAttribute("rowspan") || 1) - 1, fj = tj + Number(td.getAttribute("colspan") || 1) - 1;
+          if (ti < r.i0) { r.i0 = ti; cambio = true; }
+          if (tj < r.j0) { r.j0 = tj; cambio = true; }
+          if (fi > r.i1) { r.i1 = fi; cambio = true; }
+          if (fj > r.j1) { r.j1 = fj; cambio = true; }
+        }
+      }
+    }
+    return r;
+  }
+
+  const refRango = (v, r) => {
+    const desde = letra(v.visC[r.j0]) + (v.visF[r.i0] + 1), hasta = letra(v.visC[r.j1]) + (v.visF[r.i1] + 1);
+    return desde === hasta ? desde : desde + ":" + hasta;
+  };
+
+  function seleccionarRango(v, i0, j0, i1, j1) {
+    v.ancla = { i: i0, j: j0 };
+    seleccionar(v, i1, j1, false, true);
   }
 
   function irA(v, fila, col) {
@@ -486,11 +530,40 @@
   function prepararCuerpo(v, cuerpo) {
     cuerpo.tabIndex = 0;
     cuerpo.setAttribute("aria-label", "Hoja. Flechas para moverte" + (v.editable ? ", Enter para escribir" : ""));
+    // Clic: una celda. Arrastrar o Shift + clic: un rango. Clic en un número de fila o en
+    // una letra de columna: la fila o la columna entera (la esquina: toda la hoja).
+    let arrastrando = false;
     cuerpo.addEventListener("mousedown", (ev) => {
+      if (ev.button !== 0) return;
+      const th = ev.target.closest(".visor-tabla th");
+      if (th) {
+        ev.preventDefault(); enfocarCuerpo();
+        const ultimaF = v.visF.length - 1, ultimaC = v.visC.length - 1;
+        if (th.classList.contains("visor-esquina")) seleccionarRango(v, 0, 0, ultimaF, ultimaC);
+        else if (th.dataset.j !== undefined) {
+          const j = Number(th.dataset.j);
+          if (ev.shiftKey && v.ancla) { v.ancla = { i: 0, j: v.ancla.j }; seleccionar(v, ultimaF, j, false, true); }
+          else seleccionarRango(v, 0, j, ultimaF, j);
+        } else if (th.dataset.i !== undefined) {
+          const i = Number(th.dataset.i);
+          if (ev.shiftKey && v.ancla) { v.ancla = { i: v.ancla.i, j: 0 }; seleccionar(v, i, ultimaC, false, true); }
+          else seleccionarRango(v, i, 0, i, ultimaC);
+        }
+        return;
+      }
       const td = ev.target.closest(".visor-tabla td");
       if (!td || td.classList.contains("celda-editando")) return;
       if (!ev.target.closest("a")) { ev.preventDefault(); enfocarCuerpo(); }
-      seleccionar(v, Number(td.dataset.i), Number(td.dataset.j), false);
+      seleccionar(v, Number(td.dataset.i), Number(td.dataset.j), false, ev.shiftKey);
+      arrastrando = true;
+      window.addEventListener("mouseup", () => { arrastrando = false; }, { once: true });
+    });
+    cuerpo.addEventListener("mouseover", (ev) => {
+      if (!arrastrando) return;
+      const td = ev.target.closest(".visor-tabla td");
+      if (td && !(v.sel.i === Number(td.dataset.i) && v.sel.j === Number(td.dataset.j))) {
+        seleccionar(v, Number(td.dataset.i), Number(td.dataset.j), false, true);
+      }
     });
     cuerpo.addEventListener("dblclick", (ev) => {
       const td = ev.target.closest(".visor-tabla td");
@@ -503,15 +576,15 @@
     }, { passive: false });
     cuerpo.addEventListener("keydown", (ev) => {
       if (ev.target !== cuerpo || !v.sel) return;
-      const ctrl = ev.ctrlKey || ev.metaKey;
+      const ctrl = ev.ctrlKey || ev.metaKey, shift = ev.shiftKey;
       const td = v.mapa.get(v.sel.i + ":" + v.sel.j);
       const paginas = Math.max(1, Math.floor(cuerpo.clientHeight / (24 * zoom / 100)) - 2);
       let hecho = true;
       switch (ev.key) {
-        case "ArrowUp": if (ev.altKey) cambiarPestana(v, v.hojas[v.hojas.indexOf(v.hoja) - 1]); else if (ctrl) seleccionar(v, 0, v.sel.j); else mover(v, -1, 0); break;
-        case "ArrowDown": if (ev.altKey) cambiarPestana(v, v.hojas[v.hojas.indexOf(v.hoja) + 1]); else if (ctrl) seleccionar(v, v.visF.length - 1, v.sel.j); else mover(v, 1, 0); break;
-        case "ArrowLeft": if (ctrl) seleccionar(v, v.sel.i, 0); else mover(v, 0, -1); break;
-        case "ArrowRight": if (ctrl) seleccionar(v, v.sel.i, v.visC.length - 1); else mover(v, 0, 1); break;
+        case "ArrowUp": if (ev.altKey) cambiarPestana(v, v.hojas[v.hojas.indexOf(v.hoja) - 1]); else if (ctrl) seleccionar(v, 0, v.sel.j, true, shift); else mover(v, -1, 0, shift); break;
+        case "ArrowDown": if (ev.altKey) cambiarPestana(v, v.hojas[v.hojas.indexOf(v.hoja) + 1]); else if (ctrl) seleccionar(v, v.visF.length - 1, v.sel.j, true, shift); else mover(v, 1, 0, shift); break;
+        case "ArrowLeft": if (ctrl) seleccionar(v, v.sel.i, 0, true, shift); else mover(v, 0, -1, shift); break;
+        case "ArrowRight": if (ctrl) seleccionar(v, v.sel.i, v.visC.length - 1, true, shift); else mover(v, 0, 1, shift); break;
         case "Tab": mover(v, 0, ev.shiftKey ? -1 : 1); break;
         case "Home": seleccionar(v, ctrl ? 0 : v.sel.i, 0); break;
         case "End": seleccionar(v, ctrl ? v.visF.length - 1 : v.sel.i, v.visC.length - 1); break;
@@ -522,7 +595,8 @@
           if (ctrl && (ev.key === "+" || ev.key === "=")) pasoZoom(1);
           else if (ctrl && ev.key === "-") pasoZoom(-1);
           else if (ctrl && ev.key === "0") ponerZoom(100);
-          else if (ctrl && (ev.key === "c" || ev.key === "C")) copiar(td);
+          else if (ctrl && (ev.key === "c" || ev.key === "C")) copiarRango(v, rangoSeleccionado(v));
+          else if (ctrl && (ev.key === "a" || ev.key === "A")) seleccionarRango(v, 0, 0, v.visF.length - 1, v.visC.length - 1);
           else if (ctrl && (ev.key === "g" || ev.key === "G" || ev.key === "j" || ev.key === "J")) ventana.querySelector(".visor-nombre").focus();
           // Escribir sobre una celda empieza a editarla, como en Sheets.
           else if (v.editable && !ctrl && !ev.altKey && ev.key.length === 1) editar(v, td, ev.key);
@@ -532,11 +606,61 @@
     });
   }
 
-  async function copiar(td) {
+  // Copia el rango de dos formas a la vez: texto separado por tabulaciones (Excel y Sheets
+  // lo pegan en celdas) y una tabla HTML con los colores y combinadas (un correo, Word o
+  // Sheets la pegan con formato). Como en Sheets, lo que va es el valor que se ve.
+  const ESTILOS_QUE_SE_COPIAN = ["background-color", "color", "font-weight", "font-style", "font-size", "font-family",
+    "text-align", "vertical-align", "text-decoration", "border-right", "border-bottom"];
+  const escaparHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const celdaTsv = (s) => (/[\t\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+
+  async function copiarRango(v, r) {
+    const lineas = [], filasHtml = [];
+    for (let i = r.i0; i <= r.i1; i++) {
+      const valores = [], celdasHtml = [];
+      for (let j = r.j0; j <= r.j1; j++) {
+        const td = v.mapa.get(i + ":" + j);
+        const esAncla = td && Number(td.dataset.i) === i && Number(td.dataset.j) === j;
+        const texto = esAncla ? (td._celda.formattedValue || "") : "";
+        valores.push(celdaTsv(texto));
+        if (!esAncla) continue;   // la cubre una combinada que ya se escribió
+        const filas = Math.min(Number(td.getAttribute("rowspan") || 1), r.i1 - i + 1);
+        const cols = Math.min(Number(td.getAttribute("colspan") || 1), r.j1 - j + 1);
+        const estilo = ESTILOS_QUE_SE_COPIAN.map((p) => (td.style.getPropertyValue(p) ? `${p}:${td.style.getPropertyValue(p)}` : null)).filter(Boolean);
+        estilo.push("padding:2px 4px", "white-space:" + (td.classList.contains("c-ajustar") ? "normal" : "nowrap"));
+        const contenido = td._celda.hyperlink && /^https?:\/\//i.test(td._celda.hyperlink)
+          ? `<a href="${escaparHtml(td._celda.hyperlink)}">${escaparHtml(texto || td._celda.hyperlink)}</a>` : escaparHtml(texto);
+        celdasHtml.push(`<td${filas > 1 ? ` rowspan="${filas}"` : ""}${cols > 1 ? ` colspan="${cols}"` : ""} style="${estilo.join(";")}">${contenido}</td>`);
+      }
+      lineas.push(valores.join("\t"));
+      filasHtml.push("<tr>" + celdasHtml.join("") + "</tr>");
+    }
+    const tsv = lineas.join("\n");
+    const html = `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:10pt">${filasHtml.join("")}</table>`;
+    const filas = r.i1 - r.i0 + 1, cols = r.j1 - r.j0 + 1;
+    const que = filas * cols === 1 ? refRango(v, r) : `${refRango(v, r)} (${filas} fila${filas === 1 ? "" : "s"} × ${cols} columna${cols === 1 ? "" : "s"})`;
     try {
-      await navigator.clipboard.writeText(td._celda.formattedValue || "");
-      avisar("📋 Copiado " + letra(Number(td.dataset.c)) + (Number(td.dataset.f) + 1), "gris");
-    } catch (_) { avisar("No se pudo copiar", "error"); }
+      if (window.ClipboardItem && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({
+          "text/plain": new Blob([tsv], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        })]);
+      } else {
+        await navigator.clipboard.writeText(tsv);
+      }
+      v.ultimaCopia = { tsv, html };
+      avisar("📋 Copiado " + que + " · pégalo en Excel, Sheets, un correo o WhatsApp", "ok");
+    } catch (_) {
+      avisar("❌ El navegador no dejó copiar. Prueba otra vez con Ctrl+C", "error");
+    }
+  }
+
+  // Las filas inmovilizadas de arriba (cédula, nombre, PR, celular...): lo que más se copia.
+  function copiarEncabezado(v) {
+    if (!v.fijasF) return;
+    seleccionarRango(v, 0, 0, v.fijasF - 1, v.visC.length - 1);
+    copiarRango(v, rangoSeleccionado(v));
+    enfocarCuerpo();
   }
 
   // ------------------------------------------------------------------ edición

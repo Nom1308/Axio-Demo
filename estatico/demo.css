@@ -212,3 +212,12 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .gestion-estado.ambar { color: var(--ambar); }
 
 @keyframes celda-ok { 0% { box-shadow: inset 0 0 0 2px #34a853; background: #e6f4ea; } 100% { box-shadow: none; } }
+
+/* Rango seleccionado en el visor: velo azul encima del color de la celda, como en Sheets. */
+.visor-tabla td.rango { background-image: linear-gradient(rgba(26, 115, 232, .16), rgba(26, 115, 232, .16)) !important; }
+.visor-barra .visor-copiar {
+  flex: none; padding: 4px 10px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; color: #1f1f1f;
+  font: 600 12px var(--fuente); cursor: pointer; white-space: nowrap;
+}
+.visor-barra .visor-copiar:hover { background: #e8f0fe; border-color: #aecbfa; color: #0b57d0; }
+.visor-barra .visor-copiar[hidden] { display: none; }
