@@ -174,6 +174,9 @@
     const cabecera = nodo("div", { class: "visor-cabecera" },
       nodo("span", { class: "icono-sheets", "aria-hidden": "true" }),
       nodo("strong", { class: "visor-titulo", text: v ? v.archivo.name : "Hoja de Google", title: v ? v.archivo.name : null }),
+      // El nombre del archivo trae código, cédula y nombre: Cartera lo copia seguido.
+      v ? nodo("button", { class: "boton boton-texto visor-copiar-titulo", type: "button", title: "Copiar el nombre completo de la hoja",
+        "aria-label": "Copiar el nombre de la hoja", text: "📋", onclick: () => copiarTexto(v.archivo.name, "📋 Nombre de la hoja copiado") }) : null,
       v ? nodo("span", { class: v.editable ? "visor-insignia editable" : "visor-insignia", text: v.editable ? "Puedes editar" : v.excel ? "Excel · solo lectura" : "Solo lectura" }) : null,
       estado,
       v ? nodo("a", { class: "boton boton-chico", href: v.archivo.webViewLink || `https://docs.google.com/spreadsheets/d/${v.id}/edit${v.hoja && !v.excel ? "#gid=" + v.hoja.sheetId : ""}`,
@@ -182,7 +185,7 @@
         "aria-label": "Maximizar o restaurar", text: "⤢", onclick: maximizar }),
       nodo("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", text: "✕", onclick: () => ventana.close() }));
     arrastrable(cabecera);
-    cabecera.addEventListener("dblclick", (ev) => { if (!ev.target.closest("button, a")) maximizar(); });
+    cabecera.addEventListener("dblclick", (ev) => { if (!ev.target.closest("button, a, .visor-titulo")) maximizar(); });
     return cabecera;
   }
 
@@ -655,6 +658,15 @@
     }
   }
 
+  async function copiarTexto(texto, aviso) {
+    try {
+      await navigator.clipboard.writeText(texto);
+      avisar(aviso, "ok");
+    } catch (_) {
+      avisar("❌ El navegador no dejó copiar. Selecciona el nombre con el mouse y usa Ctrl+C", "error");
+    }
+  }
+
   // Las filas inmovilizadas de arriba (cédula, nombre, PR, celular...): lo que más se copia.
   function copiarEncabezado(v) {
     if (!v.fijasF) return;
@@ -737,7 +749,8 @@
   // ------------------------------------------------------------------ mover la ventana
   function arrastrable(asa) {
     asa.addEventListener("pointerdown", (ev) => {
-      if (ev.target.closest("button, a") || ventana.classList.contains("maximizada")) return;
+      // Sobre el nombre no se arrastra: ahí se selecciona el texto para copiarlo.
+      if (ev.target.closest("button, a, .visor-titulo") || ventana.classList.contains("maximizada")) return;
       const caja = ventana.getBoundingClientRect();
       const dx = ev.clientX - caja.left, dy = ev.clientY - caja.top;
       asa.setPointerCapture(ev.pointerId);

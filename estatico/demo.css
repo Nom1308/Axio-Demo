@@ -76,7 +76,9 @@
 }
 .visor-hoja.maximizada .visor-cabecera { cursor: default; }
 .visor-cabecera:active { cursor: grabbing; }
-.visor-titulo { font-size: 15px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.visor-titulo { font-size: 15px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; cursor: text; }
+.visor-cabecera .visor-copiar-titulo { margin-left: -6px; padding: 3px 6px; font-size: 14px; line-height: 1; opacity: .7; }
+.visor-cabecera .visor-copiar-titulo:hover { opacity: 1; }
 .visor-insignia {
   font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px;
   color: var(--texto-2); background: var(--campo); border: 1px solid var(--borde);
