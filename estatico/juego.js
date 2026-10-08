@@ -1,20 +1,15 @@
-/* Axio demo: «Atrapa los comprobantes», un minijuego para la espera de la primera carga.
+/* Axio demo: «Atrapa los comprobantes», el juego escondido. 🥚
  *
- * Aparece debajo del buscador cuando empieza a cargar (evento axio-carga-inicio de
- * puente.js), con la barra de avance real arriba. Es opcional: «No, gracias» lo cierra.
- * Cuando la carga termina (axio-carga-fin), lo que hay en pantalla vuela hacia el buscador,
- * el panel se cierra y Axio queda listo: el juego "se fusiona" con la aplicación.
- *
- * Solo guarda en este navegador el récord y cuánto tardó la última carga (para estimar la
- * barra). Nada de datos de las hojas.
+ * Se abre con 17 clics seguidos en el logo de la lupa (desde el clic 10 la lupa se mueve
+ * un poquito, como pista). Se juega en una ventana aparte: no toca nada de Axio.
+ * Solo guarda en este navegador el récord.
  */
 (function () {
   "use strict";
 
-  const $ = (sel) => document.querySelector(sel);
-  const reducirMovimiento = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const leer = (clave, porDefecto) => { try { return Number(localStorage.getItem(clave)) || porDefecto; } catch (_) { return porDefecto; } };
-  const guardar = (clave, valor) => { try { localStorage.setItem(clave, String(valor)); } catch (_) { /* sin almacenamiento */ } };
+  const CLICS_SECRETOS = 17;
+  const PISTA_DESDE = 10;
+  const PAUSA_MAXIMA_MS = 1500;   // más tiempo entre clics y la cuenta vuelve a cero
 
   // Lo que cae: lo bueno suma, la mora quita una vida.
   const COSAS = [
@@ -26,13 +21,10 @@
   ];
   const PESO_TOTAL = COSAS.reduce((s, c) => s + c.peso, 0);
   const FUENTE_EMOJI = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
-  const ALTO = 300;
-
-  let panel = null;
-  let juego = null;          // estado de la partida en curso
-  let inicioCarga = 0;
-  let duracionEsperada = Math.max(15, leer("axio-duracion-carga", 45));   // segundos
-  let cuadroBarra = null;
+  const ALTO = 340;
+  const reducirMovimiento = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const leerRecord = () => { try { return Number(localStorage.getItem("axio-record-juego")) || 0; } catch (_) { return 0; } };
+  const guardarRecord = (n) => { try { localStorage.setItem("axio-record-juego", String(n)); } catch (_) { /* sin almacenamiento */ } };
 
   function nodo(etiqueta, props, ...hijos) {
     const n = document.createElement(etiqueta);
@@ -47,105 +39,95 @@
     return n;
   }
 
-  // ------------------------------------------------------------------ panel y barra de carga
-  function abrirPanel() {
-    if (panel) return;
-    inicioCarga = performance.now();
-    const mensaje = nodo("span", { class: "juego-mensaje", text: "Preparando Axio…" });
-    const relleno = nodo("span", { class: "juego-relleno" });
-    const porcentaje = nodo("span", { class: "juego-porcentaje", text: "0 %" });
-    const lienzo = nodo("canvas", { class: "juego-lienzo", tabindex: "0", "aria-label": "Minijuego: mueve la bandeja con el mouse o las flechas" });
-    const capa = nodo("div", { class: "juego-capa" },
-      nodo("div", { class: "juego-portada" },
-        nodo("strong", { text: "🎮 ¿Un juego mientras carga?" }),
-        nodo("p", { text: "Atrapa los comprobantes 🧾 💵 💳 ⭐ con la bandeja y esquiva la mora 🔴. Mueve el mouse, el dedo o las flechas." }),
-        nodo("p", { class: "juego-record", text: leer("axio-record-juego", 0) ? `🏆 Tu récord: ${leer("axio-record-juego", 0)} puntos` : null }),
-        nodo("div", { class: "juego-botones" },
-          nodo("button", { class: "boton boton-principal", type: "button", text: "▶ Jugar", onclick: empezar }),
-          nodo("button", { class: "boton", type: "button", text: "No, gracias", onclick: noJugar }))));
-    panel = nodo("section", { class: "juego", "aria-label": "Cargando Axio" },
-      nodo("div", { class: "juego-cabecera" }, mensaje, porcentaje),
-      nodo("div", { class: "juego-barra" }, relleno),
-      nodo("div", { class: "juego-escena" }, lienzo, capa));
-    const zona = $("#asociado-zona");
-    zona.parentNode.insertBefore(panel, zona);
-    window.addEventListener("resize", ajustarLienzo);
-    ajustarLienzo();
-    dibujarQuieto();
-    cuadroBarra = requestAnimationFrame(avanzarBarra);
-  }
-
-  // La barra estima con lo que tardó la última carga; los mensajes de descarga ("3 de 9")
-  // la empujan. Nunca llega a 100 % hasta que de verdad termina.
-  let pisoBarra = 0;
-  function avanzarBarra() {
-    if (!panel) return;
-    const t = (performance.now() - inicioCarga) / 1000;
-    const estimado = 1 - Math.exp(-2.2 * t / duracionEsperada);
-    ponerAvance(Math.max(pisoBarra, Math.min(0.96, estimado)));
-    cuadroBarra = requestAnimationFrame(avanzarBarra);
-  }
-  function ponerAvance(f) {
-    if (!panel) return;
-    panel.querySelector(".juego-relleno").style.width = (f * 100).toFixed(1) + "%";
-    panel.querySelector(".juego-porcentaje").textContent = Math.floor(f * 100) + " %";
-  }
-
-  window.addEventListener("axio-progreso", (ev) => {
-    if (!panel) return;
-    const texto = ev.detail.mensaje || "";
-    panel.querySelector(".juego-mensaje").textContent = "⏳ " + texto;
-    const m = /(\d+) de (\d+)/.exec(texto);
-    if (m && /Descargando/.test(texto)) pisoBarra = Math.max(pisoBarra, 0.1 + 0.3 * Number(m[1]) / Number(m[2]));
-    if (/Leyendo|descargadas/.test(texto)) pisoBarra = Math.max(pisoBarra, 0.45);
+  // ------------------------------------------------------------------ el secreto: 17 clics
+  let clics = 0, ultimoClic = 0;
+  document.addEventListener("click", (ev) => {
+    const logo = ev.target.closest(".logo");
+    if (!logo) return;
+    const ahora = Date.now();
+    clics = ahora - ultimoClic > PAUSA_MAXIMA_MS ? 1 : clics + 1;
+    ultimoClic = ahora;
+    if (clics >= PISTA_DESDE && clics < CLICS_SECRETOS && !reducirMovimiento) {
+      logo.classList.remove("logo-pista");
+      void logo.offsetWidth;   // reinicia la animación
+      logo.classList.add("logo-pista");
+    }
+    if (clics >= CLICS_SECRETOS) {
+      clics = 0;
+      logo.classList.remove("logo-pista");
+      abrir();
+    }
   });
 
-  // ------------------------------------------------------------------ el juego
+  // ------------------------------------------------------------------ ventana
+  let ventana = null;
+  let juego = null;
+
+  function abrir() {
+    if (!ventana) {
+      ventana = nodo("dialog", { class: "juego-secreto", "aria-label": "Juego secreto" });
+      ventana.addEventListener("close", detener);
+      document.body.append(ventana);
+    }
+    detener();
+    const record = leerRecord();
+    const lienzo = nodo("canvas", { class: "juego-lienzo", tabindex: "0", "aria-label": "Mueve la bandeja con el mouse o las flechas" });
+    ventana.replaceChildren(
+      nodo("div", { class: "juego-secreto-cabecera" },
+        nodo("strong", { text: "🥚 ¡Encontraste el juego secreto!" }),
+        nodo("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", text: "✕", onclick: () => ventana.close() })),
+      nodo("div", { class: "juego-escena" }, lienzo,
+        nodo("div", { class: "juego-capa" },
+          nodo("div", { class: "juego-portada" },
+            nodo("strong", { text: "🎮 Atrapa los comprobantes" }),
+            nodo("p", { text: "Atrapa 🧾 💵 💳 ⭐ con la bandeja y esquiva la mora 🔴. Mueve el mouse, el dedo o las flechas." }),
+            record ? nodo("p", { class: "juego-record", text: `🏆 Tu récord: ${record} puntos` }) : null,
+            nodo("div", { class: "juego-botones" },
+              nodo("button", { class: "boton boton-principal", type: "button", text: "▶ Jugar", onclick: empezar }))))));
+    if (!ventana.open) ventana.showModal();
+    ajustarLienzo();
+    ventana.querySelector(".juego-capa .boton-principal").focus();
+  }
+
+  function detener() {
+    if (juego) { juego.terminado = true; cancelAnimationFrame(juego.cuadro); }
+    juego = null;
+  }
+
   function ajustarLienzo() {
-    if (!panel) return;
-    const lienzo = panel.querySelector(".juego-lienzo");
+    const lienzo = ventana && ventana.querySelector(".juego-lienzo");
+    if (!lienzo) return;
     const ancho = lienzo.clientWidth || 600;
     const dpr = window.devicePixelRatio || 1;
     lienzo.width = Math.round(ancho * dpr);
     lienzo.height = Math.round(ALTO * dpr);
-    const ctx = lienzo.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    lienzo.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
     if (juego) { juego.ancho = ancho; juego.x = Math.min(juego.x, ancho - 40); }
-    else dibujarQuieto();
   }
+  window.addEventListener("resize", () => { if (ventana && ventana.open) ajustarLienzo(); });
 
-  // Fondo con cosas quietas mientras se elige jugar o no.
-  function dibujarQuieto() {
-    const lienzo = panel && panel.querySelector(".juego-lienzo");
-    if (!lienzo) return;
-    const ctx = lienzo.getContext("2d");
-    const ancho = lienzo.clientWidth || 600;
-    ctx.clearRect(0, 0, ancho, ALTO);
-    ctx.font = `26px ${FUENTE_EMOJI}`;
-    ctx.globalAlpha = 0.18;
-    const fijos = ["🧾", "💵", "💳", "⭐", "🧾", "💵", "🔴", "🧾"];
-    fijos.forEach((e, k) => ctx.fillText(e, (k + 0.5) * ancho / fijos.length - 13, 60 + (k % 3) * 70));
-    ctx.globalAlpha = 1;
-  }
-
+  // ------------------------------------------------------------------ el juego
   function empezar() {
-    const lienzo = panel.querySelector(".juego-lienzo");
-    panel.querySelector(".juego-capa").hidden = true;
+    const lienzo = ventana.querySelector(".juego-lienzo");
+    ventana.querySelector(".juego-capa").hidden = true;
+    detener();
+    ajustarLienzo();
     const ancho = lienzo.clientWidth;
-    juego = { ancho, x: ancho / 2, objetivo: ancho / 2, cosas: [], textos: [], puntos: 0, vidas: 3, atrapados: 0,
-      t: 0, proxima: 0.6, ultimo: performance.now(), teclas: new Set(), terminado: false, cuadro: 0 };
+    juego = { ancho, x: ancho / 2, objetivo: ancho / 2, cosas: [], textos: [], puntos: 0, vidas: 3, t: 0, proxima: 0.6,
+      ultimo: performance.now(), teclas: new Set(), terminado: false, cuadro: 0 };
     lienzo.focus({ preventScroll: true });
-    lienzo.onpointermove = (ev) => { const r = lienzo.getBoundingClientRect(); juego.objetivo = ev.clientX - r.left; };
-    lienzo.onpointerdown = lienzo.onpointermove;
+    lienzo.onpointermove = (ev) => { if (juego) { const r = lienzo.getBoundingClientRect(); juego.objetivo = ev.clientX - r.left; } };
+    lienzo.onpointerdown = (ev) => {
+      if (juego && juego.vidas <= 0) { empezar(); return; }
+      lienzo.onpointermove(ev);
+    };
     lienzo.onkeydown = (ev) => {
+      if (!juego) return;
+      if (juego.vidas <= 0 && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); empezar(); return; }
       if (["ArrowLeft", "ArrowRight", "a", "d", "A", "D"].includes(ev.key)) { juego.teclas.add(ev.key.toLowerCase()); ev.preventDefault(); }
     };
-    lienzo.onkeyup = (ev) => juego.teclas.delete(ev.key.toLowerCase());
+    lienzo.onkeyup = (ev) => { if (juego) juego.teclas.delete(ev.key.toLowerCase()); };
     juego.cuadro = requestAnimationFrame(paso);
-  }
-
-  function noJugar() {
-    panel.querySelector(".juego-escena").classList.add("juego-plegada");
   }
 
   function elegirCosa() {
@@ -157,14 +139,13 @@
   function paso() {
     const j = juego;
     if (!j || j.terminado) return;
-    // Reloj propio (no el del cuadro): entre 0 y 50 ms por paso, aunque la pestaña se pause.
+    // Reloj propio: entre 0 y 50 ms por paso, aunque la pestaña se pause.
     const ahora = performance.now();
     const dt = Math.max(0, Math.min(0.05, (ahora - j.ultimo) / 1000));
     j.ultimo = ahora;
     j.t += dt;
     const velocidad = 130 + Math.min(220, j.t * 4.5);   // se pone más difícil con el tiempo
 
-    // Bandeja: sigue al mouse, o se mueve con las flechas.
     const izquierda = j.teclas.has("arrowleft") || j.teclas.has("a"), derecha = j.teclas.has("arrowright") || j.teclas.has("d");
     if (izquierda || derecha) j.objetivo = j.x + (derecha ? 1 : -1) * 520 * dt;
     j.objetivo = Math.max(36, Math.min(j.ancho - 36, j.objetivo));
@@ -188,9 +169,9 @@
           j.vidas--;
           j.textos.push({ x: c.x, y: yBandeja - 30, texto: "−1 ♥", color: "#FF6B6B", vida: 1 });
           j.sacudir = 0.35;
+          if (j.vidas <= 0 && j.puntos > leerRecord()) { guardarRecord(j.puntos); j.recordNuevo = true; }
         } else {
           j.puntos += c.puntos;
-          j.atrapados++;
           j.textos.push({ x: c.x, y: yBandeja - 30, texto: "+" + c.puntos, color: c.puntos >= 50 ? "#FBBF24" : "#34D399", vida: 1 });
         }
       }
@@ -205,8 +186,7 @@
   }
 
   function dibujar(j) {
-    const lienzo = panel.querySelector(".juego-lienzo");
-    const ctx = lienzo.getContext("2d");
+    const ctx = ventana.querySelector(".juego-lienzo").getContext("2d");
     ctx.save();
     ctx.clearRect(0, 0, j.ancho, ALTO);
     if (j.sacudir && !reducirMovimiento) ctx.translate((Math.random() - 0.5) * 8 * j.sacudir / 0.35, 0);
@@ -246,7 +226,6 @@
     }
     ctx.globalAlpha = 1;
 
-    // Marcador
     ctx.textAlign = "left";
     ctx.fillStyle = "rgba(255,255,255,.92)";
     ctx.font = "700 15px system-ui, sans-serif";
@@ -258,17 +237,10 @@
       ctx.textAlign = "center";
       ctx.fillStyle = "rgba(255,255,255,.95)";
       ctx.font = "700 22px system-ui, sans-serif";
-      ctx.fillText("¡Te alcanzó la mora! 🔴", j.ancho / 2, ALTO / 2 - 22);
+      ctx.fillText(j.recordNuevo ? "🏆 ¡Récord nuevo!" : "¡Te alcanzó la mora! 🔴", j.ancho / 2, ALTO / 2 - 22);
       ctx.font = "500 14px system-ui, sans-serif";
       ctx.fillStyle = "rgba(255,255,255,.75)";
       ctx.fillText(`${j.puntos} puntos · clic o Enter para otra partida`, j.ancho / 2, ALTO / 2 + 8);
-      if (!j.esperandoOtra) {
-        j.esperandoOtra = true;
-        anotarRecord(j.puntos);
-        const otra = (ev) => { if (ev.type === "pointerdown" || ev.key === "Enter" || ev.key === " ") { lienzo.removeEventListener("pointerdown", otra); lienzo.removeEventListener("keydown", otra); cancelAnimationFrame(j.cuadro); juego = null; empezar(); } };
-        lienzo.addEventListener("pointerdown", otra);
-        lienzo.addEventListener("keydown", otra);
-      }
     }
     ctx.restore();
   }
@@ -282,79 +254,4 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
-
-  function anotarRecord(puntos) {
-    const record = leer("axio-record-juego", 0);
-    if (puntos > record) guardar("axio-record-juego", puntos);
-    return puntos > record;
-  }
-
-  // ------------------------------------------------------------------ la fusión
-  // Al terminar la carga, lo que hay en pantalla vuela al buscador y el panel se recoge.
-  function fusionar(error) {
-    if (!panel) return;
-    cancelAnimationFrame(cuadroBarra);
-    guardar("axio-duracion-carga", Math.round((performance.now() - inicioCarga) / 1000));
-    ponerAvance(1);
-    panel.querySelector(".juego-mensaje").textContent = error ? "⚠️ Terminó con avisos: revisa las fuentes" : "✨ ¡Axio está listo!";
-    const j = juego;
-    let resumen = "";
-    if (j) {
-      j.terminado = true;
-      cancelAnimationFrame(j.cuadro);
-      const nuevo = j.vidas > 0 && anotarRecord(j.puntos);
-      resumen = ` · atrapaste ${j.atrapados} comprobante${j.atrapados === 1 ? "" : "s"} (${j.puntos} puntos${nuevo ? ", ¡récord nuevo! 🏆" : ""})`;
-    }
-    const caja = $("#form-busqueda");
-    const lienzo = panel.querySelector(".juego-lienzo");
-    const desde = lienzo.getBoundingClientRect();
-    const hasta = (caja || lienzo).getBoundingClientRect();
-    const voladores = j && !reducirMovimiento
-      ? [...j.cosas.filter((c) => !c.malo).map((c) => ({ emoji: c.emoji, x: c.x, y: c.y })), { emoji: "📂", x: j.x, y: ALTO - 42 }]
-      : [];
-    voladores.forEach((c, k) => {
-      const chispa = nodo("span", { class: "juego-chispa", text: c.emoji, "aria-hidden": "true" });
-      chispa.style.left = desde.left + c.x + "px";
-      chispa.style.top = desde.top + c.y + "px";
-      document.body.append(chispa);
-      const dx = hasta.left + 60 + Math.random() * Math.max(40, hasta.width - 200) - (desde.left + c.x);
-      const dy = hasta.top + hasta.height / 2 - (desde.top + c.y);
-      chispa.animate([
-        { transform: "translate(-50%,-50%) scale(1)", opacity: 1 },
-        { transform: `translate(calc(-50% + ${dx * 0.5}px), calc(-50% + ${dy * 0.5 - 60}px)) scale(1.25)`, opacity: 1, offset: 0.45 },
-        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.2)`, opacity: 0 },
-      ], { duration: 900, delay: k * 35, easing: "cubic-bezier(.5,0,.3,1)", fill: "forwards" }).finished.then(() => chispa.remove());
-    });
-    const espera = voladores.length ? 900 + voladores.length * 35 : 250;
-    setTimeout(() => {
-      if (caja) {
-        caja.classList.add("axio-fusion");
-        setTimeout(() => caja.classList.remove("axio-fusion"), 1600);
-      }
-      const p = panel;
-      panel = null;
-      juego = null;
-      window.removeEventListener("resize", ajustarLienzo);
-      p.style.height = p.offsetHeight + "px";
-      requestAnimationFrame(() => p.classList.add("juego-cerrando"));
-      setTimeout(() => p.remove(), 650);
-      avisoListo((error ? "⚠️ Axio cargó con avisos" : "✨ Axio está listo") + resumen);
-      const q = $("#q");
-      if (q && !document.querySelector("dialog[open]")) q.focus({ preventScroll: true });
-    }, espera);
-  }
-
-  function avisoListo(texto) {
-    const t = $("#toast");
-    if (!t) return;
-    t.textContent = texto;
-    t.hidden = false;
-    t.classList.add("visible");
-    clearTimeout(avisoListo.temporizador);
-    avisoListo.temporizador = setTimeout(() => { t.classList.remove("visible"); t.hidden = true; }, 5000);
-  }
-
-  // Solo en la primera carga (al entrar); «Refrescar datos» no saca el juego.
-  window.addEventListener("axio-carga-inicio", (ev) => { if (ev.detail.accion === "configurar") abrirPanel(); });
-  window.addEventListener("axio-carga-fin", (ev) => { if (ev.detail.accion === "configurar") fusionar(ev.detail.error); });
 })();

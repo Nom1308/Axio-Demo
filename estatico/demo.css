@@ -225,46 +225,85 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .visor-barra .visor-copiar[hidden] { display: none; }
 
 /* ==========================================================================
-   Minijuego de la primera carga (estatico/juego.js)
+   «¿Sabías que…?» durante la primera carga (estatico/espera.js)
    ========================================================================== */
-.juego {
+.espera {
   margin: 18px 0; border-radius: var(--radio); overflow: hidden;
   background: var(--vidrio); border: 1px solid var(--borde-fuerte); box-shadow: var(--sombra-chica), var(--brillo);
   animation: aparecer .45s cubic-bezier(.2, .8, .2, 1) both;
-  transition: height .55s cubic-bezier(.5, 0, .3, 1), opacity .45s ease, margin .55s ease, transform .55s ease;
+  transition: height .55s cubic-bezier(.5, 0, .3, 1), opacity .45s ease, margin .55s ease;
 }
-.juego.juego-cerrando { height: 0 !important; opacity: 0; margin: 0; transform: scale(.98); border-width: 0; }
-.juego-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 8px; font-size: 13px; color: var(--texto-2); }
-.juego-mensaje { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.juego-porcentaje { flex: none; font-weight: 700; color: var(--texto); font-variant-numeric: tabular-nums; }
-.juego-barra { height: 4px; margin: 0 16px 12px; border-radius: 99px; background: var(--campo); overflow: hidden; }
-.juego-relleno {
+.espera.espera-cerrando { height: 0 !important; opacity: 0; margin: 0; border-width: 0; }
+.espera-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px 8px; font-size: 12.5px; color: var(--texto-2); }
+.espera-mensaje { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.espera-porcentaje { flex: none; font-weight: 700; color: var(--texto); font-variant-numeric: tabular-nums; }
+.espera-barra { height: 4px; margin: 0 18px; border-radius: 99px; background: var(--campo); overflow: hidden; }
+.espera-relleno {
   display: block; height: 100%; width: 0; border-radius: inherit;
   background: linear-gradient(90deg, #2F7DF6, #4FA3FF, #34D399); background-size: 200% 100%;
-  box-shadow: 0 0 12px rgba(79, 163, 255, .7); animation: juego-brillo 2s linear infinite;
+  box-shadow: 0 0 12px rgba(79, 163, 255, .7); animation: espera-brillo 2s linear infinite;
 }
-@keyframes juego-brillo { to { background-position: -200% 0; } }
-.juego-escena { position: relative; height: 300px; transition: height .4s ease; border-top: 1px solid var(--borde);
-  background: radial-gradient(120% 90% at 50% 0%, rgba(47, 125, 246, .16), transparent 60%), rgba(0, 0, 0, .14); }
-.juego-escena.juego-plegada { height: 0; border-top-width: 0; }
-.juego-lienzo { display: block; width: 100%; height: 300px; outline: none; cursor: none; touch-action: none; }
-.juego-capa { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(3, 10, 36, .35); backdrop-filter: blur(2px); }
+@keyframes espera-brillo { to { background-position: -200% 0; } }
+.espera-cuerpo { padding: 18px; }
+.espera-tarjeta { display: grid; gap: 12px; max-width: 760px; margin: 0 auto; animation: aparecer .35s cubic-bezier(.2, .8, .2, 1) both; }
+.espera-etiqueta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ambar); }
+.espera-marcador { color: var(--texto-2); letter-spacing: .04em; }
+.espera-pregunta { margin: 0; font-family: var(--fuente-titulo); font-size: 19px; line-height: 1.35; letter-spacing: -.01em; }
+.espera-opciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 8px; }
+.espera-opcion {
+  display: flex; align-items: center; gap: 10px; padding: 11px 14px; text-align: left; cursor: pointer;
+  font: inherit; font-size: 14px; color: var(--texto); background: var(--campo); border: 1px solid var(--borde); border-radius: 12px;
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.espera-opcion:not(:disabled):hover { background: var(--campo-hover); border-color: rgba(79, 163, 255, .5); transform: translateY(-1px); }
+.espera-opcion:disabled { cursor: default; opacity: .55; }
+.espera-letra {
+  flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px;
+  font-size: 12px; font-weight: 800; color: var(--texto-2); background: rgba(255, 255, 255, .06); border: 1px solid var(--borde);
+}
+.espera-opcion.correcta { opacity: 1; border-color: rgba(52, 211, 153, .7); background: rgba(52, 211, 153, .14); }
+.espera-opcion.correcta .espera-letra { color: #052e1f; background: var(--verde); border-color: transparent; }
+.espera-opcion.incorrecta { opacity: 1; border-color: rgba(255, 107, 107, .6); background: rgba(255, 107, 107, .12); }
+.espera-opcion.incorrecta .espera-letra { color: #fff; background: var(--rojo); border-color: transparent; }
+.espera-respuesta { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--borde); animation: aparecer .3s ease both; }
+.espera-respuesta strong { font-size: 15px; }
+.espera-respuesta p { margin: 0; color: var(--texto-2); font-size: 14px; line-height: 1.5; }
+.espera-respuesta.bien { background: rgba(52, 211, 153, .08); border-color: rgba(52, 211, 153, .3); }
+.espera-respuesta.bien strong { color: var(--verde); }
+.espera-respuesta.casi { background: rgba(251, 191, 36, .07); border-color: rgba(251, 191, 36, .3); }
+.espera-respuesta.casi strong { color: var(--ambar); }
+.espera-siguiente { justify-self: end; margin-top: 2px; }
+.espera-final { text-align: center; padding: 10px 0 4px; }
+.espera-final strong { font-family: var(--fuente-titulo); font-size: 22px; }
+.espera-final p { margin: 0; color: var(--texto-2); font-size: 15px; }
+/* El buscador queda listo: un destello azul. */
+.caja-busqueda.axio-listo { animation: axio-listo 1.5s ease; }
+@keyframes axio-listo {
+  25% { box-shadow: 0 0 0 6px rgba(79, 163, 255, .4), 0 0 50px 10px rgba(79, 163, 255, .45); }
+  100% { box-shadow: 0 0 0 0 rgba(79, 163, 255, 0); }
+}
+
+/* ==========================================================================
+   El juego escondido en la lupa (estatico/juego.js) 🥚
+   ========================================================================== */
+.logo { cursor: pointer; }
+.logo.logo-pista { animation: logo-pista .35s ease; }
+@keyframes logo-pista { 30% { transform: rotate(-14deg) scale(1.08); } 65% { transform: rotate(10deg); } }
+.juego-secreto {
+  width: min(760px, calc(100vw - 24px)); padding: 0; border-radius: 22px; overflow: hidden; color: var(--texto);
+  background: var(--vidrio-solido); border: 1px solid var(--borde-fuerte); box-shadow: 0 40px 100px -20px rgba(0, 0, 0, .75);
+}
+.juego-secreto[open] { animation: aparecer-modal .32s cubic-bezier(.2, .9, .25, 1) both; }
+.juego-secreto::backdrop { background: rgba(3, 10, 36, .6); backdrop-filter: blur(6px); }
+.juego-secreto-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--borde); }
+.juego-escena { position: relative; background: radial-gradient(120% 90% at 50% 0%, rgba(47, 125, 246, .18), transparent 60%), rgba(0, 0, 0, .18); }
+.juego-lienzo { display: block; width: 100%; height: 340px; outline: none; cursor: none; touch-action: none; }
+.juego-capa { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(3, 10, 36, .35); }
 .juego-capa[hidden] { display: none; }
 .juego-portada { max-width: 440px; text-align: center; display: grid; gap: 8px; }
 .juego-portada strong { font-family: var(--fuente-titulo); font-size: 20px; letter-spacing: -.01em; }
 .juego-portada p { margin: 0; color: var(--texto-2); font-size: 13.5px; }
 .juego-record { color: var(--ambar) !important; font-weight: 700; }
-.juego-botones { display: flex; justify-content: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
-.juego-chispa {
-  position: fixed; z-index: 1000; pointer-events: none; font-size: 28px; transform: translate(-50%, -50%);
-  font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
-  filter: drop-shadow(0 0 8px rgba(79, 163, 255, .9));
-}
-/* El buscador "recibe" lo que voló: un destello azul. */
-.caja-busqueda.axio-fusion { animation: axio-fusion 1.5s ease; }
-@keyframes axio-fusion {
-  0% { box-shadow: 0 0 0 0 rgba(79, 163, 255, 0); }
-  25% { box-shadow: 0 0 0 6px rgba(79, 163, 255, .45), 0 0 50px 10px rgba(79, 163, 255, .55); transform: scale(1.015); }
-  100% { box-shadow: 0 0 0 0 rgba(79, 163, 255, 0); transform: none; }
-}
-@media (prefers-reduced-motion: reduce) { .juego, .juego-relleno, .caja-busqueda.axio-fusion { animation: none; transition: none; } }
+.juego-botones { display: flex; justify-content: center; gap: 10px; margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .espera, .espera-tarjeta, .espera-relleno, .espera-respuesta, .caja-busqueda.axio-listo { animation: none; transition: none; } }
