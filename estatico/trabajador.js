@@ -55,19 +55,113 @@ function aBytes(valor) {
 const motor = arrancar();
 motor.catch((e) => postMessage({ tipo: "error-motor", error: String(e && e.message || e) }));
 
-// Los mensajes se atienden de a uno: Python corre en un solo hilo y cada llamada es
-// síncrona, así que mientras se descargan las hojas las demás esperan en la cola.
+// ------------------------------------------------------------------ descargas en paralelo
+// Python baja cada hoja con una petición síncrona, una detrás de otra, y además no puede
+// empezar hasta que el motor termine de instalarse. Aquí se bajan todas a la vez apenas
+// llega el config, MIENTRAS el motor se prepara, y Python las encuentra listas (ver
+// guardar_precarga en motor/navegador.py). Lo que falle aquí, Python lo vuelve a intentar
+// a su manera y da el mensaje de error de siempre.
+const HOSTS_GOOGLE = ["docs.google.com", "sheets.googleapis.com", "www.googleapis.com"];
+const DESCARGAS_A_LA_VEZ = 6;
+let tokenGoogle = "";
+let ultimoConfig = null;
+let motorListo = false;
+
+// Las mismas URLs que arman descargar_base_global (csv), descargar_linea_credito (xlsx,
+// para conservar los hipervínculos) y descargar_directorio_whatsapp (csv) en
+// axio/dominio/buscador.py. Si alguna no coincide, solo se pierde la precarga de esa hoja.
+function urlExportacion(url, formato) {
+  url = String(url || "").trim();
+  if (!url.includes("docs.google.com/spreadsheets")) return url;
+  const gid = url.includes("gid=") ? "&gid=" + url.split("gid=")[1].split("&")[0] : "";
+  return url.replace(/\/edit.*$/s, "/export?format=" + formato + gid);
+}
+
+function urlsPrevistas(textoConfig) {
+  const config = JSON.parse(textoConfig);
+  const urls = [];
+  if (String(config.url_base_global || "").trim()) urls.push(urlExportacion(config.url_base_global, "csv"));
+  for (const linea of config.lineas_credito || []) {
+    if (String(linea.url || "").trim()) urls.push(urlExportacion(linea.url, "xlsx"));
+  }
+  if (String(config.url_whatsapp || "").trim()) urls.push(urlExportacion(config.url_whatsapp, "csv"));
+  return [...new Set(urls)].filter((u) => u.startsWith("https://"));
+}
+
+async function bajarUna(url) {
+  const cabeceras = tokenGoogle && HOSTS_GOOGLE.includes(new URL(url).hostname) ? { Authorization: "Bearer " + tokenGoogle } : {};
+  for (let intento = 1; intento <= 3; intento++) {
+    try {
+      const resp = await fetch(url, { headers: cabeceras, cache: "no-store" });
+      if (resp.status >= 500 || resp.status === 429) continue;
+      return { estado: resp.status, datos: new Uint8Array(await resp.arrayBuffer()), urlFinal: resp.url, tipo: resp.headers.get("Content-Type") || "" };
+    } catch (_) { /* sin conexión o corte de Google: otro intento */ }
+  }
+  return null;
+}
+
+// Devuelve las descargas que salieron bien: [{ url, estado, datos, urlFinal, tipo }].
+async function precargar(urls) {
+  const inicio = performance.now();
+  const bajadas = [];
+  let listas = 0, siguiente = 0;
+  const contar = () => avisar(`Descargando las hojas a la vez: ${listas} de ${urls.length} listas` + (motorListo ? "…" : " (y preparando el motor)…"));
+  contar();
+  const tomar = async () => {
+    while (siguiente < urls.length) {
+      const url = urls[siguiente++];
+      const t0 = performance.now();
+      const r = await bajarUna(url);
+      listas++;
+      console.info(`[Axio] ${r ? (r.datos.length / 1048576).toFixed(1) + " MB" : "FALLÓ"} en ${((performance.now() - t0) / 1000).toFixed(1)} s · ${url.replace(/\/export.*$/, "")}`);
+      if (r && r.estado < 400) bajadas.push({ url, ...r });
+      contar();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DESCARGAS_A_LA_VEZ, urls.length) }, tomar));
+  console.info(`[Axio] Descargas: ${((performance.now() - inicio) / 1000).toFixed(1)} s en total`);
+  return bajadas;
+}
+
+async function cargarDatos(accion, config) {
+  if (accion === "configurar") ultimoConfig = config;
+  let descargas = Promise.resolve([]);
+  try {
+    if (ultimoConfig) descargas = precargar(urlsPrevistas(ultimoConfig));
+  } catch (e) {
+    console.warn("[Axio] No se pudieron precargar las hojas; se bajan de a una", e);
+  }
+  const nav = await motorConToken();
+  for (const b of await descargas) nav.guardar_precarga(b.url, b.datos, b.estado, b.urlFinal, b.tipo);
+  const inicio = performance.now();
+  const estado = accion === "configurar" ? nav.configurar(config) : nav.recargar();
+  console.info(`[Axio] Lectura y armado de los datos: ${((performance.now() - inicio) / 1000).toFixed(1)} s`);
+  return estado;
+}
+motor.then(() => { motorListo = true; }, () => {});
+
+// El token se guarda al instante (no espera al motor: así el inicio de sesión y las
+// descargas no quedan frenados mientras se instala Python) y se le pasa a Python justo
+// antes de cada llamada.
+async function motorConToken() {
+  const nav = await motor;
+  nav.fijar_token(tokenGoogle);
+  return nav;
+}
+
+// Python corre en un solo hilo y cada llamada es síncrona: mientras carga, lo demás espera.
+// puente.js no manda búsquedas hasta que la carga termina.
 self.onmessage = async (ev) => {
   const { id, accion } = ev.data;
   try {
-    const nav = await motor;
     if (accion === "token") {
-      nav.fijar_token(ev.data.token || "");
+      tokenGoogle = ev.data.token || "";
       postMessage({ tipo: "respuesta", id });
     } else if (accion === "configurar" || accion === "recargar") {
-      const estado = accion === "configurar" ? nav.configurar(ev.data.config) : nav.recargar();
+      const estado = await cargarDatos(accion, ev.data.config);
       postMessage({ tipo: "respuesta", id, estado: JSON.parse(estado) });
     } else if (accion === "api") {
+      const nav = await motorConToken();
       const proxy = nav.atender(ev.data.url);
       const codigo = proxy.get(0), tipo = proxy.get(1), cuerpoPy = proxy.get(2);
       proxy.destroy();
@@ -75,6 +169,7 @@ self.onmessage = async (ev) => {
       postMessage({ tipo: "respuesta", id, codigo, tipoContenido: tipo, cuerpo }, [cuerpo]);
     } else if (accion === "excel") {
       const d = ev.data;
+      const nav = await motorConToken();
       postMessage({ tipo: "respuesta", id, datos: JSON.parse(nav.leer_excel(d.archivo, d.hoja || "", d.filas, d.columnas)) });
     }
   } catch (e) {

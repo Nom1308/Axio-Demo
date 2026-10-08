@@ -97,9 +97,24 @@ def _pedir(url):
     return xhr if xhr.status != 0 else None
 
 
+# ------------------------------------------------------------------ descargas en paralelo
+# Aquí cada descarga es síncrona, así que las hojas bajarían de a una (cada exportación de
+# Google tarda varios segundos). El trabajador las baja TODAS A LA VEZ antes de cargar
+# (urlsPrevistas en estatico/trabajador.js) y las deja aquí; urlopen las toma de aquí. Si
+# alguna no se precargó (falló o la URL no coincide), se baja como siempre.
+_precarga = {}
+
+
+def guardar_precarga(url, datos, estado, url_final, tipo):
+    _precarga[url] = (estado, bytes(datos.to_py()), url_final or url, tipo)
+
+
 def _urlopen_navegador(url, data=None, timeout=None, **_):
     if isinstance(url, urllib.request.Request):
         url = url.full_url
+    if url in _precarga:
+        estado, datos, url_final, tipo = _precarga.pop(url)
+        return _Respuesta(url_final, estado, datos, tipo)
     xhr = None
     for _intento in range(_INTENTOS_DESCARGA):
         xhr = _pedir(url)
@@ -171,13 +186,19 @@ def configurar(texto_config):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False)
     _motor = MotorNavegador()
-    _motor.cargar_ahora(forzar=True)
+    try:
+        _motor.cargar_ahora(forzar=True)
+    finally:
+        _precarga.clear()   # lo que no se usó no se queda ocupando memoria
     return json.dumps(_motor.estado())
 
 
 def recargar():
     """El «Refrescar datos» de la barra: vuelve a bajar todo con el mismo config."""
-    _motor.cargar_ahora(forzar=True)
+    try:
+        _motor.cargar_ahora(forzar=True)
+    finally:
+        _precarga.clear()
     return json.dumps(_motor.estado())
 
 
