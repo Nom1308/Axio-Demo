@@ -145,6 +145,32 @@ if EN_NAVEGADOR:
     urllib.request.urlopen = _urlopen_navegador
 
 
+# ------------------------------------------------------------------ openpyxl más rápido
+# Cada línea de crédito trae ~20.000 hipervínculos (uno por obligación), y openpyxl busca
+# el destino de cada uno recorriendo TODA la lista de relaciones de la hoja: millones de
+# comparaciones. Con Libre Inversión Menor eran 9 de los 13 s de lectura (más aún aquí,
+# en WebAssembly). Con un índice por Id la búsqueda es inmediata y el resultado, el mismo:
+# probado celda por celda (valor e hipervínculo) con las 7 líneas reales.
+try:
+    from openpyxl.packaging.relationship import RelationshipList
+
+    def _relacion_por_id(self, key):
+        indice = self.__dict__.get('_axio_indice')
+        if indice is None or indice[0] != len(self):   # la lista cambió: se rehace
+            mapa = {}
+            for r in self:
+                mapa.setdefault(r.Id, r)   # como el original: gana la primera con ese Id
+            indice = self.__dict__['_axio_indice'] = (len(self), mapa)
+        r = indice[1].get(key)
+        if r is None:
+            raise KeyError("Unknown relationship: {0}".format(key))
+        return r
+
+    RelationshipList.get = _relacion_por_id
+except ImportError:   # sin openpyxl (pruebas fuera del navegador): nada que acelerar
+    pass
+
+
 def _avisar(mensaje):
     if EN_NAVEGADOR and mensaje:
         import js
