@@ -626,18 +626,94 @@
           onclick: () => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.") }),
         a.whatsapp ? botonWhatsapp(a.whatsapp) : null));
 
-    const creditos = el("div", { class: "asociado-creditos" });
-    for (const linea of a.lineas) {
-      for (const e of linea.entradas) creditos.append(pintarCredito(linea.linea, e, true));
-    }
-    const enMora = a.lineas.reduce((n, l) => n + l.entradas.filter((e) => estadoCredito(e).mora).length, 0);
+    // Primero los créditos en mora (lo que hay que gestionar), después los demás; dentro de
+    // cada grupo, en el orden de las líneas.
+    const todos = a.lineas.flatMap((l) => l.entradas.map((e) => ({ linea: l.linea, e, estado: estadoCredito(e) })));
+    const peso = (x) => (x.estado.mora ? 0 : x.estado.mora === null ? 1 : 2);
+    todos.sort((x, y) => peso(x) - peso(y));
+    const creditos = el("div", { class: "asociado-creditos" },
+      ...todos.map((x) => pintarCredito(x.linea, x.e, true)));
+
+    const enMora = todos.filter((x) => x.estado.mora).length;
+    const alDia = todos.filter((x) => x.estado.mora === false).length;
     const titulo = a.total_creditos
       ? `💳 ${a.total_creditos} crédito${a.total_creditos === 1 ? "" : "s"} activo${a.total_creditos === 1 ? "" : "s"}`
       : "💳 Sin créditos activos en las líneas de crédito";
-    return el("section", { class: "asociado" }, cabecera,
-      el("h3", { class: "asociado-titulo" }, titulo,
-        enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null),
+    // Barra de proporción: cuánto de lo que tiene la persona está en mora y cuánto al día.
+    const barra = todos.length > 1 && (enMora || alDia)
+      ? el("div", { class: "asociado-barra", role: "img", "aria-label": `${enMora} en mora y ${alDia} al día de ${todos.length}` },
+          enMora ? el("span", { class: "barra-mora", style: `flex:${enMora}` }) : null,
+          alDia ? el("span", { class: "barra-dia", style: `flex:${alDia}` }) : null,
+          todos.length - enMora - alDia ? el("span", { class: "barra-otro", style: `flex:${todos.length - enMora - alDia}` }) : null)
+      : null;
+    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, cabecera,
+      el("div", { class: "asociado-resumen" },
+        el("h3", { class: "asociado-titulo" }, titulo),
+        enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null,
+        alDia && enMora ? el("span", { class: "asociado-dia", text: `🟢 ${alDia} al día` }) : null,
+        barra),
       a.total_creditos ? creditos : null);
+  }
+
+  // "$ 15,328,095" si es una cifra; "PAZ Y SALVO" tal cual (sin el signo de pesos delante).
+  const conPesos = (v) => (v === null || v === undefined || v === "" ? null : /\d/.test(String(v)) ? "$ " + v : String(v));
+
+  // Tarjeta de un crédito en el resumen de la persona: línea y estado arriba, el saldo en
+  // grande, las demás cifras en casillas y los enlaces abajo. Todas iguales, también la del
+  // Seguro de Vida (tarifa y saldo del mes en vez de saldo actual).
+  function tarjetaCredito(nombreLinea, e) {
+    const estado = estadoCredito(e);
+    const etiquetas = etiquetasCredito(e);
+    const descripcion = [e.congregacion, e.cco ? "CCO " + e.cco : null, e.distrito ? "Distrito " + e.distrito : null].filter(Boolean);
+    const conDetalle = Boolean(e.campos && e.campos.length);
+    const nodo = el("article", {
+      class: "tarjeta-credito" + (estado.mora ? " credito-mora" : estado.mora === false ? " credito-dia" : "") + (conDetalle ? " credito-clic" : ""),
+      role: conDetalle ? "button" : null, tabindex: conDetalle ? "0" : null,
+      title: conDetalle ? "Ver la obligación completa" : null,
+      onclick: conDetalle ? () => abrirObligacion(nombreLinea, e) : null,
+      onkeydown: conDetalle ? (ev) => { if (ev.key === "Enter") abrirObligacion(nombreLinea, e); } : null,
+    });
+
+    // filter(Boolean): append() de DOM escribiría «null» por cada parte que falta.
+    nodo.append(...[
+      el("div", { class: "tc-cabecera" },
+        el("span", { class: "tc-linea", text: nombreLinea }),
+        el("span", { class: "insignia" + (estado.mora ? " insignia-mora" : ""), text: (estado.mora ? "● " : "") + estado.texto.toUpperCase() })),
+      el("strong", { class: "tc-titulo", text: e.tipo_credito && e.tipo_credito !== nombreLinea ? e.tipo_credito : (e.nombre || nombreLinea) }),
+      descripcion.length ? el("span", { class: "tc-descripcion", text: descripcion.join("  ·  ") }) : null,
+      etiquetas.length ? el("div", { class: "etiquetas-credito" }, ...etiquetas) : null,
+    ].filter(Boolean));
+
+    // La cifra principal: el saldo actual de la tabla, o el saldo del mes (Seguro de Vida).
+    const saldo = e.saldo_actual ? ["Saldo actual", conPesos(e.saldo_actual)]
+      : e.saldo ? [etiquetaColumna(e.columna_saldo, "Saldo"), conPesos(e.saldo)] : null;
+    if (saldo) {
+      nodo.append(el("div", { class: "tc-saldo" + (/\d/.test(saldo[1]) ? "" : " tc-saldo-texto") },
+        el("span", { text: saldo[0] }), el("strong", { text: saldo[1] })));
+    }
+
+    const datos = [
+      ["Observación", e.observacion_estado],
+      ["Último pago", e.fecha_ultimo_pago],
+      [etiquetaColumna(e.columna_tarifa, "Tarifa"), conPesos(e.tarifa)],
+      ["Meses en mora", e.meses_mora, e.en_mora ? "dato-mora" : null],
+    ].filter(([, v]) => v);
+    if (datos.length) {
+      nodo.append(el("dl", { class: "credito-datos tc-datos" },
+        ...datos.map(([etiqueta, valor, clase]) => el("div", { class: clase }, el("dt", { text: etiqueta }), el("dd", { text: valor })))));
+    }
+    // La hoja la titula «OBSERVACION DIRECTIVOS (NO REPORTAR)»: es de uso interno.
+    if (e.observacion_directivos) nodo.append(el("p", { class: "tc-nota", text: "📝 Directivos (no reportar): " + e.observacion_directivos }));
+    if (e.observacion_general) nodo.append(el("p", { class: "tc-nota", text: "📝 General: " + e.observacion_general }));
+
+    // Los enlaces no abren el detalle: solo su propia pestaña.
+    const sinBurbuja = (ev) => ev.stopPropagation();
+    const pie = el("div", { class: "tc-pie" });
+    if (e.link_obligacion) pie.append(enlaceHoja("🔗 Ver obligación", e.link_obligacion, { onclick: sinBurbuja }));
+    if (e.link_registro && e.link_registro !== e.link_obligacion) pie.append(enlaceHoja("🔗 Último registro", e.link_registro, { onclick: sinBurbuja }));
+    if (conDetalle) pie.append(el("span", { class: "credito-ver", text: "Ver completa ›" }));
+    if (pie.childElementCount) nodo.append(pie);
+    return nodo;
   }
 
   // 'SALDO A AGOSTO 2026' -> 'Saldo a agosto 2026': el título de la hoja dice de qué mes es.
@@ -647,6 +723,7 @@
   }
 
   function pintarCredito(nombreLinea, e, comoTarjeta) {
+    if (comoTarjeta) return tarjetaCredito(nombreLinea, e);
     const descripcion = [];
     if (e.congregacion) descripcion.push(e.congregacion);
     if (e.cco) descripcion.push("CCO " + e.cco);
