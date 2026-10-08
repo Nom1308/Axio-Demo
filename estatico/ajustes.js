@@ -12,7 +12,7 @@ window.AXIO_AJUSTES = {
 
   // ID del archivo config_axio.json guardado en Drive (lo que va entre /d/ y /view en su
   // enlace). Vacío: después de iniciar sesión se pide el archivo.
-  configDriveId: "1dMoGR4QsizP1FBo7GCyBRdcvyUtW7TYV",
+  configDriveId: "1G0YNCFTxa6IYzjqF5uwDSitYwRUeJN0y",
 
   // Dominio de los correos que pueden entrar, por ejemplo "miempresa.org". Vacío: entra
   // cualquiera que Google deje pasar (con la app en modo "Interno", solo la empresa).
