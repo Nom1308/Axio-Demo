@@ -2,9 +2,10 @@
  *
  * - Al pasar el mouse por un enlace a una hoja (🔗 Ver obligación, ↗ de un campo), una
  *   tarjeta con su miniatura, nombre, propietario y si se puede editar.
- * - Al hacer clic, la tabla se abre en una ventana pequeña dentro de Axio, con sus colores,
- *   celdas combinadas y pestañas. Doble clic (o Enter) en una celda para escribir; Enter
- *   guarda en la hoja real de Google.
+ * - Al hacer clic, la tabla se abre en una ventana dentro de Axio tal como se ve en Google
+ *   Sheets: colores, bordes, celdas combinadas, filas/columnas ocultas e inmovilizadas y
+ *   pestañas. Se navega con el teclado, con el cuadro de nombre (B13 + Enter) y con zoom.
+ *   Doble clic, Enter o empezar a escribir edita una celda; Enter guarda en la hoja real.
  *
  * Todo pasa con la cuenta de quien inició sesión (window.axioGoogle, de puente.js): Google
  * aplica sus permisos. Quien solo puede ver la hoja, la ve en solo lectura. Sin sesión, los
@@ -130,11 +131,21 @@
   }
 
   // ------------------------------------------------------------------ ventana con la tabla
+  // La hoja se dibuja como en Google Sheets: mismos anchos y altos, filas y columnas ocultas
+  // fuera, filas/columnas inmovilizadas fijas al desplazarse. Se navega con el teclado
+  // (flechas, Tab, Inicio/Fin, Ctrl+flecha), se salta a una celda escribiéndola en el cuadro
+  // de nombre y se acerca o aleja con los botones de zoom o Ctrl + rueda del mouse.
   const ventana = nodo("dialog", { class: "visor-hoja", "aria-label": "Hoja de Google" });
   document.body.append(ventana);
   ventana.addEventListener("cancel", (ev) => { if (ventana.querySelector(".celda-editando")) ev.preventDefault(); });
 
-  let visor = null;   // { id, archivo, hojas, hoja, editable, celdas }
+  const ALTO_CABECERA = 22;   // fila de letras A, B, C...
+  const ANCHO_NUMEROS = 46;   // columna de números de fila
+  const NIVELES_ZOOM = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200];
+  let zoom = 100;
+  try { zoom = NIVELES_ZOOM.includes(Number(localStorage.getItem("axio-visor-zoom"))) ? Number(localStorage.getItem("axio-visor-zoom")) : 100; } catch (_) { /* sin almacenamiento */ }
+
+  let visor = null;   // { id, archivo, hojas, hoja, editable, datos, merges, visF, visC, mapa, sel }
 
   async function abrirVisor(id, gid) {
     ocultarPrevia();
@@ -147,8 +158,9 @@
         await cargarHoja();
         return;
       }
-      const libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=${encodeURIComponent("sheets.properties(sheetId,title,index,gridProperties(rowCount,columnCount))")}`);
-      const hojas = libro.sheets.map((h) => h.properties);
+      const libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=${encodeURIComponent(
+        "sheets.properties(sheetId,title,index,hidden,gridProperties(rowCount,columnCount,frozenRowCount,frozenColumnCount))")}`);
+      const hojas = libro.sheets.map((h) => h.properties).filter((h) => !h.hidden || h.sheetId === gid);
       const hoja = hojas.find((h) => h.sheetId === gid) || hojas[0];
       visor = { id, archivo, hojas, hoja, editable: Boolean(archivo.capabilities && archivo.capabilities.canEdit && google().puedeEscribir()) };
       await cargarHoja();
@@ -166,9 +178,17 @@
       estado,
       v ? nodo("a", { class: "boton boton-chico", href: v.archivo.webViewLink || `https://docs.google.com/spreadsheets/d/${v.id}/edit${v.hoja && !v.excel ? "#gid=" + v.hoja.sheetId : ""}`,
         target: "_blank", rel: "noopener noreferrer", text: "Abrir en Google Sheets ↗" }) : null,
+      nodo("button", { class: "boton boton-texto boton-icono", type: "button", title: "Maximizar / restaurar (doble clic en esta barra)",
+        "aria-label": "Maximizar o restaurar", text: "⤢", onclick: maximizar }),
       nodo("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", text: "✕", onclick: () => ventana.close() }));
     arrastrable(cabecera);
+    cabecera.addEventListener("dblclick", (ev) => { if (!ev.target.closest("button, a")) maximizar(); });
     return cabecera;
+  }
+
+  function maximizar() {
+    const max = ventana.classList.toggle("maximizada");
+    if (max) { ventana.style.margin = ""; ventana.style.left = ""; ventana.style.top = ""; }
   }
 
   function avisar(texto, clase) {
@@ -176,124 +196,347 @@
     if (e) { e.textContent = texto; e.className = "visor-estado " + (clase || ""); }
   }
 
+  // Cuadro de nombre (A1), barra de fórmulas y zoom, como la barra de Google Sheets.
+  function barraVisor(v) {
+    const nombre = nodo("input", { class: "visor-nombre", type: "text", spellcheck: "false", "aria-label": "Celda seleccionada. Escribe una (por ejemplo B13) y Enter para ir",
+      title: "Escribe una celda (por ejemplo B13) y Enter para ir" });
+    nombre.addEventListener("focus", () => nombre.select());
+    nombre.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); enfocarCuerpo(); return; }
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      const m = /^\s*\$?([a-z]{1,3})\$?(\d{1,6})\s*$/i.exec(nombre.value);
+      if (!m || !irA(v, Number(m[2]) - 1, columnaDeLetras(m[1]))) { nombre.classList.add("invalido"); setTimeout(() => nombre.classList.remove("invalido"), 600); return; }
+      enfocarCuerpo();
+    });
+    const formula = nodo("div", { class: "visor-formula", "aria-live": "polite" });
+    const valorZoom = nodo("button", { class: "visor-zoom-valor", type: "button", title: "Volver a 100 %", text: zoom + " %", onclick: () => ponerZoom(100) });
+    return nodo("div", { class: "visor-barra" },
+      nombre,
+      nodo("span", { class: "visor-fx", "aria-hidden": "true", text: "fx" }),
+      formula,
+      nodo("div", { class: "visor-zoom", role: "group", "aria-label": "Zoom" },
+        nodo("button", { type: "button", title: "Alejar (Ctrl + rueda)", "aria-label": "Alejar", text: "−", onclick: () => pasoZoom(-1) }),
+        valorZoom,
+        nodo("button", { type: "button", title: "Acercar (Ctrl + rueda)", "aria-label": "Acercar", text: "+", onclick: () => pasoZoom(1) })));
+  }
+
+  function ponerZoom(nuevo) {
+    zoom = nuevo;
+    try { localStorage.setItem("axio-visor-zoom", String(zoom)); } catch (_) { /* sin almacenamiento */ }
+    const t = ventana.querySelector(".visor-tabla");
+    if (t) t.style.zoom = zoom / 100;
+    const e = ventana.querySelector(".visor-zoom-valor");
+    if (e) e.textContent = zoom + " %";
+  }
+  function pasoZoom(dir) {
+    const i = NIVELES_ZOOM.indexOf(zoom);
+    ponerZoom(NIVELES_ZOOM[Math.max(0, Math.min(NIVELES_ZOOM.length - 1, (i < 0 ? 5 : i) + dir))]);
+  }
+
   async function cargarHoja() {
     const v = visor;
-    ventana.replaceChildren(cabeceraVisor(v), pestanas(v), nodo("div", { class: "visor-cuerpo" },
-      nodo("p", { class: "visor-nota", text: "⏳ Cargando " + (v.hoja ? v.hoja.title : v.archivo.name) + "…" })));
+    ventana.replaceChildren(cabeceraVisor(v), barraVisor(v), nodo("div", { class: "visor-cuerpo" },
+      nodo("p", { class: "visor-nota", text: "⏳ Cargando " + (v.hoja ? v.hoja.title : v.archivo.name) + "…" })), pestanas(v));
     let libro, filas, cols;
     if (v.excel) {
       const r = await google().leerExcel(v.id, v.hoja ? v.hoja.title : "", MAX_FILAS, MAX_COLUMNAS);
       v.hojas = r.hojas.map((titulo, i) => ({ sheetId: i, title: titulo }));
       v.hoja = v.hojas.find((h) => h.title === r.hoja) || v.hojas[0];
       v.recortada = r.recortada;
+      v.congeladas = r.congeladas || { filas: 0, cols: 0 };
       libro = r.libro;
       const rowData = libro.sheets[0].data[0].rowData;
       filas = rowData.length;
       cols = Math.max(1, ...rowData.map((f) => f.values.length));
       ventana.querySelector(".visor-pestanas").replaceWith(pestanas(v));
     } else {
-      filas = Math.min(v.hoja.gridProperties.rowCount || MAX_FILAS, MAX_FILAS);
-      cols = Math.min(v.hoja.gridProperties.columnCount || 26, MAX_COLUMNAS);
+      const g = v.hoja.gridProperties || {};
+      filas = Math.min(g.rowCount || MAX_FILAS, MAX_FILAS);
+      cols = Math.min(g.columnCount || 26, MAX_COLUMNAS);
+      v.congeladas = { filas: g.frozenRowCount || 0, cols: g.frozenColumnCount || 0 };
       const r = `'${v.hoja.title.replace(/'/g, "''")}'!A1:${letra(cols - 1)}${filas}`;
-      const campos = "sheets(merges,data(columnMetadata(pixelSize),rowMetadata(pixelSize),rowData(values(" +
+      const campos = "sheets(merges,data(columnMetadata(pixelSize,hiddenByUser),rowMetadata(pixelSize,hiddenByUser,hiddenByFilter),rowData(values(" +
         "formattedValue,hyperlink,userEnteredValue,effectiveValue(numberValue)," +
-        "effectiveFormat(backgroundColor,horizontalAlignment,textFormat(bold,italic,foregroundColor,fontSize))))))";
+        "effectiveFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,borders," +
+        "textFormat(bold,italic,underline,strikethrough,foregroundColor,fontSize,fontFamily))))))";
       libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}?ranges=${encodeURIComponent(r)}&includeGridData=true&fields=${encodeURIComponent(campos)}`);
-      v.recortada = (v.hoja.gridProperties.rowCount || 0) > MAX_FILAS || (v.hoja.gridProperties.columnCount || 0) > MAX_COLUMNAS;
+      v.recortada = (g.rowCount || 0) > MAX_FILAS || (g.columnCount || 0) > MAX_COLUMNAS;
     }
     v.datos = (libro.sheets[0].data || [])[0] || {};
     v.merges = libro.sheets[0].merges || [];
-    ventana.querySelector(".visor-cuerpo").replaceChildren(tabla(v, filas, cols));
-    avisar(v.editable ? "Doble clic en una celda para escribir"
+    const cuerpo = ventana.querySelector(".visor-cuerpo");
+    cuerpo.replaceChildren(tabla(v, filas, cols));
+    prepararCuerpo(v, cuerpo);
+    seleccionar(v, 0, 0, false);
+    enfocarCuerpo();
+    avisar(v.editable ? "Doble clic o Enter en una celda para escribir"
       : v.excel ? "Es un archivo de Excel guardado en Drive: para editarlo, ábrelo en Google Sheets" : "", "gris");
   }
 
+  // Pestañas abajo, como en Google Sheets. Alt + ↑/↓ cambia de pestaña.
   function pestanas(v) {
     if (v.hojas.length < 2) return nodo("div", { class: "visor-pestanas vacio" });
     const barra = nodo("div", { class: "visor-pestanas", role: "tablist" });
     for (const h of v.hojas) {
       barra.append(nodo("button", { type: "button", role: "tab", class: "visor-pestana" + (h.sheetId === v.hoja.sheetId ? " activa" : ""),
-        "aria-selected": String(h.sheetId === v.hoja.sheetId), text: h.title,
-        onclick: () => { if (h.sheetId !== v.hoja.sheetId) { v.hoja = h; cargarHoja().catch((e) => avisar("❌ " + e.message, "error")); } } }));
+        "aria-selected": String(h.sheetId === v.hoja.sheetId), text: h.title, onclick: () => cambiarPestana(v, h) }));
     }
     return barra;
   }
+  function cambiarPestana(v, h) {
+    if (!h || h.sheetId === v.hoja.sheetId) return;
+    v.hoja = h;
+    cargarHoja().catch((e) => avisar("❌ " + e.message, "error"));
+  }
+
+  // ------------------------------------------------------------------ dibujar la hoja
+  const ANCHO_BORDE = { SOLID: 1, SOLID_MEDIUM: 2, SOLID_THICK: 3, DASHED: 1, DOTTED: 1, DOUBLE: 3 };
 
   function tabla(v, filas, cols) {
     const datos = v.datos;
     const filasDatos = datos.rowData || [];
-    // Celdas combinadas: la de arriba a la izquierda lleva colspan/rowspan; las demás no se dibujan.
-    const cubiertas = new Set();
-    const combinadas = new Map();
+    const metaF = datos.rowMetadata || [], metaC = datos.columnMetadata || [];
+    const alto = (f) => Math.max(8, (metaF[f] || {}).pixelSize || 21);
+    const ancho = (c) => Math.max(8, (metaC[c] || {}).pixelSize || 100);
+    // Lo que está oculto en la hoja (a mano, por filtro o con un grupo contraído) no se dibuja.
+    const visF = [], visC = [];
+    for (let f = 0; f < filas; f++) if (!((metaF[f] || {}).hiddenByUser || (metaF[f] || {}).hiddenByFilter)) visF.push(f);
+    for (let c = 0; c < cols; c++) if (!(metaC[c] || {}).hiddenByUser) visC.push(c);
+    if (!visF.length) visF.push(0);
+    if (!visC.length) visC.push(0);
+    const posF = new Map(visF.map((f, i) => [f, i])), posC = new Map(visC.map((c, j) => [c, j]));
+
+    // Celdas combinadas, contadas solo sobre lo visible. El contenido sale de la celda de
+    // arriba a la izquierda aunque esa quede oculta.
+    const ancla = new Map();      // "i:j" de cada celda visible cubierta -> "i:j" de su ancla
+    const combinadas = new Map(); // "i:j" del ancla -> { filas, cols, f, c, alto }
     for (const m of v.merges) {
-      for (let f = m.startRowIndex; f < Math.min(m.endRowIndex, filas); f++) {
-        for (let c = m.startColumnIndex; c < Math.min(m.endColumnIndex, cols); c++) cubiertas.add(f + ":" + c);
-      }
-      cubiertas.delete(m.startRowIndex + ":" + m.startColumnIndex);
-      combinadas.set(m.startRowIndex + ":" + m.startColumnIndex,
-        { filas: Math.min(m.endRowIndex, filas) - m.startRowIndex, cols: Math.min(m.endColumnIndex, cols) - m.startColumnIndex });
+      const fs = visF.filter((f) => f >= m.startRowIndex && f < m.endRowIndex);
+      const cs = visC.filter((c) => c >= m.startColumnIndex && c < m.endColumnIndex);
+      if (!fs.length || !cs.length) continue;
+      const clave = posF.get(fs[0]) + ":" + posC.get(cs[0]);
+      for (const f of fs) for (const c of cs) ancla.set(posF.get(f) + ":" + posC.get(c), clave);
+      combinadas.set(clave, { filas: fs.length, cols: cs.length, f: m.startRowIndex, c: m.startColumnIndex, alto: fs.reduce((s, f) => s + alto(f), 0) });
     }
-    // Un poco más anchas que en la hoja: las celdas tienen más aire alrededor del texto.
-    const anchos = (datos.columnMetadata || []).map((c) => Math.max(64, Math.min(Math.round((c.pixelSize || 100) * 1.12) + 12, 420)));
-    const grupoCols = nodo("colgroup", null, nodo("col", { style: "width:46px" }));
-    for (let c = 0; c < cols; c++) grupoCols.append(nodo("col", { style: `width:${anchos[c] || 100}px` }));
+    const celdaEn = (f, c) => (((filasDatos[f] || {}).values || [])[c]) || {};
+    const vacia = (i, j) => {
+      if (j >= visC.length) return false;
+      const a = ancla.get(i + ":" + j);
+      if (a && a !== i + ":" + j) return false;
+      return !celdaEn(visF[i], visC[j]).formattedValue;
+    };
+
+    // Filas y columnas inmovilizadas: fijas arriba / a la izquierda al desplazarse.
+    const fijasF = visF.filter((f) => f < (v.congeladas || {}).filas).length;
+    const fijasC = visC.filter((c) => c < (v.congeladas || {}).cols).length;
+    const arriba = [], izquierda = [];
+    for (let i = 0, y = ALTO_CABECERA; i < fijasF; i++) { arriba.push(y); y += alto(visF[i]); }
+    for (let j = 0, x = ANCHO_NUMEROS; j < fijasC; j++) { izquierda.push(x); x += ancho(visC[j]); }
+    const fondoFijas = (fijasF ? arriba[fijasF - 1] + alto(visF[fijasF - 1]) : ALTO_CABECERA);
+    const bordeFijas = (fijasC ? izquierda[fijasC - 1] + ancho(visC[fijasC - 1]) : ANCHO_NUMEROS);
+
+    const grupoCols = nodo("colgroup", null, nodo("col", { style: `width:${ANCHO_NUMEROS}px` }));
+    for (const c of visC) grupoCols.append(nodo("col", { style: `width:${ancho(c)}px` }));
 
     const cabeza = nodo("tr", null, nodo("th", { class: "visor-esquina" }));
-    for (let c = 0; c < cols; c++) cabeza.append(nodo("th", { text: letra(c) }));
+    visC.forEach((c, j) => cabeza.append(nodo("th", {
+      text: letra(c), "data-j": j, class: j < fijasC ? "fija" + (j === fijasC - 1 ? " fin-fijas-c" : "") : null,
+      style: j < fijasC ? `left:${izquierda[j]}px` : null })));
+
+    v.visF = visF; v.visC = visC; v.mapa = new Map();
     const cuerpo = nodo("tbody");
-    for (let f = 0; f < filas; f++) {
-      const valores = (filasDatos[f] || {}).values || [];
-      const alto = ((datos.rowMetadata || [])[f] || {}).pixelSize;
-      const tr = nodo("tr", alto && alto > 36 ? { style: `height:${Math.min(alto, 120)}px` } : null, nodo("th", { text: String(f + 1) }));
-      for (let c = 0; c < cols; c++) {
-        if (cubiertas.has(f + ":" + c)) continue;
-        const celda = valores[c] || {};
-        const comb = combinadas.get(f + ":" + c);
-        tr.append(pintarCelda(v, celda, f, c, comb));
-      }
+    visF.forEach((f, i) => {
+      const fija = i < fijasF;
+      const clasesFila = fija ? "fija" + (i === fijasF - 1 ? " fin-fijas-f" : "") : "";
+      const tr = nodo("tr", { class: clasesFila || null },
+        nodo("th", { text: String(f + 1), "data-i": i, style: `height:${alto(f)}px` + (fija ? `;top:${arriba[i]}px` : "") }));
+      visC.forEach((c, j) => {
+        const clave = i + ":" + j;
+        const a = ancla.get(clave);
+        if (a && a !== clave) { v.mapa.set(clave, v.mapa.get(a)); return; }
+        const comb = combinadas.get(clave);
+        const fOrigen = comb ? comb.f : f, cOrigen = comb ? comb.c : c;
+        const td = pintarCelda(v, celdaEn(fOrigen, cOrigen), fOrigen, cOrigen, comb, {
+          alto: comb ? comb.alto : alto(f), derramar: vacia(i, j + (comb ? comb.cols : 1)) });
+        td.dataset.i = i; td.dataset.j = j;
+        const fijaC = j < fijasC;
+        if (fija || fijaC) {
+          td.classList.add(fija && fijaC ? "fija-ambas" : fija ? "fija-f" : "fija-c");
+          if (fija) td.style.top = arriba[i] + "px";
+          if (fijaC) td.style.left = izquierda[j] + "px";
+          if (j + (comb ? comb.cols : 1) === fijasC) td.classList.add("fin-fijas-c");
+        }
+        v.mapa.set(clave, td);
+        tr.append(td);
+      });
       cuerpo.append(tr);
-    }
-    const t = nodo("table", { class: "visor-tabla" }, grupoCols, nodo("thead", null, cabeza), cuerpo);
+    });
+    // Ancho exacto: con "max-content", el texto que se derrama ensancharía su columna.
+    const anchoTotal = visC.reduce((s, c) => s + ancho(c), ANCHO_NUMEROS);
+    const t = nodo("table", { class: "visor-tabla", style: `width:${anchoTotal}px;zoom:${zoom / 100};--margen-arriba:${fondoFijas}px;--margen-izq:${bordeFijas}px` },
+      grupoCols, nodo("thead", null, cabeza), cuerpo);
     const envoltura = nodo("div", { class: "visor-tabla-envoltura" }, t);
     if (v.recortada) envoltura.append(nodo("p", { class: "visor-nota", text: `Se muestran las primeras ${filas} filas y ${cols} columnas. El resto, en «Abrir en Google Sheets».` }));
     return envoltura;
   }
 
-  function pintarCelda(v, celda, f, c, comb) {
+  function borde(b) {
+    if (!b || !b.style || b.style === "NONE") return null;
+    const c = color((b.colorStyle && b.colorStyle.rgbColor) || b.color) || "rgb(0,0,0)";
+    const w = b.style === "DOUBLE" ? 3 : (ANCHO_BORDE[b.style] || b.width || 1);
+    const tipo = b.style === "DASHED" ? "dashed" : b.style === "DOTTED" ? "dotted" : b.style === "DOUBLE" ? "double" : "solid";
+    return { c, w, tipo };
+  }
+
+  function pintarCelda(v, celda, f, c, comb, info) {
     const formato = celda.effectiveFormat || {};
     const texto = formato.textFormat || {};
     const estilos = [];
-    // Google devuelve blanco explícito en cada celda sin color: se omite, así la fila se
-    // puede resaltar al pasar el mouse.
     const fondo = color(formato.backgroundColor);
     if (fondo && fondo !== "rgb(255,255,255)") estilos.push("background:" + fondo);
     const letraColor = color(texto.foregroundColor);
     if (letraColor && letraColor !== "rgb(0,0,0)") estilos.push("color:" + letraColor);
     if (texto.bold) estilos.push("font-weight:700");
     if (texto.italic) estilos.push("font-style:italic");
+    const lineas = [texto.underline && "underline", texto.strikethrough && "line-through"].filter(Boolean);
+    if (lineas.length) estilos.push("text-decoration:" + lineas.join(" "));
+    if (texto.fontSize && texto.fontSize !== 10) estilos.push(`font-size:${texto.fontSize}pt`);
+    if (texto.fontFamily && !/^arial$/i.test(texto.fontFamily)) estilos.push(`font-family:"${texto.fontFamily.replace(/"/g, "")}",Arial,sans-serif`);
     const esNumero = Boolean(celda.effectiveValue && "numberValue" in celda.effectiveValue);
     const alineacion = formato.horizontalAlignment || (esNumero ? "RIGHT" : "LEFT");
     estilos.push("text-align:" + alineacion.toLowerCase());
+    const vertical = { TOP: "top", MIDDLE: "middle", BOTTOM: "bottom" }[formato.verticalAlignment] || "bottom";
+    if (vertical !== "bottom") estilos.push("vertical-align:" + vertical);
+    // Bordes de la hoja: derecho e inferior como borde; superior e izquierdo como sombra
+    // interior (así no se descuadran los anchos).
+    const b = formato.borders || {};
+    const der = borde(b.right), aba = borde(b.bottom), arr = borde(b.top), izq = borde(b.left);
+    if (der) estilos.push(`border-right:${der.w}px ${der.tipo} ${der.c}`);
+    if (aba) estilos.push(`border-bottom:${aba.w}px ${aba.tipo} ${aba.c}`);
+    const sombras = [arr && `inset 0 ${arr.w}px 0 ${arr.c}`, izq && `inset ${izq.w}px 0 0 ${izq.c}`].filter(Boolean);
+    if (sombras.length) estilos.push("box-shadow:" + sombras.join(","));
 
+    // Como en Sheets: el texto que no cabe sigue sobre la celda vecina si está vacía; si no,
+    // se corta. Con "ajustar texto", baja de línea.
+    const ajuste = formato.wrapStrategy === "WRAP" || formato.wrapStrategy === "LEGACY_WRAP" ? "ajustar"
+      : formato.wrapStrategy !== "CLIP" && !esNumero && alineacion === "LEFT" && info.derramar && celda.formattedValue ? "derramar" : "cortar";
     const td = nodo("td", {
-      class: esNumero ? "num" : null,
+      class: "c-" + ajuste,
       style: estilos.join(";"), colspan: comb && comb.cols > 1 ? comb.cols : null, rowspan: comb && comb.filas > 1 ? comb.filas : null,
-      tabindex: v.editable ? "0" : null, "data-f": f, "data-c": c,
+      "data-f": f, "data-c": c,
       title: celda.userEnteredValue && celda.userEnteredValue.formulaValue ? "Fórmula: " + celda.userEnteredValue.formulaValue : null,
     });
+    td._celda = celda;
+    td._alto = info.alto;
     escribirContenido(td, celda);
-    if (v.editable) {
-      td.addEventListener("dblclick", () => editar(v, td, celda));
-      td.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === "F2") { ev.preventDefault(); editar(v, td, celda); } });
-    }
     return td;
   }
 
   function escribirContenido(td, celda) {
     const valor = celda.formattedValue || "";
-    td.replaceChildren(celda.hyperlink && /^https?:\/\//i.test(celda.hyperlink)
+    const contenido = celda.hyperlink && /^https?:\/\//i.test(celda.hyperlink)
       ? nodo("a", { href: celda.hyperlink, target: "_blank", rel: "noopener noreferrer", text: valor || celda.hyperlink })
-      : valor);
+      : valor;
+    // El div mantiene la celda del alto que tiene en la hoja aunque el texto no quepa.
+    td.replaceChildren(nodo("div", { class: "visor-c", style: `max-height:${Math.max(8, td._alto - 1)}px` }, contenido));
+  }
+
+  // ------------------------------------------------------------------ selección y teclado
+  const enfocarCuerpo = () => { const c = ventana.querySelector(".visor-cuerpo"); if (c) c.focus({ preventScroll: true }); };
+  const columnaDeLetras = (s) => [...s.toUpperCase()].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+
+  function seleccionar(v, i, j, desplazar = true) {
+    i = Math.max(0, Math.min(v.visF.length - 1, i));
+    j = Math.max(0, Math.min(v.visC.length - 1, j));
+    const td = v.mapa.get(i + ":" + j);
+    if (!td) return;
+    v.sel = { i, j };
+    ventana.querySelectorAll(".visor-tabla .sel, .visor-tabla .activa").forEach((e) => e.classList.remove("sel", "activa"));
+    td.classList.add("sel");
+    // Resalta la letra y el número de la celda (todas las que abarca si está combinada).
+    const ti = Number(td.dataset.i), tj = Number(td.dataset.j);
+    const filasCelda = Number(td.getAttribute("rowspan") || 1), colsCelda = Number(td.getAttribute("colspan") || 1);
+    for (let k = 0; k < colsCelda; k++) { const th = ventana.querySelector(`.visor-tabla thead th[data-j="${tj + k}"]`); if (th) th.classList.add("activa"); }
+    for (let k = 0; k < filasCelda; k++) { const th = ventana.querySelector(`.visor-tabla tbody th[data-i="${ti + k}"]`); if (th) th.classList.add("activa"); }
+    const nombre = ventana.querySelector(".visor-nombre");
+    const ref = letra(Number(td.dataset.c)) + (Number(td.dataset.f) + 1);
+    if (nombre && document.activeElement !== nombre) nombre.value = colsCelda > 1 || filasCelda > 1
+      ? ref + ":" + letra(v.visC[tj + colsCelda - 1]) + (v.visF[ti + filasCelda - 1] + 1) : ref;
+    const formula = ventana.querySelector(".visor-formula");
+    if (formula) { formula.textContent = textoEditable(td._celda); formula.title = formula.textContent; }
+    if (desplazar) td.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  // Mueve la selección; si cae dentro de la misma celda combinada, sigue hasta salir de ella.
+  function mover(v, di, dj) {
+    const actual = v.mapa.get(v.sel.i + ":" + v.sel.j);
+    let { i, j } = v.sel;
+    do { i += di; j += dj; } while (v.mapa.get(i + ":" + j) === actual && i >= 0 && j >= 0 && i < v.visF.length && j < v.visC.length);
+    seleccionar(v, i, j);
+  }
+
+  function irA(v, fila, col) {
+    const i = v.visF.findIndex((f) => f >= fila), j = v.visC.findIndex((c) => c >= col);
+    if (fila < 0 || col < 0 || i < 0 || j < 0) return false;
+    seleccionar(v, i, j);
+    return true;
+  }
+
+  function prepararCuerpo(v, cuerpo) {
+    cuerpo.tabIndex = 0;
+    cuerpo.setAttribute("aria-label", "Hoja. Flechas para moverte" + (v.editable ? ", Enter para escribir" : ""));
+    cuerpo.addEventListener("mousedown", (ev) => {
+      const td = ev.target.closest(".visor-tabla td");
+      if (!td || td.classList.contains("celda-editando")) return;
+      if (!ev.target.closest("a")) { ev.preventDefault(); enfocarCuerpo(); }
+      seleccionar(v, Number(td.dataset.i), Number(td.dataset.j), false);
+    });
+    cuerpo.addEventListener("dblclick", (ev) => {
+      const td = ev.target.closest(".visor-tabla td");
+      if (td && v.editable && !ev.target.closest("a")) editar(v, td);
+    });
+    cuerpo.addEventListener("wheel", (ev) => {
+      if (!ev.ctrlKey) return;
+      ev.preventDefault();
+      pasoZoom(ev.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+    cuerpo.addEventListener("keydown", (ev) => {
+      if (ev.target !== cuerpo || !v.sel) return;
+      const ctrl = ev.ctrlKey || ev.metaKey;
+      const td = v.mapa.get(v.sel.i + ":" + v.sel.j);
+      const paginas = Math.max(1, Math.floor(cuerpo.clientHeight / (24 * zoom / 100)) - 2);
+      let hecho = true;
+      switch (ev.key) {
+        case "ArrowUp": if (ev.altKey) cambiarPestana(v, v.hojas[v.hojas.indexOf(v.hoja) - 1]); else if (ctrl) seleccionar(v, 0, v.sel.j); else mover(v, -1, 0); break;
+        case "ArrowDown": if (ev.altKey) cambiarPestana(v, v.hojas[v.hojas.indexOf(v.hoja) + 1]); else if (ctrl) seleccionar(v, v.visF.length - 1, v.sel.j); else mover(v, 1, 0); break;
+        case "ArrowLeft": if (ctrl) seleccionar(v, v.sel.i, 0); else mover(v, 0, -1); break;
+        case "ArrowRight": if (ctrl) seleccionar(v, v.sel.i, v.visC.length - 1); else mover(v, 0, 1); break;
+        case "Tab": mover(v, 0, ev.shiftKey ? -1 : 1); break;
+        case "Home": seleccionar(v, ctrl ? 0 : v.sel.i, 0); break;
+        case "End": seleccionar(v, ctrl ? v.visF.length - 1 : v.sel.i, v.visC.length - 1); break;
+        case "PageDown": seleccionar(v, v.sel.i + paginas, v.sel.j); break;
+        case "PageUp": seleccionar(v, v.sel.i - paginas, v.sel.j); break;
+        case "Enter": case "F2": if (v.editable && !ev.shiftKey) editar(v, td); else mover(v, ev.shiftKey ? -1 : 1, 0); break;
+        default:
+          if (ctrl && (ev.key === "+" || ev.key === "=")) pasoZoom(1);
+          else if (ctrl && ev.key === "-") pasoZoom(-1);
+          else if (ctrl && ev.key === "0") ponerZoom(100);
+          else if (ctrl && (ev.key === "c" || ev.key === "C")) copiar(td);
+          else if (ctrl && (ev.key === "g" || ev.key === "G" || ev.key === "j" || ev.key === "J")) ventana.querySelector(".visor-nombre").focus();
+          // Escribir sobre una celda empieza a editarla, como en Sheets.
+          else if (v.editable && !ctrl && !ev.altKey && ev.key.length === 1) editar(v, td, ev.key);
+          else hecho = false;
+      }
+      if (hecho) ev.preventDefault();
+    });
+  }
+
+  async function copiar(td) {
+    try {
+      await navigator.clipboard.writeText(td._celda.formattedValue || "");
+      avisar("📋 Copiado " + letra(Number(td.dataset.c)) + (Number(td.dataset.f) + 1), "gris");
+    } catch (_) { avisar("No se pudo copiar", "error"); }
   }
 
   // ------------------------------------------------------------------ edición
@@ -306,28 +549,33 @@
     return celda.formattedValue || "";
   }
 
-  function editar(v, td, celda) {
+  // inicial: la tecla con la que se empezó a escribir (reemplaza el contenido, como en Sheets).
+  function editar(v, td, inicial) {
     if (td.classList.contains("celda-editando")) return;
+    const celda = td._celda;
     const original = textoEditable(celda);
     const entrada = nodo("input", { class: "visor-entrada", type: "text", "aria-label": "Valor de la celda" });
-    entrada.value = original;
+    entrada.value = inicial === undefined ? original : inicial;
     td.classList.add("celda-editando");
     td.replaceChildren(entrada);
     entrada.focus();
-    entrada.select();
+    if (inicial === undefined) entrada.select();
     if (celda.userEnteredValue && "formulaValue" in celda.userEnteredValue) avisar("⚠️ Esta celda tiene una fórmula: si la cambias, la reemplazas", "ambar");
 
     let cerrada = false;
-    const cerrar = (guardarCambio) => {
+    const cerrar = (guardarCambio, di, dj) => {
       if (cerrada) return;
       cerrada = true;
       td.classList.remove("celda-editando");
       const nuevo = entrada.value;
-      if (!guardarCambio || nuevo === original) { escribirContenido(td, celda); avisar("", ""); td.focus(); return; }
-      guardar(v, td, celda, nuevo);
+      if (!guardarCambio || nuevo === original) { escribirContenido(td, celda); avisar("", ""); }
+      else guardar(v, td, celda, nuevo);
+      enfocarCuerpo();
+      if (di || dj) mover(v, di, dj);
     };
     entrada.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") { ev.preventDefault(); cerrar(true); }
+      if (ev.key === "Enter") { ev.preventDefault(); cerrar(true, ev.shiftKey ? -1 : 1, 0); }
+      else if (ev.key === "Tab") { ev.preventDefault(); cerrar(true, 0, ev.shiftKey ? -1 : 1); }
       else if (ev.key === "Escape") { ev.preventDefault(); cerrar(false); }
     });
     entrada.addEventListener("blur", () => cerrar(true));
@@ -337,7 +585,7 @@
     const f = Number(td.dataset.f), c = Number(td.dataset.c);
     const r = rango(v.hoja.title, f, c);
     td.classList.add("celda-guardando");
-    td.textContent = texto;
+    td.replaceChildren(nodo("div", { class: "visor-c" }, texto));
     avisar("⏳ Guardando " + letra(c) + (f + 1) + "…", "gris");
     try {
       const resp = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}/values/${encodeURIComponent(r)}` +
@@ -353,6 +601,7 @@
       td.classList.remove("celda-guardando");
       td.classList.add("celda-guardada");
       setTimeout(() => td.classList.remove("celda-guardada"), 1600);
+      if (td.classList.contains("sel")) seleccionar(v, v.sel.i, v.sel.j, false);
       avisar(`✓ Guardado en Google Sheets · ${letra(c)}${f + 1} · ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`, "ok");
     } catch (e) {
       td.classList.remove("celda-guardando");
@@ -364,7 +613,7 @@
   // ------------------------------------------------------------------ mover la ventana
   function arrastrable(asa) {
     asa.addEventListener("pointerdown", (ev) => {
-      if (ev.target.closest("button, a")) return;
+      if (ev.target.closest("button, a") || ventana.classList.contains("maximizada")) return;
       const caja = ventana.getBoundingClientRect();
       const dx = ev.clientX - caja.left, dy = ev.clientY - caja.top;
       asa.setPointerCapture(ev.pointerId);

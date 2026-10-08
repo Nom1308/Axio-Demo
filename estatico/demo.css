@@ -59,19 +59,22 @@
 .hoja-previa-nota { margin: 0; color: #5f6368; }
 .hoja-previa-nota.error { color: #c5221f; }
 
-/* Ventana con la tabla: se puede mover (por la cabecera) y cambiar de tamaño (esquina). */
+/* Ventana con la tabla: se puede mover (por la cabecera), cambiar de tamaño (esquina) y
+   maximizar (⤢ o doble clic en la cabecera). */
 .visor-hoja {
-  width: min(1180px, 96vw); height: min(780px, 90vh); max-width: 100vw; max-height: 100vh;
+  width: min(1280px, 96vw); height: min(820px, 92vh); max-width: 100vw; max-height: 100vh;
   padding: 0; border: 1px solid var(--borde-fuerte); border-radius: 18px; overflow: hidden; resize: both;
   background: var(--vidrio-solido); color: var(--texto); box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .7);
 }
 .visor-hoja[open] { display: flex; flex-direction: column; animation: visor-entra .22s cubic-bezier(.2, .8, .2, 1); }
+.visor-hoja.maximizada { inset: 0; width: 100vw; height: 100vh; margin: 0; border-radius: 0; resize: none; }
 @keyframes visor-entra { from { opacity: 0; transform: translateY(10px) scale(.985); } }
 .visor-hoja::backdrop { background: rgba(3, 10, 36, .45); backdrop-filter: blur(3px); }
 .visor-cabecera {
-  display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: grab; user-select: none;
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 16px; cursor: grab; user-select: none;
   border-bottom: 1px solid var(--borde); flex-wrap: wrap;
 }
+.visor-hoja.maximizada .visor-cabecera { cursor: default; }
 .visor-cabecera:active { cursor: grabbing; }
 .visor-titulo { font-size: 15px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visor-insignia {
@@ -83,62 +86,95 @@
 .visor-estado.ok { color: var(--verde); }
 .visor-estado.error { color: var(--rojo); }
 .visor-estado.ambar { color: var(--ambar); }
+.visor-cabecera .boton-icono { font-size: 17px; line-height: 1; padding: 4px 8px; }
 
-/* Pestañas de la hoja, como pastillas */
-.visor-pestanas { display: flex; gap: 6px; padding: 10px 16px; overflow-x: auto; border-bottom: 1px solid var(--borde); }
+/* Barra como la de Google Sheets: cuadro de nombre, fx y zoom */
+.visor-barra { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #f8f9fa; border-bottom: 1px solid #dadce0; color: #3c4043; }
+.visor-barra .visor-nombre {
+  width: 92px; flex: none; padding: 4px 8px; font: 600 12.5px var(--fuente); color: #202124; background: #fff;
+  border: 1px solid #dadce0; border-radius: 6px; text-transform: uppercase;
+}
+.visor-barra .visor-nombre:hover { background: #fff; }
+.visor-barra .visor-nombre:focus { outline: 2px solid #1a73e8; outline-offset: -1px; border-color: #dadce0; box-shadow: none; background: #fff; }
+.visor-barra .visor-nombre.invalido { outline: 2px solid #d93025; animation: visor-sacudir .3s; }
+@keyframes visor-sacudir { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.visor-fx { flex: none; padding: 0 6px 0 8px; border-left: 1px solid #dadce0; color: #80868b; font: italic 600 13px Georgia, serif; }
+.visor-formula { flex: 1; min-width: 0; font: 13px Arial, sans-serif; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+.visor-zoom { flex: none; display: flex; align-items: center; border: 1px solid #dadce0; border-radius: 6px; background: #fff; overflow: hidden; }
+.visor-zoom button { border: 0; background: none; color: #3c4043; font: 600 13px var(--fuente); padding: 3px 9px; cursor: pointer; }
+.visor-zoom button:hover { background: #f1f3f4; }
+.visor-zoom .visor-zoom-valor { min-width: 54px; font-weight: 500; font-size: 12px; border-inline: 1px solid #eceef1; }
+
+/* Pestañas abajo, como en Google Sheets */
+.visor-pestanas { display: flex; gap: 2px; padding: 0 10px; overflow-x: auto; background: #f8f9fa; border-top: 1px solid #dadce0; flex: none; }
 .visor-pestanas.vacio { display: none; }
 .visor-pestana {
-  padding: 6px 14px; font-size: 12.5px; border-radius: 99px; border: 1px solid var(--borde);
-  background: var(--campo); color: var(--texto-2); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s;
+  padding: 8px 16px; font: 500 13px var(--fuente); border: 0; border-radius: 0 0 8px 8px; background: none; color: #5f6368;
+  cursor: pointer; white-space: nowrap; transition: background .15s, color .15s;
 }
-.visor-pestana:hover { background: var(--campo-hover); color: var(--texto); }
-.visor-pestana.activa { background: #fff; color: #1E3A8A; font-weight: 700; border-color: transparent; box-shadow: 0 4px 14px -6px rgba(0, 0, 0, .45); }
+.visor-pestana:hover { background: #e8eaed; color: #202124; }
+.visor-pestana.activa { background: #e1e9f7; color: #0b57d0; font-weight: 700; box-shadow: inset 0 3px 0 #0b57d0; }
 
-/* El cuerpo es un lienzo; la hoja va encima como una tarjeta de papel. */
-.visor-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 16px; background: var(--campo); }
+/* La hoja, tal cual: medidas de la hoja original, Arial 10, cuadrícula gris clara. */
+.visor-cuerpo { flex: 1; min-height: 0; overflow: auto; background: #fff; outline: none; overscroll-behavior: contain; }
+.visor-cuerpo > .visor-nota { margin: 16px; }
 .visor-nota { margin: 6px 2px; color: var(--texto-2); font-size: 13px; }
 .visor-nota.error { color: var(--rojo); }
-.visor-tabla-envoltura {
-  width: max-content; min-width: min(100%, 480px); background: #fff; border-radius: 14px; overflow: clip;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 18px 40px -22px rgba(0, 0, 0, .55);
-}
-.visor-tabla-envoltura > .visor-nota { margin: 0; padding: 10px 16px; color: #64748b; font-size: 12px; border-top: 1px solid #eef1f6; background: #fafbfd; }
+.visor-tabla-envoltura { width: max-content; min-width: 100%; background: #fff; }
+.visor-tabla-envoltura > .visor-nota { margin: 0; padding: 8px 12px; color: #5f6368; font-size: 12px; border-top: 1px solid #e2e3e3; background: #f8f9fa; }
 
 .visor-tabla {
   border-collapse: separate; border-spacing: 0; table-layout: fixed; width: max-content; min-width: 0;
-  font: 13px/1.45 var(--fuente); color: #1e293b; background: #fff; font-variant-numeric: tabular-nums;
+  font: 10pt/1.15 Arial, sans-serif; color: #000; background: #fff;
 }
 .visor-tabla th, .visor-tabla td {
-  border: 0; border-bottom: 1px solid #eef1f6; border-right: 1px solid #f3f5f9;
-  padding: 8px 12px; height: 36px; vertical-align: middle; white-space: normal; overflow-wrap: anywhere;
-  text-transform: none; letter-spacing: normal; position: static; font-size: 13px;
+  box-sizing: border-box; border: 0; border-right: 1px solid #e2e3e3; border-bottom: 1px solid #e2e3e3;
+  padding: 0 3px; height: auto; vertical-align: bottom; position: static;
+  text-transform: none; letter-spacing: normal; font-size: inherit;
+  /* Sin el límite de 300 px ni el recorte con "…" de las tablas de resultados de Axio */
+  max-width: none; overflow: visible; text-overflow: clip; white-space: nowrap;
 }
-.visor-tabla td.num { white-space: nowrap; }
-.visor-tabla thead th {
-  position: sticky; top: -16px; z-index: 2; height: 30px; padding: 6px 12px; background: #f8fafc; color: #94a3b8;
-  font-weight: 600; font-size: 11px; letter-spacing: .04em; text-align: center; border-bottom: 1px solid #e5e9f0;
-}
-.visor-tabla tbody th {
-  position: sticky; left: -16px; z-index: 1; padding: 6px 4px; background: #fafbfd; color: #a3adbd;
-  font-weight: 500; font-size: 11px; text-align: center; border-right: 1px solid #eef1f6;
-}
-.visor-tabla .visor-esquina { left: -16px; z-index: 3; }
-.visor-tabla tbody tr { cursor: default; background: transparent; }
-.visor-tabla tbody tr:hover { background: transparent; }
+.visor-tabla tbody tr, .visor-tabla tbody tr:nth-child(even), .visor-tabla tbody tr:hover { background: transparent; cursor: default; }
 .visor-tabla tbody tr:hover td:first-child { box-shadow: none; }
-.visor-tabla tbody tr:hover td { background-color: #f4f7ff; }
-.visor-tabla tbody tr:hover th { color: #2F7DF6; background: #eef3ff; }
-.visor-tabla tbody tr:last-child > * { border-bottom: 0; }
-.visor-tabla td a { color: #2563eb; font-weight: 500; text-decoration: none; }
-.visor-tabla td a:hover { text-decoration: underline; }
-.visor-tabla td[tabindex] { cursor: cell; }
-.visor-tabla td[tabindex]:focus { outline: 2px solid #2F7DF6; outline-offset: -2px; border-radius: 4px; }
-.visor-tabla td.celda-editando { padding: 0; outline: 2px solid #2F7DF6; outline-offset: -2px; overflow: visible; }
-.visor-entrada {
-  width: 100%; height: 100%; min-height: 36px; border: 0; border-radius: 0; padding: 8px 12px;
-  font: inherit; color: #1e293b; background: #fff; box-shadow: 0 6px 18px -8px rgba(47, 125, 246, .5);
+.visor-tabla td { background-color: #fff; scroll-margin-top: var(--margen-arriba); scroll-margin-left: var(--margen-izq); }
+.visor-tabla .visor-c { overflow: hidden; white-space: nowrap; }
+.visor-tabla td.c-derramar .visor-c { overflow: visible; }
+.visor-tabla td.c-ajustar .visor-c { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Letras de columna y números de fila */
+.visor-tabla thead th, .visor-tabla tbody th {
+  background: #f8f9fa; color: #5f6368; font: 400 11px/1 Arial, sans-serif; text-align: center; vertical-align: middle;
+  border-color: #c4c7c5; user-select: none;
 }
-.visor-entrada:focus { outline: none; }
+.visor-tabla thead th { position: sticky; top: 0; z-index: 8; height: 22px; padding: 0 2px; }
+.visor-tabla tbody th { position: sticky; left: 0; z-index: 7; padding: 0 2px; }
+.visor-tabla .visor-esquina { left: 0; z-index: 10; }
+.visor-tabla thead th.fija { z-index: 9; }
+.visor-tabla tr.fija > th { position: sticky; z-index: 8; }
+.visor-tabla thead th.activa, .visor-tabla tbody th.activa { background: #d3e3fd; color: #041e49; font-weight: 700; }
+
+/* Filas y columnas inmovilizadas: la línea gruesa gris marca dónde termina lo fijo. Cada
+   grupo va en su capa; la celda cuyo texto se derrama, una encima de sus vecinas. */
+.visor-tabla td.fija-f, .visor-tabla td.fija-c, .visor-tabla td.fija-ambas { position: sticky; }
+.visor-tabla td.fija-c { z-index: 1; }
+.visor-tabla td.fija-c.c-derramar { z-index: 2; }
+.visor-tabla td.fija-f { z-index: 3; }
+.visor-tabla td.fija-f.c-derramar { z-index: 4; }
+.visor-tabla td.fija-ambas { z-index: 5; }
+.visor-tabla td.fija-ambas.c-derramar { z-index: 6; }
+.visor-tabla tr.fin-fijas-f > * { border-bottom: 3px solid #c4c7c5; }
+.visor-tabla .fin-fijas-c { border-right: 3px solid #c4c7c5; }
+
+/* Celda seleccionada, como en Sheets (el contorno se pinta encima de todo lo de su capa) */
+.visor-tabla td.sel { outline: 2px solid #1a73e8; outline-offset: -2px; }
+.visor-tabla td { cursor: cell; }
+.visor-tabla td a { color: #1155cc; text-decoration: underline; }
+.visor-tabla td.celda-editando { padding: 0; outline: 2px solid #1a73e8; outline-offset: -2px; overflow: visible; }
+.visor-tabla .visor-entrada {
+  width: 100%; height: 100%; min-height: 21px; border: 0; border-radius: 0; padding: 0 3px;
+  font: inherit; color: #000; background: #fff; box-shadow: 0 2px 8px rgba(60, 64, 67, .35);
+}
+.visor-tabla .visor-entrada:focus, .visor-tabla .visor-entrada:hover { outline: none; border: 0; background: #fff; box-shadow: 0 2px 8px rgba(60, 64, 67, .35); }
 .visor-tabla td.celda-guardando { color: #94a3b8; }
 .visor-tabla td.celda-guardada { animation: celda-ok 1.6s ease; }
 /* ==========================================================================

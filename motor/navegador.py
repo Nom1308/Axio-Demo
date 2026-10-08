@@ -265,6 +265,9 @@ def leer_excel(id_archivo, nombre_hoja, max_filas, max_columnas):
     columnas = min(ws.max_column or 1, max_columnas)
 
     alineaciones = {'left': 'LEFT', 'center': 'CENTER', 'centerContinuous': 'CENTER', 'right': 'RIGHT'}
+    verticales = {'top': 'TOP', 'center': 'MIDDLE', 'bottom': 'BOTTOM'}
+    estilos_borde = {'thin': 'SOLID', 'hair': 'SOLID', 'medium': 'SOLID_MEDIUM', 'thick': 'SOLID_THICK',
+                     'dashed': 'DASHED', 'mediumDashed': 'DASHED', 'dotted': 'DOTTED', 'double': 'DOUBLE'}
     datos_filas = []
     for fila in ws.iter_rows(min_row=1, max_row=filas, max_col=columnas):
         valores = []
@@ -282,14 +285,35 @@ def leer_excel(id_archivo, nombre_hoja, max_filas, max_columnas):
                     texto['bold'] = True
                 if fuente.i:
                     texto['italic'] = True
+                if fuente.u:
+                    texto['underline'] = True
+                if fuente.strike:
+                    texto['strikethrough'] = True
+                if fuente.sz:
+                    texto['fontSize'] = float(fuente.sz)
+                if fuente.name:
+                    texto['fontFamily'] = fuente.name
                 letra = _color_excel(fuente.color)
                 if letra:
                     texto['foregroundColor'] = letra
             if texto:
                 formato['textFormat'] = texto
-            horizontal = c.alignment.horizontal if c.alignment is not None else None
+            alineacion = c.alignment
+            horizontal = alineacion.horizontal if alineacion is not None else None
             if horizontal in alineaciones:
                 formato['horizontalAlignment'] = alineaciones[horizontal]
+            vertical = alineacion.vertical if alineacion is not None else None
+            if vertical in verticales:
+                formato['verticalAlignment'] = verticales[vertical]
+            if alineacion is not None and alineacion.wrap_text:
+                formato['wrapStrategy'] = 'WRAP'
+            bordes = {}
+            for lado in ('top', 'bottom', 'left', 'right'):
+                b = getattr(c.border, lado, None) if c.border is not None else None
+                if b is not None and b.style in estilos_borde:
+                    bordes[lado] = {'style': estilos_borde[b.style], 'color': _color_excel(b.color) or {}}
+            if bordes:
+                formato['borders'] = bordes
             celda = {'formattedValue': _texto_excel(c.value, c.number_format), 'effectiveFormat': formato}
             if isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
                 celda['effectiveValue'] = {'numberValue': c.value}
@@ -302,11 +326,18 @@ def leer_excel(id_archivo, nombre_hoja, max_filas, max_columnas):
     for i in range(1, columnas + 1):
         dim = ws.column_dimensions.get(get_column_letter(i))
         ancho = dim.width if dim is not None and dim.width else 8.43
-        anchos.append({'pixelSize': round(ancho * 7 + 5)})
+        anchos.append({'pixelSize': round(ancho * 7 + 5), 'hiddenByUser': bool(dim is not None and dim.hidden)})
     altos = []
     for i in range(1, filas + 1):
         dim = ws.row_dimensions.get(i)
-        altos.append({'pixelSize': round(dim.height * 4 / 3) if dim is not None and dim.height else 21})
+        altos.append({'pixelSize': round(dim.height * 4 / 3) if dim is not None and dim.height else 21,
+                      'hiddenByUser': bool(dim is not None and dim.hidden)})
+    # Paneles inmovilizados: freeze_panes es la primera celda que NO queda fija (p. ej. "C5").
+    congeladas = {'filas': 0, 'cols': 0}
+    if ws.freeze_panes:
+        from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+        col_letras, fila_num = coordinate_from_string(ws.freeze_panes)
+        congeladas = {'filas': fila_num - 1, 'cols': column_index_from_string(col_letras) - 1}
     merges = [{'startRowIndex': r.min_row - 1, 'endRowIndex': r.max_row,
                'startColumnIndex': r.min_col - 1, 'endColumnIndex': r.max_col}
               for r in ws.merged_cells.ranges if r.min_row <= filas and r.min_col <= columnas]
@@ -314,6 +345,7 @@ def leer_excel(id_archivo, nombre_hoja, max_filas, max_columnas):
         'hojas': [w.title for w in visibles],
         'hoja': ws.title,
         'recortada': (ws.max_row or 0) > max_filas or (ws.max_column or 0) > max_columnas,
+        'congeladas': congeladas,
         'libro': {'sheets': [{'merges': merges, 'data': [{
             'columnMetadata': anchos, 'rowMetadata': altos, 'rowData': datos_filas}]}]},
     }, ensure_ascii=False)
