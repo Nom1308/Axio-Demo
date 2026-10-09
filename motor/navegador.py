@@ -445,6 +445,29 @@ def atender(url):
             return _json({'error': "Ese resultado ya no está disponible. Vuelve a buscar."}, 404)
         return _json(detalle)
 
+    # Tabla completa de los Extractos (ver MotorWeb.tabla), igual que en web/app.py.
+    if ruta[:2] == ['api', 'tabla']:
+        a = {k: v[0] for k, v in parse_qs(partes.query).items()}
+        try:
+            if len(ruta) == 2:
+                datos = _motor.tabla(int(a.get('desde', 0) or 0), int(a.get('cuantas', 200) or 200),
+                                     a.get('f', ''), a.get('orden', ''))
+            elif ruta[2:] == ['valores']:
+                datos = _motor.valores_tabla(a.get('col', ''), a.get('f', ''), a.get('q', ''))
+            elif len(ruta) == 4 and ruta[2] == 'detalle' and ruta[3].isdigit():
+                datos = _motor.detalle_tabla(int(ruta[3]))
+            elif ruta[2:] == ['exportar']:
+                datos = _motor.exportar_tabla(a.get('f', ''), a.get('orden', ''))
+                if datos is not None:
+                    return 200, TIPO_XLSX, datos
+            else:
+                return _json({'error': "No encontrado."}, 404)
+        except ValueError as e:
+            return _json({'error': str(e)}, 400)
+        if datos is None:
+            return _json({'error': "Los Extractos todavía no están cargados."}, 503)
+        return _json(datos)
+
     if len(ruta) == 3 and ruta[:2] == ['api', 'exportar']:
         exportado = _motor.exportar(ruta[2], USUARIO)
         if exportado is None:

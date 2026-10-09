@@ -38,6 +38,15 @@
     return m ? m[1] : null;
   }
   const gidDe = (url) => { const m = /[#&?]gid=(\d+)/.exec(url); return m ? Number(m[1]) : null; };
+  // «…#gid=1&range=A1520:AF1520» -> { fila: 1519, col: 0, colFin: 31 } (desde 0). Así llega
+  // «Ver obligación» de Seguro de Vida: a la fila de la persona en la hoja maestra.
+  function destinoDe(url) {
+    const r = /[#&?]range=([^&]+)/.exec(url || "");
+    const m = r && /^\$?([a-z]{1,3})\$?(\d{1,7})(?::\$?([a-z]{1,3})\$?(\d{1,7}))?$/i.exec(decodeURIComponent(r[1]));
+    if (!m) return null;
+    const col = columnaDeLetras(m[1]);
+    return { fila: Number(m[2]) - 1, col, colFin: m[3] ? columnaDeLetras(m[3]) : col };
+  }
   const letra = (i) => { let s = ""; for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
   const rango = (hoja, fila, col) => `'${hoja.replace(/'/g, "''")}'!${letra(col)}${fila + 1}`;
   const color = (c) => c ? `rgb(${Math.round((c.red || 0) * 255)},${Math.round((c.green || 0) * 255)},${Math.round((c.blue || 0) * 255)})` : null;
@@ -147,14 +156,15 @@
 
   let visor = null;   // { id, archivo, hojas, hoja, editable, datos, merges, visF, visC, mapa, sel }
 
-  async function abrirVisor(id, gid) {
+  async function abrirVisor(id, gid, url) {
     ocultarPrevia();
     ventana.replaceChildren(cabeceraVisor(null), nodo("div", { class: "visor-cuerpo" }, nodo("p", { class: "visor-nota", text: "⏳ Abriendo la hoja…" })));
     if (!ventana.open) ventana.showModal();
+    const destino = destinoDe(url);
     try {
       const archivo = await datosArchivo(id);
       if (esExcel(archivo)) {
-        visor = { id, archivo, excel: true, hojas: [], hoja: null, editable: false };
+        visor = { id, archivo, excel: true, hojas: [], hoja: null, editable: false, destino };
         await cargarHoja();
         return;
       }
@@ -162,7 +172,8 @@
         "sheets.properties(sheetId,title,index,hidden,gridProperties(rowCount,columnCount,frozenRowCount,frozenColumnCount))")}`);
       const hojas = libro.sheets.map((h) => h.properties).filter((h) => !h.hidden || h.sheetId === gid);
       const hoja = hojas.find((h) => h.sheetId === gid) || hojas[0];
-      visor = { id, archivo, hojas, hoja, editable: Boolean(archivo.capabilities && archivo.capabilities.canEdit && google().puedeEscribir()) };
+      visor = { id, archivo, hojas, hoja, editable: Boolean(archivo.capabilities && archivo.capabilities.canEdit && google().puedeEscribir()),
+        destino, url: destino && hoja.sheetId === gid ? url : null };
       await cargarHoja();
     } catch (e) {
       ventana.querySelector(".visor-cuerpo").replaceChildren(nodo("p", { class: "visor-nota error", text: "No se pudo abrir la hoja: " + e.message + "." }));
@@ -179,7 +190,8 @@
         "aria-label": "Copiar el nombre de la hoja", text: "📋", onclick: () => copiarTexto(v.archivo.name, "📋 Nombre de la hoja copiado") }) : null,
       v ? nodo("span", { class: v.editable ? "visor-insignia editable" : "visor-insignia", text: v.editable ? "Puedes editar" : v.excel ? "Excel · solo lectura" : "Solo lectura" }) : null,
       estado,
-      v ? nodo("a", { class: "boton boton-chico", href: v.archivo.webViewLink || `https://docs.google.com/spreadsheets/d/${v.id}/edit${v.hoja && !v.excel ? "#gid=" + v.hoja.sheetId : ""}`,
+      v ? nodo("a", { class: "boton boton-chico", href: (v.url && v.hoja && v.url.includes("gid=" + v.hoja.sheetId) ? v.url : null)
+          || v.archivo.webViewLink || `https://docs.google.com/spreadsheets/d/${v.id}/edit${v.hoja && !v.excel ? "#gid=" + v.hoja.sheetId : ""}`,
         target: "_blank", rel: "noopener noreferrer", text: "Abrir en Google Sheets ↗" }) : null,
       nodo("button", { class: "boton boton-texto boton-icono", type: "button", title: "Maximizar / restaurar (doble clic en esta barra)",
         "aria-label": "Maximizar o restaurar", text: "⤢", onclick: maximizar }),
@@ -253,6 +265,8 @@
       v.hoja = v.hojas.find((h) => h.title === r.hoja) || v.hojas[0];
       v.recortada = r.recortada;
       v.congeladas = r.congeladas || { filas: 0, cols: 0 };
+      v.filasCargadas = null;
+      v.tramoFilas = null;
       libro = r.libro;
       const rowData = libro.sheets[0].data[0].rowData;
       filas = rowData.length;
@@ -260,16 +274,41 @@
       ventana.querySelector(".visor-pestanas").replaceWith(pestanas(v));
     } else {
       const g = v.hoja.gridProperties || {};
-      filas = Math.min(g.rowCount || MAX_FILAS, MAX_FILAS);
+      const totalFilas = g.rowCount || MAX_FILAS;
       cols = Math.min(g.columnCount || 26, MAX_COLUMNAS);
       v.congeladas = { filas: g.frozenRowCount || 0, cols: g.frozenColumnCount || 0 };
-      const r = `'${v.hoja.title.replace(/'/g, "''")}'!A1:${letra(cols - 1)}${filas}`;
-      const campos = "sheets(merges,data(columnMetadata(pixelSize,hiddenByUser),rowMetadata(pixelSize,hiddenByUser,hiddenByFilter),rowData(values(" +
+      // Se traen MAX_FILAS filas: las primeras o, si se pidió una fila más abajo (Seguro de
+      // Vida), las de alrededor de esa fila, más las inmovilizadas de arriba (el encabezado).
+      const fijas = Math.min(v.congeladas.filas, totalFilas);
+      let desde = 0;
+      if (v.destino && v.destino.fila >= MAX_FILAS - 60) {
+        desde = Math.max(fijas, Math.min(v.destino.fila - 100, totalFilas - (MAX_FILAS - fijas)));
+      }
+      const hasta = Math.min(totalFilas, desde ? desde + MAX_FILAS - fijas : MAX_FILAS);
+      filas = hasta;
+      v.tramoFilas = desde ? { desde, hasta } : null;
+      v.filasCargadas = [];
+      for (let f = 0; f < (desde ? fijas : 0); f++) v.filasCargadas.push(f);
+      for (let f = desde; f < hasta; f++) v.filasCargadas.push(f);
+      const hoja = `'${v.hoja.title.replace(/'/g, "''")}'!`;
+      const rangos = [hoja + `A${desde + 1}:${letra(cols - 1)}${hasta}`];
+      if (desde && fijas) rangos.unshift(hoja + `A1:${letra(cols - 1)}${fijas}`);
+      const campos = "sheets(merges,data(startRow,columnMetadata(pixelSize,hiddenByUser),rowMetadata(pixelSize,hiddenByUser,hiddenByFilter),rowData(values(" +
         "formattedValue,hyperlink,userEnteredValue,effectiveValue(numberValue)," +
         "effectiveFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,borders," +
         "textFormat(bold,italic,underline,strikethrough,foregroundColor,fontSize,fontFamily))))))";
-      libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}?ranges=${encodeURIComponent(r)}&includeGridData=true&fields=${encodeURIComponent(campos)}`);
-      v.recortada = (g.rowCount || 0) > MAX_FILAS || (g.columnCount || 0) > MAX_COLUMNAS;
+      libro = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}?${rangos.map((r) => "ranges=" + encodeURIComponent(r)).join("&")}` +
+        `&includeGridData=true&fields=${encodeURIComponent(campos)}`);
+      v.recortada = totalFilas > MAX_FILAS || (g.columnCount || 0) > MAX_COLUMNAS;
+      // Cada rango llega por separado (con su fila de inicio): se juntan por número de fila.
+      const juntos = { rowData: [], rowMetadata: [], columnMetadata: [] };
+      for (const d of libro.sheets[0].data || []) {
+        const inicio = d.startRow || 0;
+        (d.rowData || []).forEach((x, k) => { juntos.rowData[inicio + k] = x; });
+        (d.rowMetadata || []).forEach((x, k) => { juntos.rowMetadata[inicio + k] = x; });
+        if (!juntos.columnMetadata.length && d.columnMetadata) juntos.columnMetadata = d.columnMetadata;
+      }
+      libro.sheets[0].data = [juntos];
     }
     v.datos = (libro.sheets[0].data || [])[0] || {};
     v.merges = libro.sheets[0].merges || [];
@@ -282,6 +321,32 @@
     enfocarCuerpo();
     avisar(v.editable ? "Doble clic o Enter en una celda para escribir"
       : v.excel ? "Es un archivo de Excel guardado en Drive: para editarlo, ábrelo en Google Sheets" : "", "gris");
+    if (v.destino) irADestino(v, v.destino);
+    v.destino = null;
+  }
+
+  // La fila pedida queda seleccionada entera, al centro de la vista y resaltada un momento.
+  function irADestino(v, d) {
+    const i = v.visF.indexOf(d.fila);
+    if (i < 0) { avisar(`La fila ${d.fila + 1} no está a la vista en esta hoja (puede estar oculta o filtrada)`, "ambar"); return; }
+    let j0 = v.visC.findIndex((c) => c >= d.col);
+    let j1 = v.visC.length - 1 - [...v.visC].reverse().findIndex((c) => c <= d.colFin);
+    if (j0 < 0) j0 = 0;
+    if (j1 < j0 || j1 >= v.visC.length) j1 = v.visC.length - 1;
+    v.ancla = { i, j: j1 };
+    seleccionar(v, i, j0, false, true);
+    const td = v.mapa.get(i + ":" + j0);
+    if (td) {
+      // Al centro, pero sin quedar debajo de las filas inmovilizadas.
+      const cuerpo = ventana.querySelector(".visor-cuerpo");
+      const caja = cuerpo.getBoundingClientRect(), r = td.getBoundingClientRect();
+      cuerpo.scrollTop += r.top - caja.top - Math.max(caja.height / 2 - r.height, 0);
+      cuerpo.scrollLeft = 0;
+      const fila = td.parentElement;
+      fila.classList.add("visor-fila-destino");
+      setTimeout(() => fila.classList.remove("visor-fila-destino"), 2600);
+    }
+    avisar(`📍 Fila ${d.fila + 1}: la de esta persona`, "ok");
   }
 
   // Pestañas abajo, como en Google Sheets. Alt + ↑/↓ cambia de pestaña.
@@ -297,6 +362,7 @@
   function cambiarPestana(v, h) {
     if (!h || h.sheetId === v.hoja.sheetId) return;
     v.hoja = h;
+    v.destino = null;
     cargarHoja().catch((e) => avisar("❌ " + e.message, "error"));
   }
 
@@ -311,7 +377,8 @@
     const ancho = (c) => Math.max(8, (metaC[c] || {}).pixelSize || 100);
     // Lo que está oculto en la hoja (a mano, por filtro o con un grupo contraído) no se dibuja.
     const visF = [], visC = [];
-    for (let f = 0; f < filas; f++) if (!((metaF[f] || {}).hiddenByUser || (metaF[f] || {}).hiddenByFilter)) visF.push(f);
+    const cargadas = v.filasCargadas || Array.from({ length: filas }, (_, f) => f);
+    for (const f of cargadas) if (!((metaF[f] || {}).hiddenByUser || (metaF[f] || {}).hiddenByFilter)) visF.push(f);
     for (let c = 0; c < cols; c++) if (!(metaC[c] || {}).hiddenByUser) visC.push(c);
     if (!visF.length) visF.push(0);
     if (!visC.length) visC.push(0);
@@ -387,7 +454,11 @@
     const t = nodo("table", { class: "visor-tabla", style: `width:${anchoTotal}px;zoom:${zoom / 100};--margen-arriba:${fondoFijas}px;--margen-izq:${bordeFijas}px` },
       grupoCols, nodo("thead", null, cabeza), cuerpo);
     const envoltura = nodo("div", { class: "visor-tabla-envoltura" }, t);
-    if (v.recortada) envoltura.append(nodo("p", { class: "visor-nota", text: `Se muestran las primeras ${filas} filas y ${cols} columnas. El resto, en «Abrir en Google Sheets».` }));
+    if (v.tramoFilas) {
+      envoltura.append(nodo("p", { class: "visor-nota", text: `Se muestran las filas ${v.tramoFilas.desde + 1} a ${v.tramoFilas.hasta} (alrededor de la buscada) y el encabezado. El resto, en «Abrir en Google Sheets».` }));
+    } else if (v.recortada) {
+      envoltura.append(nodo("p", { class: "visor-nota", text: `Se muestran las primeras ${filas} filas y ${cols} columnas. El resto, en «Abrir en Google Sheets».` }));
+    }
     return envoltura;
   }
 
@@ -793,7 +864,7 @@
       if (!google() || !google().conectado() || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
       ev.preventDefault();
       ev.stopPropagation();
-      abrirVisor(id, gidDe(url));
+      abrirVisor(id, gidDe(url), url);
     });
   };
 })();

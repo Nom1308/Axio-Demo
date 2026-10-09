@@ -1417,8 +1417,19 @@ def descargar_linea_credito(url, clave=None):
             return None
         return v
 
+    # Seguro de Vida: no hay una hoja por obligación; todo se gestiona en la maestra. «Ver
+    # obligación» lleva a la fila de la persona en esa misma hoja (con su pestaña, gid).
+    enlace_a_fila = None
+    if clave in CLAVES_LINEAS_CON_INFO_EXTRA and "docs.google.com/spreadsheets" in url:
+        base = re.match(r'https://docs\.google\.com/spreadsheets/d/[\w-]+', url)
+        gid_hoja = re.search(r'[#&?]gid=(\d+)', url)
+        if base:
+            ultima_col = get_column_letter(max(1, len(encabezados)))
+            enlace_a_fila = (lambda n, b=base.group(0), g=(gid_hoja.group(1) if gid_hoja else '0'):
+                             f"{b}/edit#gid={g}&range=A{n}:{ultima_col}{n}")
     roster = {}
-    for fila_celdas in filas[1:]:
+    # n_fila: el número de la fila en la hoja (iter_rows empieza en la 1, también openpyxl).
+    for n_fila, fila_celdas in enumerate(filas[1:], start=2):
         if idx_cedula >= len(fila_celdas):
             continue
         cedula_raw = fila_celdas[idx_cedula].value
@@ -1453,6 +1464,8 @@ def descargar_linea_credito(url, clave=None):
                 if isinstance(v, str) and v.strip().lower().startswith(('http://', 'https://')):
                     link_obligacion = v.strip()
                     break
+        if enlace_a_fila is not None:
+            link_obligacion = enlace_a_fila(n_fila)   # el enlace de la celda sigue en 'campos'
 
         # El tipo de crédito suele llevar un hipervínculo al último registro del crédito.
         link_registro = None

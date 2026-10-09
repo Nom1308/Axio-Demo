@@ -199,7 +199,13 @@
     } else if (m.error) {
       zona.append(el("span", { class: "error", text: "❌ Los Extractos no se pudieron cargar" }));
     } else if (m.filas) {
-      zona.append(el("span", { text: `☁️ Extractos: ${formatoMiles.format(m.filas)} filas · ${haceCuanto(m.hora)}` }));
+      const casilla = el("input", { type: "checkbox", id: "ver-tabla" });
+      casilla.checked = !ventanaTabla.hidden;
+      casilla.addEventListener("change", () => (casilla.checked ? abrirTabla() : cerrarTabla()));
+      zona.append(el("span", { text: `☁️ Extractos: ${formatoMiles.format(m.filas)} filas · ${haceCuanto(m.hora)}` }),
+        el("label", { class: "interruptor interruptor-tabla", title: "Muestra debajo los Extractos completos, tal cual la hoja, con filtros en los encabezados" },
+          casilla, " Ver todos los pagos"));
+      if (ventanaTabla.hidden && tablaPreferida()) abrirTabla();
     }
     if (l.configuradas) {
       const errores = Object.keys(l.errores || {});
@@ -459,11 +465,15 @@
   }
 
   // ------------------------------------------------------------------ detalle
-  async function abrirDetalle(i) {
+  function abrirDetalle(i) {
+    return abrirDetalleDe(`/api/detalle/${encodeURIComponent(busqueda.id)}/${i}`);
+  }
+
+  async function abrirDetalleDe(url) {
     cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
     if (!dialogo.open) dialogo.showModal();
     try {
-      const { datos } = await apiJson(`/api/detalle/${encodeURIComponent(busqueda.id)}/${i}`);
+      const { datos } = await apiJson(url);
       pintarDetalle(datos);
     } catch (e) {
       cuerpoDetalle.replaceChildren(el("p", { class: "aviso aviso-error", text: e.message }));
@@ -869,6 +879,404 @@
     }
     if (conDetalle) nodo.append(el("span", { class: "credito-ver", text: "Ver obligación completa ›" }));
     return nodo;
+  }
+
+  // ------------------------------------------------------------------ tabla completa
+  // Los Extractos enteros, tal cual la hoja, con un filtro en cada encabezado como en Google
+  // Sheets o Excel: valores con casillas, buscar entre ellos y ordenar. Filtrar y ordenar lo
+  // hace el servidor (/api/tabla); la página pide las filas por tramos a medida que se
+  // desplaza y solo dibuja las que se ven, así que miles de pagos se recorren sin trabarse.
+  // Es opcional: aparece debajo del buscador solo si se marca «Ver todos los pagos», y la
+  // página recuerda (en este equipo) si se dejó marcada.
+  const TRAMO_TABLA = 200;
+  const SIN_ESTADO = "Sin gestionar";
+  const CLAVE_VER_TABLA = "axio.verTabla";
+  const ventanaTabla = el("section", { class: "tabla-completa", "aria-labelledby": "tc-titulo", hidden: true });
+  $(".panel-busqueda").after(ventanaTabla);
+  const tc = {
+    columnas: [], anchos: [], filtros: {}, orden: null, total: 0, filtradas: 0, hora: null,
+    tramos: new Map(), pidiendo: new Set(), version: 0, altoFila: 34, pintada: "", menu: null,
+  };
+
+  const nombreColumna = (col) => (col === "estado" ? "Estado" : tc.columnas[col]);
+  const textoValor = (col, v) => (col === "estado" ? (v ? ESTADOS[v] || v : SIN_ESTADO) : v === "" ? "(Vacías)" : v);
+
+  function urlTabla(base, extra) {
+    const p = new URLSearchParams(extra || {});
+    if (Object.keys(tc.filtros).length) p.set("f", JSON.stringify(tc.filtros));
+    if (tc.orden) p.set("orden", `${tc.orden.col}:${tc.orden.asc ? "asc" : "desc"}`);
+    const q = p.toString();
+    return q ? `${base}?${q}` : base;
+  }
+
+  function tablaPreferida() {
+    try { return sessionStorage.getItem(CLAVE_VER_TABLA) === "1"; } catch (_) { return false; }
+  }
+  function recordarTabla(si) {
+    try { si ? sessionStorage.setItem(CLAVE_VER_TABLA, "1") : sessionStorage.removeItem(CLAVE_VER_TABLA); } catch (_) { /* sin almacenamiento */ }
+  }
+  function marcarCasillaTabla() {
+    const casilla = $("#ver-tabla");
+    if (casilla) casilla.checked = !ventanaTabla.hidden;
+  }
+
+  function cerrarTabla() {
+    if (ventanaTabla.hidden) return;
+    cerrarMenuFiltro();
+    tc.version++;
+    tc.tramos.clear();
+    ventanaTabla.hidden = true;
+    ventanaTabla.replaceChildren();
+    recordarTabla(false);
+    marcarCasillaTabla();
+  }
+
+  async function abrirTabla() {
+    if (!ventanaTabla.hidden) return;
+    recordarTabla(true);
+    tc.filtros = {};
+    tc.orden = null;
+    tc.columnas = [];
+    ventanaTabla.replaceChildren(
+      el("div", { class: "tc-barra" },
+        el("div", { class: "tc-titulos" },
+          el("h2", { id: "tc-titulo", text: "Extractos · todos los pagos" }),
+          el("span", { class: "tc-conteo", "aria-live": "polite" })),
+        el("button", { class: "boton boton-chico tc-quitar", type: "button", text: "Quitar filtros", hidden: true, onclick: quitarFiltros }),
+        el("button", { class: "boton boton-chico boton-exportar tc-exportar", type: "button", text: "Exportar a Excel",
+          title: "Descarga lo que se ve: todas las filas filtradas, en este orden", onclick: exportarTabla }),
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Ocultar la tabla", title: "Ocultar la tabla", text: "✕", onclick: cerrarTabla })),
+      el("div", { class: "tc-chips", hidden: true }),
+      el("div", { class: "tc-cuerpo", tabindex: "0" }, el("p", { class: "tc-nota", text: "Cargando los Extractos…" })));
+    ventanaTabla.querySelector(".tc-cuerpo").addEventListener("scroll", programarPintado, { passive: true });
+    ventanaTabla.hidden = false;
+    marcarCasillaTabla();
+    await recargarTabla(true);
+  }
+
+  // Escape cierra el menú del filtro abierto; un clic fuera de él, también.
+  ventanaTabla.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && tc.menu) { ev.preventDefault(); cerrarMenuFiltro(); } });
+  document.addEventListener("pointerdown", (ev) => {
+    if (tc.menu && !tc.menu.contains(ev.target) && !(ev.target instanceof Element && ev.target.closest(".tc-th"))) cerrarMenuFiltro();
+  });
+  window.addEventListener("resize", () => { if (!ventanaTabla.hidden) { cerrarMenuFiltro(); programarPintado(); } });
+
+  // Con filtros u orden nuevos: se vuelve a pedir desde la primera fila.
+  async function recargarTabla(primeraVez) {
+    const version = ++tc.version;
+    tc.tramos.clear();
+    tc.pidiendo.clear();
+    tc.pintada = "";
+    const cuerpo = ventanaTabla.querySelector(".tc-cuerpo");
+    try {
+      const { datos } = await apiJson(urlTabla("/api/tabla", { desde: 0, cuantas: TRAMO_TABLA }));
+      if (version !== tc.version) return;
+      if (primeraVez) {
+        tc.columnas = datos.columnas;
+        tc.anchos = calcularAnchos(datos);
+      }
+      tc.total = datos.total;
+      tc.filtradas = datos.filtradas;
+      tc.hora = datos.hora;
+      tc.tramos.set(0, datos.filas);
+      if (primeraVez || !cuerpo.querySelector("table")) armarTabla();
+      cuerpo.scrollTop = 0;
+      pintarBarraTabla();
+      pintarFilasTabla();
+    } catch (e) {
+      if (version !== tc.version) return;
+      cuerpo.replaceChildren(el("p", { class: "aviso aviso-error tc-nota", text: "❌ " + e.message }));
+    }
+  }
+
+  // Ancho de cada columna según su encabezado y las primeras filas, entre un mínimo y un
+  // máximo; el texto más largo se ve completo al pasar el mouse. Se fija una vez, para que
+  // las columnas no salten al filtrar o desplazarse.
+  function calcularAnchos(datos) {
+    return datos.columnas.map((nombre, j) => {
+      let largo = Math.max(6, String(nombre).length * 0.92 + 3);
+      for (const f of datos.filas.slice(0, 120)) largo = Math.max(largo, String(f.v[j] || "").length);
+      return Math.round(Math.min(340, Math.max(76, largo * 7.4 + 30)));
+    });
+  }
+
+  function armarTabla() {
+    const cols = el("colgroup", null, el("col", { style: "width:46px" }), ...tc.anchos.map((a) => el("col", { style: `width:${a}px` })));
+    const fila = el("tr", null, cabeceraFiltro("estado", ""));
+    tc.columnas.forEach((nombre, j) => fila.append(cabeceraFiltro(j, nombre)));
+    const ancho = tc.anchos.reduce((s, a) => s + a, 46);
+    const tabla = el("table", { class: "tc-tabla", style: `width:${ancho}px` }, cols, el("thead", null, fila), el("tbody"));
+    tabla.addEventListener("click", (ev) => {
+      const tr = ev.target.closest("tbody tr[data-p]");
+      if (tr) abrirDetalleDe(`/api/tabla/detalle/${tr.dataset.p}`);
+    });
+    tabla.addEventListener("keydown", (ev) => {
+      const tr = ev.target.closest("tbody tr[data-p]");
+      if (tr && ev.key === "Enter") abrirDetalleDe(`/api/tabla/detalle/${tr.dataset.p}`);
+    });
+    ventanaTabla.querySelector(".tc-cuerpo").replaceChildren(tabla, el("p", { class: "tc-vacio", hidden: true }));
+  }
+
+  function cabeceraFiltro(col, nombre) {
+    return el("th", { class: "tc-th", scope: "col", "data-col": String(col), title: col === "estado" ? "Filtrar por estado (color de la fila)" : `Filtrar u ordenar «${nombre}»`,
+      onclick: (ev) => { ev.stopPropagation(); abrirMenuFiltro(col, ev.currentTarget); } },
+      el("span", { class: "tc-th-nombre", text: col === "estado" ? "" : nombre }),
+      el("span", { class: "tc-th-filtro", "aria-hidden": "true" }));
+  }
+
+  // Encabezados con filtro u orden marcados, conteo, chips de filtros y «Quitar filtros».
+  function pintarBarraTabla() {
+    const hay = Object.keys(tc.filtros).length;
+    ventanaTabla.querySelector(".tc-conteo").textContent = hay
+      ? `${formatoMiles.format(tc.filtradas)} de ${formatoMiles.format(tc.total)} pagos`
+      : `${formatoMiles.format(tc.total)} pagos${tc.hora ? " · " + haceCuanto(tc.hora) : ""}`;
+    ventanaTabla.querySelector(".tc-quitar").hidden = !hay;
+    ventanaTabla.querySelectorAll(".tc-th").forEach((th) => {
+      const col = th.dataset.col === "estado" ? "estado" : Number(th.dataset.col);
+      th.classList.toggle("tc-filtrada", col in tc.filtros);
+      const ordenada = tc.orden && tc.orden.col === col;
+      if (ordenada) th.setAttribute("aria-sort", tc.orden.asc ? "ascending" : "descending");
+      else th.removeAttribute("aria-sort");
+    });
+    const chips = ventanaTabla.querySelector(".tc-chips");
+    chips.replaceChildren(...Object.entries(tc.filtros).map(([clave, f]) => {
+      const col = clave === "estado" ? "estado" : Number(clave);
+      const lista = f.valores || f.excluir || [];
+      const que = f.texto !== undefined ? `contiene «${f.texto}»`
+        : f.valores ? (lista.length === 1 ? textoValor(col, lista[0]) : `${lista.length} valores`)
+        : `sin ${lista.length === 1 ? "«" + textoValor(col, lista[0]) + "»" : lista.length + " valores"}`;
+      return el("span", { class: "tc-chip" },
+        el("button", { type: "button", class: "tc-chip-texto", title: "Cambiar este filtro", onclick: () => {
+          const th = ventanaTabla.querySelector(`.tc-th[data-col="${clave}"]`);
+          if (th) { th.scrollIntoView({ block: "nearest", inline: "nearest" }); abrirMenuFiltro(col, th); }
+        } }, el("strong", { text: nombreColumna(col) + ": " }), que),
+        el("button", { type: "button", class: "tc-chip-quitar", "aria-label": "Quitar el filtro de " + nombreColumna(col), text: "✕",
+          onclick: () => { delete tc.filtros[clave]; recargarTabla(); } }));
+    }));
+    chips.hidden = !hay;
+    const vacio = ventanaTabla.querySelector(".tc-vacio");
+    if (vacio) {
+      vacio.hidden = tc.filtradas > 0;
+      vacio.replaceChildren("Ningún pago coincide con estos filtros. ",
+        el("button", { type: "button", class: "boton boton-chico", text: "Quitar filtros", onclick: quitarFiltros }));
+    }
+  }
+
+  function quitarFiltros() {
+    tc.filtros = {};
+    recargarTabla();
+  }
+
+  let cuadroTabla = 0;
+  function programarPintado() {
+    if (!cuadroTabla) cuadroTabla = requestAnimationFrame(() => { cuadroTabla = 0; pintarFilasTabla(); });
+  }
+
+  // Solo las filas que se ven (y unas pocas de margen); arriba y abajo, un relleno con el
+  // alto de las demás para que la barra de desplazamiento sea la de la tabla entera.
+  function pintarFilasTabla() {
+    const cuerpo = ventanaTabla.querySelector(".tc-cuerpo");
+    const tbody = cuerpo && cuerpo.querySelector(".tc-tabla tbody");
+    if (!tbody) return;
+    const alto = tc.altoFila;
+    const desde = Math.max(0, Math.floor(cuerpo.scrollTop / alto) - 10);
+    const hasta = Math.min(tc.filtradas, Math.ceil((cuerpo.scrollTop + cuerpo.clientHeight) / alto) + 10);
+    for (let t = Math.floor(desde / TRAMO_TABLA); t <= Math.floor(Math.max(desde, hasta - 1) / TRAMO_TABLA); t++) pedirTramo(t);
+    const clave = `${tc.version}:${desde}:${hasta}:${[...tc.tramos.keys()].join(",")}`;
+    if (clave === tc.pintada) return;
+    tc.pintada = clave;
+
+    const filas = [];
+    const columnas = tc.columnas.length + 1;
+    for (let k = desde; k < hasta; k++) {
+      const tramo = tc.tramos.get(Math.floor(k / TRAMO_TABLA));
+      const f = tramo && tramo[k % TRAMO_TABLA];
+      if (!f) { filas.push(el("tr", { class: "tc-cargando" }, el("td", { colspan: String(columnas) }))); continue; }
+      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, "data-p": String(f.p), tabindex: "0" },
+        el("td", { class: "estado" }, f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
+      for (const v of f.v) {
+        tr.append(el("td", { class: /^-?[\d,]+(\.\d+)?$/.test(v) ? "num" : null, title: v.length > 24 ? v : null, text: v }));
+      }
+      filas.push(tr);
+    }
+    const relleno = (n) => el("tr", { class: "tc-relleno", "aria-hidden": "true" }, el("td", { colspan: String(columnas), style: `height:${n * alto}px` }));
+    tbody.replaceChildren(relleno(desde), ...filas, relleno(tc.filtradas - hasta));
+    // El alto real de una fila (depende de la fuente del equipo): con él se calcula todo.
+    const muestra = tbody.querySelector("tr[data-p]");
+    if (muestra) {
+      const real = muestra.getBoundingClientRect().height;
+      if (real > 10 && Math.abs(real - tc.altoFila) > 0.5) { tc.altoFila = real; tc.pintada = ""; programarPintado(); }
+    }
+  }
+
+  async function pedirTramo(n) {
+    if (tc.tramos.has(n) || tc.pidiendo.has(n) || n * TRAMO_TABLA >= tc.filtradas) return;
+    const version = tc.version;
+    tc.pidiendo.add(n);
+    try {
+      const { datos } = await apiJson(urlTabla("/api/tabla", { desde: n * TRAMO_TABLA, cuantas: TRAMO_TABLA }));
+      if (version !== tc.version) return;
+      tc.tramos.set(n, datos.filas);
+      programarPintado();
+    } catch (e) {
+      if (version === tc.version) toast("No se pudieron traer más filas: " + e.message);
+    } finally {
+      if (version === tc.version) tc.pidiendo.delete(n);
+    }
+  }
+
+  // ---- el menú del filtro de un encabezado
+  function cerrarMenuFiltro() {
+    if (tc.menu) tc.menu.remove();
+    tc.menu = null;
+    ventanaTabla.querySelectorAll(".tc-th.tc-abierta").forEach((th) => th.classList.remove("tc-abierta"));
+  }
+
+  function abrirMenuFiltro(col, th) {
+    const yaAbierto = tc.menu && tc.menu.dataset.col === String(col);
+    cerrarMenuFiltro();
+    if (yaAbierto) return;
+    th.classList.add("tc-abierta");
+    const actual = tc.filtros[col] || null;
+    let lista = [];          // [{v, n}] que se están mostrando
+    let recortado = false;
+    let marcados = new Set();
+    let tocado = false;      // si se marcó o desmarcó algo a mano
+
+    const busca = el("input", { type: "search", class: "tc-busca", placeholder: col === "estado" ? "" : "Buscar valores…",
+      "aria-label": "Buscar valores", hidden: col === "estado" });
+    if (actual && actual.texto !== undefined) busca.value = actual.texto;
+    const todos = el("input", { type: "checkbox" });
+    const listaNodo = el("div", { class: "tc-valores", role: "group", "aria-label": "Valores" });
+    const nota = el("p", { class: "tc-menu-nota", hidden: true });
+    const aceptar = el("button", { type: "button", class: "boton boton-principal boton-chico", text: "Aceptar", onclick: aplicar });
+
+    const ordenar = (asc) => { tc.orden = { col, asc }; cerrarMenuFiltro(); recargarTabla(); };
+    const esOrden = (asc) => tc.orden && tc.orden.col === col && tc.orden.asc === asc;
+    const menu = el("div", { class: "tc-menu", "data-col": String(col), role: "dialog", "aria-label": "Filtro de " + nombreColumna(col) },
+      el("strong", { class: "tc-menu-titulo", text: nombreColumna(col) }),
+      el("div", { class: "tc-menu-orden" },
+        el("button", { type: "button", class: "tc-orden" + (esOrden(true) ? " activa" : ""), text: col === "estado" ? "↑ Rojos primero" : "↑ Ordenar A → Z", onclick: () => ordenar(true) }),
+        el("button", { type: "button", class: "tc-orden" + (esOrden(false) ? " activa" : ""), text: col === "estado" ? "↓ Sin gestionar primero" : "↓ Ordenar Z → A", onclick: () => ordenar(false) })),
+      busca,
+      el("label", { class: "tc-valor tc-todos" }, todos, el("span", { text: "(Seleccionar todo)" })),
+      listaNodo, nota,
+      el("div", { class: "tc-menu-pie" },
+        actual ? el("button", { type: "button", class: "boton boton-texto boton-chico", text: "Borrar filtro",
+          onclick: () => { delete tc.filtros[col]; cerrarMenuFiltro(); recargarTabla(); } }) : null,
+        el("span", { class: "tc-espacio" }),
+        el("button", { type: "button", class: "boton boton-chico", text: "Cancelar", onclick: cerrarMenuFiltro }),
+        aceptar));
+    tc.menu = menu;
+    ventanaTabla.append(menu);
+    ubicarMenu(menu, th);
+
+    function pintarLista() {
+      listaNodo.replaceChildren(...lista.map((x) => {
+        const caja = el("input", { type: "checkbox" });
+        caja.checked = marcados.has(x.v);
+        caja.addEventListener("change", () => { tocado = true; caja.checked ? marcados.add(x.v) : marcados.delete(x.v); estadoTodos(); });
+        return el("label", { class: "tc-valor" + (x.v === "" ? " tc-vacias" : "") }, caja,
+          col === "estado" && x.v ? el("span", { class: "punto e-" + x.v }) : null,
+          el("span", { class: "tc-valor-texto", text: textoValor(col, x.v), title: x.v.length > 30 ? x.v : null }),
+          el("span", { class: "tc-valor-n", text: formatoMiles.format(x.n) }));
+      }));
+      if (!lista.length) listaNodo.append(el("p", { class: "tc-menu-nota", text: "Ningún valor coincide." }));
+      estadoTodos();
+    }
+    function estadoTodos() {
+      const n = lista.filter((x) => marcados.has(x.v)).length;
+      todos.checked = lista.length > 0 && n === lista.length;
+      todos.indeterminate = n > 0 && n < lista.length;
+      aceptar.disabled = n === 0;
+    }
+    todos.addEventListener("change", () => {
+      tocado = true;
+      for (const x of lista) todos.checked ? marcados.add(x.v) : marcados.delete(x.v);
+      pintarLista();
+    });
+
+    let pedido = 0;
+    async function cargarValores() {
+      const n = ++pedido;
+      listaNodo.classList.add("tc-cargando-valores");
+      try {
+        const extra = { col: String(col) };
+        if (busca.value.trim()) extra.q = busca.value.trim();
+        const { datos } = await apiJson(urlTabla("/api/tabla/valores", extra));
+        if (n !== pedido || tc.menu !== menu) return;
+        lista = datos.valores;
+        recortado = datos.recortado;
+        // Casillas como estaban en el filtro (si no se ha tocado nada en esta lista).
+        if (!tocado || busca.value.trim()) {
+          marcados = new Set(lista.filter((x) => !actual || actual.texto !== undefined || (actual.valores ? actual.valores.includes(x.v) : !actual.excluir.includes(x.v))).map((x) => x.v));
+          tocado = false;
+        }
+        nota.hidden = !recortado;
+        nota.textContent = recortado ? `Hay ${formatoMiles.format(datos.distintos)} valores distintos: se muestran ${formatoMiles.format(lista.length)}. Escribe arriba para encontrar el tuyo.` : "";
+        pintarLista();
+      } catch (e) {
+        if (n === pedido) listaNodo.replaceChildren(el("p", { class: "tc-menu-nota error", text: "❌ " + e.message }));
+      } finally {
+        if (n === pedido) listaNodo.classList.remove("tc-cargando-valores");
+      }
+    }
+    let espera = 0;
+    busca.addEventListener("input", () => { clearTimeout(espera); espera = setTimeout(cargarValores, 220); });
+    busca.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); clearTimeout(espera); aplicar(); } });
+
+    function aplicar() {
+      const q = busca.value.trim();
+      const elegidos = lista.filter((x) => marcados.has(x.v)).map((x) => x.v);
+      const quitados = lista.filter((x) => !marcados.has(x.v)).map((x) => x.v);
+      let nuevo = null;
+      if (q) nuevo = quitados.length ? { valores: elegidos } : { texto: q };
+      else if (!quitados.length) nuevo = null;
+      else if (!recortado && elegidos.length <= quitados.length) nuevo = { valores: elegidos };
+      else nuevo = { excluir: quitados };
+      if (nuevo) tc.filtros[col] = nuevo;
+      else delete tc.filtros[col];
+      cerrarMenuFiltro();
+      recargarTabla();
+    }
+
+    cargarValores();
+    (col === "estado" ? todos : busca).focus({ preventScroll: true });
+  }
+
+  function ubicarMenu(menu, th) {
+    const caja = ventanaTabla.getBoundingClientRect();
+    const r = th.getBoundingClientRect();
+    const ancho = Math.min(300, caja.width - 16);
+    menu.style.width = ancho + "px";
+    menu.style.left = Math.max(8, Math.min(caja.width - ancho - 8, r.left - caja.left)) + "px";
+    menu.style.top = (r.bottom - caja.top + 4) + "px";
+    menu.style.maxHeight = Math.max(220, caja.height - (r.bottom - caja.top) - 16) + "px";
+  }
+
+  async function exportarTabla() {
+    const boton = ventanaTabla.querySelector(".tc-exportar");
+    boton.disabled = true;
+    boton.textContent = "Exportando…";
+    try {
+      const resp = await api(urlTabla("/api/tabla/exportar"));
+      if (!resp.ok) {
+        let msg = `Error ${resp.status}`;
+        try { msg = (await resp.json()).error || msg; } catch (_) { /* nada */ }
+        throw new Error(msg);
+      }
+      const url = URL.createObjectURL(await resp.blob());
+      const a = el("a", { href: url, download: Object.keys(tc.filtros).length ? "Extractos_filtrados.xlsx" : "Extractos.xlsx" });
+      ventanaTabla.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e) {
+      toast("No se pudo exportar: " + e.message);
+    } finally {
+      boton.disabled = false;
+      boton.textContent = "Exportar a Excel";
+    }
   }
 
   // ------------------------------------------------------------------ menú del usuario
