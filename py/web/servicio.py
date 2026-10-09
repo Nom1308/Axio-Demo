@@ -9,21 +9,25 @@ así que se puede probar sin levantar el servidor.
 """
 
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import io
 import json
 import re
 import secrets
+import sys
 import threading
 
 import numpy as np
 import pandas as pd
 
 from axio.dominio.buscador import (
-    CLAVES_LINEAS_CON_INFO_EXTRA, DIRECTORIO_CARTERA_DEFECTO, LIMITE_FILAS_DIBUJADAS,
-    _clave_orden_valor, _columnas_unicas, _formatear_valor_celda, _normalizar_para_busqueda,
+    CLAVES_LINEAS_CON_INFO_EXTRA, COLUMNAS_CEDULA_POSIBLES, COLUMNAS_DISTRITO_POSIBLES,
+    DIRECTORIO_CARTERA_DEFECTO, LIMITE_FILAS_DIBUJADAS,
+    _clave_orden_valor, _columnas_unicas, _es_columna_de_dinero, _formatear_valor_celda,
+    _normalizar_para_busqueda,
     asegurar_columna_cedula, aviso_columna_cedula,
-    buscar_comprobante_global, buscar_encargado_cartera, clasificar_estado_pago,
+    buscar_comprobante_global, buscar_encargado_cartera, clasificar_estado_pago, corregir_palabras,
     descargar_base_global, descargar_directorio_whatsapp, descargar_linea_credito,
     generar_excel_resultados_busqueda,
     obtener_cedula_de_fila, obtener_distrito_de_fila, sugerir_termino_parecido,
@@ -34,7 +38,7 @@ from axio.nucleo.cache_nube import (
 )
 from axio.nucleo.config import cargar_config
 from axio.nucleo.registro import logger
-from axio.nucleo.utils import limpiar_cedula
+from axio.nucleo.utils import limpiar_cedula, parse_money
 
 # Cuántas búsquedas se recuerdan para abrir su detalle o exportarlas. Cada una guarda sus
 # resultados completos; cien alcanza de sobra para una oficina y acota la memoria.
@@ -102,6 +106,63 @@ def _enlace_seguro(url):
     return texto if texto.lower().startswith(("http://", "https://")) else None
 
 
+_PATRON_CIFRA = re.compile(r'-?\$?\s*\d[\d.,]*')
+_PATRON_FECHA_CELDA = re.compile(r'(\d{1,2})/(\d{1,2})/(\d{4})')
+
+
+def _a_numero(valor):
+    """La cifra de una celda (250000, '1,250,000', '$ 489.600') o nan si no es una cifra."""
+    if isinstance(valor, bool) or valor is None:
+        return np.nan
+    if isinstance(valor, (int, float, np.integer, np.floating)):
+        return float(valor)
+    texto = str(valor).strip()
+    if not _PATRON_CIFRA.fullmatch(texto):
+        return np.nan
+    return float(parse_money(texto))
+
+
+def _a_fecha(valor):
+    """La fecha de una celda (fecha de verdad o texto '15/07/2026', día primero) o NaT."""
+    if isinstance(valor, (pd.Timestamp, datetime)):
+        return pd.Timestamp(valor).normalize()
+    if isinstance(valor, np.datetime64):
+        return pd.Timestamp(valor).normalize()
+    m = _PATRON_FECHA_CELDA.match(str(valor or '').strip())
+    if not m:
+        return pd.NaT
+    try:
+        return pd.Timestamp(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return pd.NaT
+
+
+def _sin_tildes(texto):
+    return _normalizar_para_busqueda(texto) if texto is not None else ''
+
+
+def _estado_credito(e):
+    """'mora', 'dia' o None, con la misma regla que la página (estadoCredito en app.js):
+    manda «ESTADO: MORA/DIA»; si no está, «ESTADO PAGO AUTOMATICO»; si tampoco, los meses
+    en mora."""
+    valor = ''
+    for palabras in (('MORA/DIA',), ('ESTADO', 'PAGO', 'AUTOMATICO')):
+        for columna, v, _ in e.get('campos') or []:
+            if all(p in str(columna).upper() for p in palabras):
+                valor = _sin_tildes(v)
+                break
+        if valor:
+            break
+    if 'MORA' in valor:
+        return 'mora'
+    if 'DIA' in valor:
+        return 'dia'
+    meses = _a_numero(e.get('meses_mora'))
+    if not np.isnan(meses):
+        return 'mora' if meses > 0 else 'dia'
+    return None
+
+
 class MotorWeb:
     """Un único motor por proceso. Ver obtener_motor()."""
 
@@ -133,6 +194,8 @@ class MotorWeb:
         self._busquedas = OrderedDict()
         self._candado_tabla = threading.Lock()
         self._cache_tabla = None
+        self._cache_sugerencias = {}       # vocabulario de palabras (ver corregir_palabras)
+        self._cache_tablero_lineas = None  # (rosters, resumen): se rehace al cambiar las líneas
 
     # ------------------------------------------------------------------ carga de datos
     def iniciar_carga(self, forzar=False):
@@ -224,25 +287,47 @@ class MotorWeb:
             logger.exception("No se pudo descargar Matriz_Nube (buscador web)")
             return None, None, str(e)
 
+    # Cuántas líneas de crédito se descargan a la vez. Bajar una hoja es casi todo esperar a
+    # Google, así que con varias a la vez la carga tarda lo que la más lenta y no la suma.
+    # La versión de navegador no tiene hilos y lo pone en 1 (allá las bajadas ya van en
+    # paralelo desde la pestaña; ver trabajador.js).
+    LINEAS_EN_PARALELO = 4
+
     def _cargar_lineas(self, config):
-        """Generador (se usa con yield from): un paso por línea. Devuelve
-        (rosters, hora, errores)."""
-        lineas = config.get('lineas_credito', [])
-        rosters, hora = cargar_lineas_credito(lineas)
+        """Generador (se usa con yield from): un paso por línea, a medida que terminan.
+        Devuelve (rosters, hora, errores)."""
+        todas = config.get('lineas_credito', [])
+        rosters, hora = cargar_lineas_credito(todas)
         if rosters is not None:
             return rosters, hora, {}
+        lineas = [l for l in todas if str(l.get('url', '')).strip()]
         rosters, errores = {}, {}
-        for linea in lineas:
-            if not str(linea.get('url', '')).strip():
-                continue
-            self.mensaje_carga = f"Descargando línea de crédito: {linea.get('nombre')}..."
-            try:
-                rosters[linea['clave']] = descargar_linea_credito(linea['url'], clave=linea['clave'])
-            except Exception as e:
-                logger.exception(f"No se pudo cargar la línea de crédito '{linea.get('nombre')}'")
-                errores[linea.get('nombre', linea.get('clave'))] = str(e)
-            yield linea['clave']
-        guardar_lineas_credito(rosters, lineas)
+
+        def fallo(linea):
+            logger.exception(f"No se pudo cargar la línea de crédito '{linea.get('nombre')}'")
+            errores[linea.get('nombre', linea.get('clave'))] = str(sys.exc_info()[1])
+
+        if self.LINEAS_EN_PARALELO > 1 and len(lineas) > 1:
+            self.mensaje_carga = f"Descargando las {len(lineas)} líneas de crédito a la vez..."
+            with ThreadPoolExecutor(max_workers=min(self.LINEAS_EN_PARALELO, len(lineas)),
+                                    thread_name_prefix="axio-linea") as ejecutor:
+                futuros = {ejecutor.submit(descargar_linea_credito, l['url'], clave=l['clave']): l for l in lineas}
+                for futuro in as_completed(futuros):
+                    linea = futuros[futuro]
+                    try:
+                        rosters[linea['clave']] = futuro.result()
+                    except Exception:
+                        fallo(linea)
+                    yield linea['clave']
+        else:
+            for linea in lineas:
+                self.mensaje_carga = f"Descargando línea de crédito: {linea.get('nombre')}..."
+                try:
+                    rosters[linea['clave']] = descargar_linea_credito(linea['url'], clave=linea['clave'])
+                except Exception:
+                    fallo(linea)
+                yield linea['clave']
+        guardar_lineas_credito(rosters, todas)
         return rosters, datetime.now(), errores
 
     def _cargar_whatsapp(self, config):
@@ -343,24 +428,28 @@ class MotorWeb:
             self.iniciar_carga()
             return None
 
-        carpeta = self._carpeta_cierres()
         df_global = self.df_global
-        argumentos = dict(df_global=df_global, carpeta_salida=carpeta,
-                          cache_archivos=self.cache_archivos,
-                          cache_normalizado=self.cache_normalizado)
-        if carpeta:
-            # El índice de cierres es un SQLite que se actualiza al buscar: dos búsquedas
-            # a la vez lo reindexarían en paralelo. La Matriz_Nube sola no lo necesita.
-            with self._candado_indice:
-                resultados, totales = buscar_comprobante_global(termino, **argumentos)
-        else:
-            resultados, totales = buscar_comprobante_global(termino, **argumentos)
+        resultados, totales = self._buscar_en_fuentes(termino)
 
-        sugerencia = sugerir_termino_parecido(termino, df_global) if not resultados else None
+        # Búsqueda que perdona errores: sin resultados, si cada palabra mal escrita tiene una
+        # gemela casi idéntica en la hoja ('Jesus Nio' -> 'Jesus Niño'), se busca con la
+        # corrección y se avisa. Solo palabras: las cifras nunca se corrigen solas.
+        corregido_de = None
+        if not resultados:
+            corregido = corregir_palabras(termino, df_global, self._cache_sugerencias)
+            if corregido and corregido != termino:
+                otros, otros_totales = self._buscar_en_fuentes(corregido)
+                if otros:
+                    corregido_de, termino = termino, corregido
+                    resultados, totales = otros, otros_totales
+
+        sugerencia = (sugerir_termino_parecido(termino, df_global, cache=self._cache_sugerencias)
+                      if not resultados else None)
         id_busqueda = self._guardar_busqueda(termino, resultados, usuario)
         return {
             'id': id_busqueda,
             'termino': termino,
+            'corregido_de': corregido_de,
             'total': sum(totales.values()) if totales else len(resultados),
             'grupos': self._agrupar(resultados, totales),
             'sugerencia': sugerencia,
@@ -369,6 +458,18 @@ class MotorWeb:
             # búsqueda sola al terminar, para sumar el resumen de créditos.
             'parcial': self.parcial,
         }
+
+    def _buscar_en_fuentes(self, termino):
+        carpeta = self._carpeta_cierres()
+        argumentos = dict(df_global=self.df_global, carpeta_salida=carpeta,
+                          cache_archivos=self.cache_archivos,
+                          cache_normalizado=self.cache_normalizado)
+        if carpeta:
+            # El índice de cierres es un SQLite que se actualiza al buscar: dos búsquedas
+            # a la vez lo reindexarían en paralelo. La Matriz_Nube sola no lo necesita.
+            with self._candado_indice:
+                return buscar_comprobante_global(termino, **argumentos)
+        return buscar_comprobante_global(termino, **argumentos)
 
     def _asociado(self, termino):
         """Si lo buscado es una cédula, el resumen de la persona que va ARRIBA de los
@@ -381,19 +482,81 @@ class MotorWeb:
             return None
         lineas = self._lineas_de_cedula(cedula) if self.rosters else []
         whatsapp = self._enlace_whatsapp(cedula)
-        if not lineas and not whatsapp:
+        pagos = self._pagos_de_cedula(cedula)
+        if not lineas and not whatsapp and not pagos:
             return None
         nombre = next((e['nombre'] for l in lineas for e in l['entradas'] if e.get('nombre')), None)
         if not nombre:
             nombre = (self.whatsapp.get(cedula) or {}).get('nombre')
+        if not nombre:
+            nombre = next((p['nombre'] for p in pagos if p.get('nombre')), None)
+        distrito = next((e['distrito'] for l in lineas for e in l['entradas'] if e.get('distrito')), None)
+        if distrito is None:
+            distrito = next((p['distrito'] for p in pagos if p.get('distrito')), None)
         return {
             'cedula': _cedula_con_puntos(cedula),
             'cedula_limpia': cedula,
             'nombre': nombre,
+            'distrito': _formatear_valor_celda(distrito) if distrito is not None else None,
             'whatsapp': whatsapp,
             'lineas': lineas,
             'total_creditos': sum(len(l['entradas']) for l in lineas),
+            'pagos': pagos,
         }
+
+    # Cuántos pagos de una persona trae su ficha (los más recientes). Alcanza para varios
+    # años de una persona que paga cada mes; el resto está en la tabla de los Extractos.
+    MAX_PAGOS_FICHA = 240
+
+    def _pagos_de_cedula(self, cedula):
+        """Los pagos de esa cédula en los Extractos, del más reciente al más viejo: fecha,
+        valor, estado (el color de la fila) y las notas de la gestión. Para la línea de
+        tiempo de la ficha. Cada uno trae su posición 'p' para abrir el detalle."""
+        if self.df_global is None:
+            return []
+        with self._candado_tabla:
+            t = self._datos_tabla()
+            if t.get('por_cedula') is None:
+                col = self._indice_columna(t, COLUMNAS_CEDULA_POSIBLES)
+                indice = {}
+                if col is not None:
+                    for p, v in enumerate(t['dfu'].iloc[:, col].tolist()):
+                        if v is None or (isinstance(v, float) and np.isnan(v)):
+                            continue
+                        indice.setdefault(limpiar_cedula(v), []).append(p)
+                t['por_cedula'] = indice
+            posiciones = t['por_cedula'].get(cedula, [])
+            if not posiciones:
+                return []
+            c = self._columnas_ficha(t)
+            fechas = self._fechas_columna(t, c['fecha']) if c['fecha'] is not None else None
+            valores = self._numeros_columna(t, c['valor']) if c['valor'] is not None else None
+            estados = self._estados(t)
+
+            def texto(col, p):
+                return self._texto_columna(t, col).iat[p] if col is not None else ''
+
+            pagos = []
+            for p in posiciones:
+                fecha = fechas[p] if fechas is not None else np.datetime64('NaT')
+                valor = valores[p] if valores is not None else np.nan
+                nombre = texto(c['nombre'], p)
+                pagos.append({
+                    'p': int(p),
+                    'fecha': None if np.isnat(fecha) else str(fecha)[:10],
+                    'valor': None if np.isnan(valor) else float(valor),
+                    'e': estados.iat[p] or None,
+                    'tipo': texto(c['tipo'], p),
+                    'detalle': texto(c['detalle'], p),
+                    'banco': texto(c['banco'], p),
+                    'rws': texto(c['rws'], p),
+                    'nota_cartera': texto(c['nota_cartera'], p),
+                    'nota_recaudo': texto(c['nota_recaudo'], p),
+                    'nombre': '' if str(nombre).strip().upper() in ('#N/D', '#N/A', '#REF!') else nombre,
+                    'distrito': texto(c['distrito'], p) or None,
+                })
+        pagos.sort(key=lambda x: (x['fecha'] or '', x['p']), reverse=True)
+        return pagos[:self.MAX_PAGOS_FICHA]
 
     def _guardar_busqueda(self, termino, resultados, usuario):
         id_busqueda = secrets.token_urlsafe(9)
@@ -556,8 +719,77 @@ class MotorWeb:
             t = self._cache_tabla = {
                 'df': df, 'dfu': dfu, 'columnas': [str(c) for c in dfu.columns],
                 'texto': {}, 'normal': {}, 'orden': {}, 'estados': None, 'ultima': None,
+                'num': {}, 'fecha': {}, 'tipos': None, 'por_cedula': None, 'ficha': None,
+                'tablero': None,
             }
         return t
+
+    @staticmethod
+    def _indice_columna(t, exactas=(), contiene=()):
+        """La posición de la primera columna que se llama como alguna de 'exactas' o, si no
+        hay, la primera cuyo nombre contiene alguna de 'contiene'. None si ninguna."""
+        nombres = [c.strip().upper() for c in t['columnas']]
+        for nombre in exactas:
+            if nombre.strip().upper() in nombres:
+                return nombres.index(nombre.strip().upper())
+        for i, n in enumerate(nombres):
+            if any(c in n for c in contiene):
+                return i
+        return None
+
+    def _columnas_ficha(self, t):
+        """Las columnas de los Extractos que usan la ficha y el tablero, por su nombre."""
+        if t['ficha'] is None:
+            from axio.nucleo.utils import ALIAS_COLUMNA_RECIBO_NUBE
+            i = self._indice_columna
+            t['ficha'] = {
+                'fecha': i(t, (), ('FECHA',)),
+                'valor': i(t, ('VALOR',), ('VALOR', 'MONTO', 'IMPORTE')),
+                'nombre': i(t, ('NOMBRE',)),
+                'tipo': i(t, ('NOMBRE / TIPO', 'TIPO'), ('TIPO',)),
+                'detalle': i(t, (), ('DETALLE', 'DESCRIPCI')),
+                'banco': i(t, (), ('BANCO',)),
+                'rws': i(t, tuple(ALIAS_COLUMNA_RECIBO_NUBE)),
+                'nota_cartera': i(t, (), ('NOTA CARTERA',)),
+                'nota_recaudo': i(t, (), ('NOTA RECAUDO',)),
+                'distrito': i(t, COLUMNAS_DISTRITO_POSIBLES),
+            }
+        return t['ficha']
+
+    @staticmethod
+    def _numeros_columna(t, col):
+        if col not in t['num']:
+            t['num'][col] = np.array([_a_numero(_nativo(v)) for v in t['dfu'].iloc[:, col].tolist()], dtype=float)
+        return t['num'][col]
+
+    @staticmethod
+    def _fechas_columna(t, col):
+        if col not in t['fecha']:
+            t['fecha'][col] = pd.DatetimeIndex([_a_fecha(_nativo(v)) for v in t['dfu'].iloc[:, col].tolist()]).values
+        return t['fecha'][col]
+
+    @staticmethod
+    def _tipos_columnas(t):
+        """'fecha', 'numero' o 'texto' por columna, mirando una muestra de valores llenos:
+        la página ofrece el filtro por rango (desde/hasta) en las de fecha y las de cifras."""
+        if t['tipos'] is None:
+            tipos = []
+            for j in range(len(t['columnas'])):
+                muestra = [v for v in t['dfu'].iloc[:, j].tolist()[:3000]
+                           if not (v is None or (isinstance(v, float) and np.isnan(v)) or str(v).strip() == '')][:300]
+                if not muestra:
+                    tipos.append('texto')
+                elif sum(not pd.isna(_a_fecha(_nativo(v))) for v in muestra) >= 0.8 * len(muestra):
+                    tipos.append('fecha')
+                # Cifras con rango solo en las columnas de plata: un rango de cédulas o de
+                # cuentas no le sirve a nadie (como en los rangos de la búsqueda).
+                elif (_es_columna_de_dinero(t['columnas'][j])
+                      and sum(not np.isnan(_a_numero(_nativo(v))) for v in muestra) >= 0.8 * len(muestra)):
+                    tipos.append('numero')
+                else:
+                    tipos.append('texto')
+            t['tipos'] = tipos
+        return t['tipos']
 
     @staticmethod
     def _texto_columna(t, col):
@@ -647,7 +879,27 @@ class MotorWeb:
             for tipo in ('valores', 'excluir'):
                 if isinstance(f.get(tipo), list):
                     filtros[col] = {tipo: [str(v) for v in f[tipo][:20000]]}
+            # {"rango": {"desde": ..., "hasta": ...}}: fechas como '2026-07-01' (lo que da un
+            # <input type=date>) o '01/07/2026'; cifras como '500000' o '500.000'.
+            if isinstance(f.get('rango'), dict) and col != COLUMNA_ESTADO:
+                rango = {k: str(f['rango'][k]).strip()[:40] for k in ('desde', 'hasta')
+                         if str(f['rango'].get(k) or '').strip()}
+                if rango:
+                    filtros[col] = {'rango': rango}
         return filtros
+
+    @staticmethod
+    def _limite_rango(texto, es_fecha):
+        if es_fecha:
+            m = re.fullmatch(r'(\d{4})-(\d{1,2})-(\d{1,2})', texto)
+            fecha = pd.Timestamp(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else _a_fecha(texto)
+            if pd.isna(fecha):
+                raise ValueError(f"«{texto}» no es una fecha.")
+            return np.datetime64(fecha)
+        numero = _a_numero(texto)
+        if np.isnan(numero):
+            raise ValueError(f"«{texto}» no es una cifra.")
+        return numero
 
     @staticmethod
     def _leer_orden(texto, n_columnas):
@@ -663,7 +915,16 @@ class MotorWeb:
         for col, f in filtros.items():
             if col == salvo:
                 continue
-            if 'texto' in f:
+            if 'rango' in f:
+                es_fecha = self._tipos_columnas(t)[col] == 'fecha'
+                datos = self._fechas_columna(t, col) if es_fecha else self._numeros_columna(t, col)
+                llenos = ~np.isnat(datos) if es_fecha else ~np.isnan(datos)
+                m &= llenos
+                if 'desde' in f['rango']:
+                    m &= np.where(llenos, datos >= self._limite_rango(f['rango']['desde'], es_fecha), False)
+                if 'hasta' in f['rango']:
+                    m &= np.where(llenos, datos <= self._limite_rango(f['rango']['hasta'], es_fecha), False)
+            elif 'texto' in f:
                 if col == COLUMNA_ESTADO:
                     continue
                 buscado = _normalizar_para_busqueda(f['texto'])
@@ -702,6 +963,7 @@ class MotorWeb:
                      for p, valores in zip(trozo, t['dfu'].iloc[trozo].itertuples(index=False, name=None))]
             return {
                 'columnas': t['columnas'],
+                'tipos': self._tipos_columnas(t),
                 'total': int(len(t['dfu'])),
                 'filtradas': int(len(pos)),
                 'desde': desde,
@@ -761,6 +1023,104 @@ class MotorWeb:
             hoja.freeze_panes = 'A2'
             hoja.auto_filter.ref = hoja.dimensions
         return buffer.getvalue()
+
+    # ------------------------------------------------------------------ tablero de cartera
+    # Los totales que se miran para saber cómo va Cartera: los pagos de los Extractos por
+    # estado (el color de la fila), por mes y por distrito, y los créditos de cada línea al
+    # día o en mora. Sale de lo que ya está en memoria: abrirlo no descarga nada.
+    ESTADOS_TABLERO = ('pendiente_recaudo', 'gestion_cartera', 'referencia_erronea', 'ingresado', '')
+    MESES_TABLERO = 12
+    DISTRITOS_TABLERO = 12
+
+    def tablero(self):
+        if self.df_global is None:
+            return None
+        with self._candado_tabla:
+            t = self._datos_tabla()
+            if t['tablero'] is None:
+                t['tablero'] = self._tablero_extractos(t)
+            extractos = t['tablero']
+        return {
+            'extractos': extractos,
+            'lineas': self._tablero_lineas(),
+            'hora': _hora_iso(self.hora_matriz),
+            'hora_lineas': _hora_iso(self.hora_lineas),
+            'parcial': self.parcial,
+        }
+
+    def _tablero_extractos(self, t):
+        c = self._columnas_ficha(t)
+        n = len(t['dfu'])
+        valores = self._numeros_columna(t, c['valor']) if c['valor'] is not None else np.zeros(n)
+        datos = pd.DataFrame({
+            'estado': self._estados(t).to_numpy(),
+            'valor': np.nan_to_num(valores, nan=0.0),
+            'mes': (pd.DatetimeIndex(self._fechas_columna(t, c['fecha'])).strftime('%Y-%m')
+                    if c['fecha'] is not None else pd.Series([None] * n)),
+            'distrito': (self._texto_columna(t, c['distrito']).to_numpy()
+                         if c['distrito'] is not None else np.array([''] * n, dtype=object)),
+        })
+
+        por_estado = datos.groupby('estado')['valor'].agg(['size', 'sum'])
+        estados = [{'e': e or None, 'n': int(por_estado.at[e, 'size']) if e in por_estado.index else 0,
+                    'suma': float(por_estado.at[e, 'sum']) if e in por_estado.index else 0.0}
+                   for e in self.ESTADOS_TABLERO]
+
+        meses = []
+        con_mes = datos[datos['mes'].notna()]
+        if len(con_mes):
+            tabla_mes = con_mes.groupby(['mes', 'estado']).size().unstack(fill_value=0)
+            suma_mes = con_mes.groupby('mes')['valor'].sum()
+            for mes in sorted(tabla_mes.index)[-self.MESES_TABLERO:]:
+                fila = tabla_mes.loc[mes]
+                meses.append({'mes': mes, 'suma': float(suma_mes.at[mes]),
+                              'n': {e or 'sin': int(fila.get(e, 0)) for e in self.ESTADOS_TABLERO}})
+
+        distritos = []
+        if c['distrito'] is not None:
+            datos['pendiente'] = datos['estado'] != 'ingresado'
+            g = datos[datos['distrito'] != ''].groupby('distrito').agg(
+                n=('valor', 'size'), suma=('valor', 'sum'), pendientes=('pendiente', 'sum'))
+            g = g.sort_values(['pendientes', 'n'], ascending=False).head(self.DISTRITOS_TABLERO)
+            distritos = [{'distrito': str(d), 'n': int(r.n), 'suma': float(r.suma), 'pendientes': int(r.pendientes)}
+                         for d, r in g.iterrows()]
+        return {'total': n, 'suma': float(datos['valor'].sum()), 'estados': estados,
+                'meses': meses, 'distritos': distritos,
+                'columna_valor': t['columnas'][c['valor']] if c['valor'] is not None else None,
+                # Posiciones en la tabla completa: la página abre la tabla ya filtrada al
+                # tocar un distrito o un mes del tablero.
+                'col_distrito': c['distrito'], 'col_fecha': c['fecha']}
+
+    def _tablero_lineas(self):
+        """Por línea: créditos activos, cuántos en mora / al día y el saldo que suman. Y los
+        distritos con más créditos en mora sumando todas las líneas."""
+        rosters = self.rosters
+        if self._cache_tablero_lineas is not None and self._cache_tablero_lineas[0] is rosters:
+            return self._cache_tablero_lineas[1]
+        lineas, mora_por_distrito = [], {}
+        for linea in self.config.get('lineas_credito', []):
+            roster = rosters.get(linea.get('clave'))
+            if roster is None:
+                continue
+            r = {'linea': linea.get('nombre', linea.get('clave')), 'n': 0, 'mora': 0, 'dia': 0, 'saldo': 0.0}
+            for entradas in roster.values():
+                for e in entradas:
+                    r['n'] += 1
+                    estado = _estado_credito(e)
+                    if estado:
+                        r[estado] += 1
+                    if estado == 'mora':
+                        d = _formatear_valor_celda(e.get('distrito')) if e.get('distrito') is not None else ''
+                        if d:
+                            mora_por_distrito[d] = mora_por_distrito.get(d, 0) + 1
+                    saldo = _a_numero(e.get('saldo_actual') if e.get('saldo_actual') is not None else e.get('saldo'))
+                    if not np.isnan(saldo):
+                        r['saldo'] += saldo
+            lineas.append(r)
+        distritos = sorted(mora_por_distrito.items(), key=lambda x: -x[1])[:self.DISTRITOS_TABLERO]
+        resumen = {'lineas': lineas, 'mora_por_distrito': [{'distrito': d, 'n': n} for d, n in distritos]}
+        self._cache_tablero_lineas = (rosters, resumen)
+        return resumen
 
     # ------------------------------------------------------------------ exportar
     def exportar(self, id_busqueda, usuario):

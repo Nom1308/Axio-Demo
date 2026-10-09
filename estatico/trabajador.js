@@ -6,50 +6,15 @@
  */
 "use strict";
 
-const VERSION_PYODIDE = "0.29.3";
-importScripts(`https://cdn.jsdelivr.net/pyodide/v${VERSION_PYODIDE}/full/pyodide.js`);
+// prepararPython, aBytes y BASE (compartidos con ayudante.js).
+importScripts("python.js" + self.location.search);
 
-const BASE = new URL("../", self.location.href).href;   // raíz del sitio
 const avisar = (mensaje) => postMessage({ tipo: "progreso", mensaje });
 
-async function bajarTexto(ruta) {
-  const resp = await fetch(BASE + ruta, { cache: "no-cache" });
-  if (!resp.ok) throw new Error(`No se pudo bajar ${ruta} (HTTP ${resp.status})`);
-  return resp.text();
-}
-
 async function arrancar() {
-  avisar("Descargando el motor de Python…");
-  const pyodide = await loadPyodide();
-
-  avisar("Instalando pandas…");
-  await pyodide.loadPackage(["pandas", "sqlite3", "orjson", "micropip"]);
-  avisar("Instalando openpyxl…");
-  await pyodide.pyimport("micropip").install("openpyxl");
-
-  avisar("Cargando Axio…");
-  const lista = (await bajarTexto("py/archivos.txt")).split("\n").map((s) => s.trim()).filter(Boolean);
-  const archivos = await Promise.all(lista.map(async (rel) => [rel, await bajarTexto("py/" + rel)]));
-  archivos.push(["navegador.py", await bajarTexto("motor/navegador.py")]);
-  for (const [rel, texto] of archivos) {
-    const ruta = "/app/" + rel;
-    pyodide.FS.mkdirTree(ruta.slice(0, ruta.lastIndexOf("/")));
-    pyodide.FS.writeFile(ruta, texto);
-  }
-  pyodide.runPython(`
-import os, sys
-os.environ['AXIO_CARPETA_DATOS'] = '/datos'
-sys.path.insert(0, '/app')
-import navegador
-`);
+  const nav = await prepararPython(avisar);
   postMessage({ tipo: "motor-listo" });
-  return pyodide.pyimport("navegador");
-}
-
-// bytes de Python -> Uint8Array con su propio buffer (para transferirlo sin copiar otra vez).
-function aBytes(valor) {
-  const vista = valor.getBuffer("u8");
-  try { return vista.data.slice(); } finally { vista.release(); valor.destroy(); }
+  return nav;
 }
 
 const motor = arrancar();
@@ -85,7 +50,72 @@ function urlsPrevistas(textoConfig) {
     if (String(linea.url || "").trim()) urls.push(urlExportacion(linea.url, "xlsx"));
   }
   if (String(config.url_whatsapp || "").trim()) urls.push(urlExportacion(config.url_whatsapp, "csv"));
-  return [...new Set(urls)].filter((u) => u.startsWith("https://"));
+  // https y, para las pruebas en este equipo, http://localhost.
+  return [...new Set(urls)].filter((u) => u.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(u));
+}
+
+// ------------------------------------------------------------------ ayudantes
+// Leer las hojas es lo que más tarda, y Python lee de a una. Si el equipo tiene núcleos y
+// memoria de sobra, uno o dos ayudantes (ayudante.js, cada uno con su propio Python) leen
+// algunas líneas mientras este trabajador lee los Extractos y las demás. Arrancan apenas
+// llega el config, a la par de las descargas, y se cierran al terminar la carga.
+function ayudantesDelEquipo() {
+  if (typeof Worker === "undefined") return 0;
+  const nucleos = navigator.hardwareConcurrency || 2;
+  const memoria = navigator.deviceMemory || 4;   // GB (solo Chrome lo dice; si no, 4)
+  return Math.max(0, Math.min(2, nucleos - 2, memoria >= 8 ? 2 : memoria >= 4 ? 1 : 0));
+}
+
+// Preparar Python toma varios segundos: los ayudantes arrancan con la página, mientras se
+// inicia sesión, para estar listos cuando lleguen las hojas.
+let ayudantesPreparados = [];
+
+// Los que hacen falta para estas líneas (uno por cada tres), de los preparados; los que
+// sobran se cierran. En un «Refrescar» ya no hay: uno nuevo tardaría más en preparar su
+// Python que lo que ahorra, así que ahí lee solo el trabajador, como siempre.
+function tomarAyudantes(nLineas) {
+  const n = Math.floor(nLineas / 3);
+  const lista = ayudantesPreparados;
+  ayudantesPreparados = [];
+  lista.slice(n).forEach((a) => a.cerrar());
+  return lista.slice(0, n);
+}
+
+function crearAyudante() {
+  const w = new Worker("ayudante.js" + self.location.search);
+  const esperando = new Map();   // clave -> resolver
+  const responder = (clave, respuesta) => { const r = esperando.get(clave); if (r) { esperando.delete(clave); r(respuesta); } };
+  w.onmessage = (ev) => responder(ev.data.clave, ev.data);
+  w.onerror = (ev) => { ev.preventDefault(); for (const clave of [...esperando.keys()]) responder(clave, { clave, error: "el ayudante se detuvo" }); };
+  return {
+    carga: 0,
+    leer(linea) {
+      return new Promise((resolver) => {
+        esperando.set(linea.clave, resolver);
+        // Una copia: el trabajador conserva la suya por si tiene que leerla él.
+        const datos = linea.datos.slice();
+        w.postMessage({ ...linea, datos }, [datos.buffer]);
+      });
+    },
+    cerrar() { w.terminate(); for (const clave of [...esperando.keys()]) responder(clave, { clave, error: "cerrado" }); },
+  };
+}
+
+// Reparte las líneas descargadas: las más pesadas primero, cada una a quien tenga menos
+// trabajo. El trabajador empieza con los Extractos encima. Devuelve {clave: promesa}.
+function repartir(ayudantes, lineas, pesoExtractos) {
+  const promesas = {};
+  let propio = pesoExtractos;
+  for (const l of [...lineas].sort((a, b) => b.datos.length - a.datos.length)) {
+    const libre = ayudantes.reduce((m, a) => (a.carga < m.carga ? a : m), ayudantes[0]);
+    if (libre && libre.carga < propio) {
+      libre.carga += l.datos.length;
+      promesas[l.clave] = libre.leer(l);
+    } else {
+      propio += l.datos.length;
+    }
+  }
+  return promesas;
 }
 
 async function bajarUna(url) {
@@ -128,13 +158,40 @@ async function precargar(urls) {
 async function cargarDatos(accion, config) {
   if (accion === "configurar") ultimoConfig = config;
   let descargas = Promise.resolve([]);
+  let lineasConfig = [];   // [{clave, urlOriginal, url}] de las líneas con dirección
+  let ayudantes = [];
   try {
-    if (ultimoConfig) descargas = precargar(urlsPrevistas(ultimoConfig));
+    if (ultimoConfig) {
+      descargas = precargar(urlsPrevistas(ultimoConfig));
+      lineasConfig = (JSON.parse(ultimoConfig).lineas_credito || []).filter((l) => String(l.url || "").trim())
+        .map((l) => ({ clave: l.clave, urlOriginal: l.url, url: urlExportacion(l.url, "xlsx") }));
+      ayudantes = tomarAyudantes(lineasConfig.length);
+      if (ayudantes.length) console.info(`[Axio] ${ayudantes.length} ayudante(s) para leer las líneas a la vez`);
+    }
   } catch (e) {
     console.warn("[Axio] No se pudieron precargar las hojas; se bajan de a una", e);
   }
-  const nav = await motorConToken();
-  for (const b of await descargas) nav.guardar_precarga(b.url, b.datos, b.estado, b.urlFinal, b.tipo);
+  let nav, bajadas;
+  try {
+    nav = await motorConToken();
+    bajadas = await descargas;
+  } catch (e) {
+    ayudantes.forEach((a) => a.cerrar());
+    throw e;
+  }
+  for (const b of bajadas) nav.guardar_precarga(b.url, b.datos, b.estado, b.urlFinal, b.tipo);
+
+  // Las líneas que van a los ayudantes (solo las que se descargaron bien aquí).
+  let deAyudantes = {};
+  if (ayudantes.length) {
+    const porUrl = new Map(bajadas.map((b) => [b.url, b]));
+    const lineas = lineasConfig.filter((l) => porUrl.has(l.url)).map((l) => ({ ...porUrl.get(l.url), ...l }));
+    const extractos = bajadas.find((b) => !lineasConfig.some((l) => l.url === b.url));
+    // Un CSV se lee varias veces más rápido que un Excel del mismo tamaño.
+    deAyudantes = repartir(ayudantes, lineas, extractos ? extractos.datos.length / 4 : 0);
+  }
+  nav.delegar(JSON.stringify(Object.keys(deAyudantes)));
+
   const inicio = performance.now();
   // Por pasos (ver _pasos_carga en web/servicio.py): después de cada uno se suelta el
   // control un instante, y las búsquedas que llegaron mientras tanto se atienden. El primer
@@ -145,6 +202,18 @@ async function cargarDatos(accion, config) {
     let paso = pasos.next();
     let primero = true;
     while (!paso.done) {
+      // «esperar:<clave>»: esa línea la está leyendo un ayudante; se espera su resultado
+      // (sin frenar las búsquedas) y se le pasa a Python. Si el ayudante falló, Python la
+      // lee por su cuenta.
+      if (typeof paso.value === "string" && paso.value.startsWith("esperar:")) {
+        const clave = paso.value.slice(8);
+        const r = await (deAyudantes[clave] || Promise.resolve({ error: "sin ayudante" }));
+        if (r.error) console.warn(`[Axio] El ayudante no pudo leer ${clave} (${r.error}); se lee aquí`);
+        if (r.error) nav.recibir_roster(clave);
+        else nav.recibir_roster(clave, r.datos);
+        paso = pasos.next();
+        continue;
+      }
       console.info(`[Axio] Lectura de ${paso.value}: ${((performance.now() - t) / 1000).toFixed(1)} s`);
       postMessage({ tipo: "paso", clave: paso.value });
       if (primero) {
@@ -161,9 +230,11 @@ async function cargarDatos(accion, config) {
     return paso.value;
   } finally {
     pasos.destroy();
+    ayudantes.forEach((a) => a.cerrar());   // su memoria se libera al terminar
   }
 }
 motor.then(() => { motorListo = true; }, () => {});
+ayudantesPreparados = Array.from({ length: ayudantesDelEquipo() }, crearAyudante);
 
 // El token se guarda al instante (no espera al motor: así el inicio de sesión y las
 // descargas no quedan frenados mientras se instala Python) y se le pasa a Python justo

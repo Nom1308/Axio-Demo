@@ -17,6 +17,25 @@
     referencia_erronea: "Referencia no encontrada",
   };
 
+  // ------------------------------------------------------------------ tema
+  // «Sistema» sigue al equipo (claro u oscuro); «Claro» y «Oscuro» lo fijan. La elección se
+  // recuerda en este navegador y se aplica antes de pintar nada.
+  const CLAVE_TEMA = "axio.tema";
+  function leerTema() {
+    try { const t = sessionStorage.getItem(CLAVE_TEMA); return t === "claro" || t === "oscuro" ? t : "sistema"; } catch (_) { return "sistema"; }
+  }
+  function aplicarTema(tema) {
+    const raiz = document.documentElement;
+    if (tema === "claro") raiz.dataset.theme = "light";
+    else if (tema === "oscuro") raiz.dataset.theme = "dark";
+    else delete raiz.dataset.theme;
+  }
+  function elegirTema(tema) {
+    try { tema === "sistema" ? sessionStorage.removeItem(CLAVE_TEMA) : sessionStorage.setItem(CLAVE_TEMA, tema); } catch (_) { /* sin almacenamiento */ }
+    aplicarTema(tema);
+  }
+  aplicarTema(leerTema());
+
   const $ = (sel) => document.querySelector(sel);
   const form = $("#form-busqueda");
   const campo = $("#q");
@@ -202,9 +221,16 @@
       const casilla = el("input", { type: "checkbox", id: "ver-tabla" });
       casilla.checked = !ventanaTabla.hidden;
       casilla.addEventListener("change", () => (casilla.checked ? abrirTabla() : cerrarTabla()));
+      const casillaTablero = el("input", { type: "checkbox", id: "ver-tablero" });
+      casillaTablero.checked = !ventanaTablero.hidden;
+      casillaTablero.addEventListener("change", () => (casillaTablero.checked ? abrirTablero() : cerrarTablero()));
       zona.append(el("span", { text: `☁️ Extractos: ${formatoMiles.format(m.filas)} filas · ${haceCuanto(m.hora)}` }),
+        el("label", { class: "interruptor interruptor-tabla", title: "Muestra debajo los totales de Cartera: pagos por estado, por mes y por distrito, y los créditos en mora" },
+          casillaTablero, " Tablero"),
         el("label", { class: "interruptor interruptor-tabla", title: "Muestra debajo los Extractos completos, tal cual la hoja, con filtros en los encabezados" },
           casilla, " Ver todos los pagos"));
+      if (ventanaTablero.hidden && preferencia(CLAVE_VER_TABLERO)) abrirTablero();
+      else if (!ventanaTablero.hidden) refrescarTableroSiCambio(est);
       if (ventanaTabla.hidden && tablaPreferida()) abrirTabla();
     }
     if (l.configuradas) {
@@ -301,8 +327,10 @@
     btnBuscar.textContent = "Buscando…";
     estadoBusqueda.className = "estado-busqueda";
     estadoBusqueda.textContent = "Buscando…";
+    pintarEsqueleto(termino);
     try {
       const { status, datos } = await apiJson("/api/buscar?q=" + encodeURIComponent(termino));
+      quitarEsqueleto();
       if (status === 202) {
         estadoBusqueda.textContent = "⏳ " + datos.mensaje + " La búsqueda se hará sola cuando terminen de cargar.";
         alTerminarCarga = buscar;
@@ -324,6 +352,7 @@
       }
       cargarEstado();
     } catch (e) {
+      quitarEsqueleto();
       estadoBusqueda.className = "estado-busqueda error";
       estadoBusqueda.textContent = "❌ " + e.message;
     } finally {
@@ -359,6 +388,11 @@
 
     barraResultados.hidden = false;
     estadoBusqueda.textContent = "";
+    if (busqueda.corregido_de) {
+      // Se buscó con la palabra corregida (ver corregir_palabras en el servidor).
+      estadoBusqueda.append(el("span", { class: "nota-corregida" },
+        `✨ No había resultados para «${busqueda.corregido_de}»: se muestran los de «${busqueda.termino}».`));
+    }
     const n = busqueda.total;
     $("#resumen").textContent = `${formatoMiles.format(n)} resultado${n === 1 ? "" : "s"} para «${busqueda.termino}» en ${busqueda.grupos.length} fuente${busqueda.grupos.length === 1 ? "" : "s"}`;
 
@@ -369,6 +403,27 @@
       if (nodo) { contenedor.append(nodo); visibles++; }
     }
     if (!visibles) estadoBusqueda.textContent = "Ningún resultado coincide con el filtro.";
+  }
+
+  // Mientras se busca: siluetas suaves con la forma de lo que va a llegar (la ficha si es
+  // una cédula, y una tabla de resultados).
+  function pintarEsqueleto(termino) {
+    const filas = (n) => Array.from({ length: n }, (_, i) => el("div", { class: "esqueleto-fila", style: `--i:${i}` },
+      ...[18, 30, 22, 14].map((w) => el("span", { class: "esqueleto-linea", style: `width:${w}%` }))));
+    contenedor.replaceChildren(el("div", { class: "grupo esqueleto", "aria-hidden": "true" },
+      el("div", { class: "esqueleto-titulo" }, el("span", { class: "esqueleto-linea", style: "width:120px" })), ...filas(5)));
+    contenedor.setAttribute("aria-busy", "true");
+    if (/^[\d.\s]{5,}$/.test(termino)) {
+      zonaAsociado.replaceChildren(el("div", { class: "asociado esqueleto", "aria-hidden": "true" },
+        el("div", { class: "asociado-cabecera" }, el("span", { class: "asociado-avatar esqueleto-bloque" }),
+          el("div", { class: "asociado-nombre" }, el("span", { class: "esqueleto-linea", style: "width:220px;height:16px" }),
+            el("span", { class: "esqueleto-linea", style: "width:140px" })))));
+    }
+  }
+  function quitarEsqueleto() {
+    contenedor.removeAttribute("aria-busy");
+    contenedor.querySelectorAll(".esqueleto").forEach((n) => n.remove());
+    zonaAsociado.querySelectorAll(".esqueleto").forEach((n) => n.remove());
   }
 
   function claveOrden(v) {
@@ -417,13 +472,16 @@
       const coinciden = new Set(f.m);
       // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
       const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n++}` : null, onclick: () => abrirDetalle(f.i), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i); } });
+      // data-label: en el celular cada fila se ve como una tarjeta, con el nombre de la
+      // columna al lado de cada dato (ver «celular» en estilos.css).
       if (conEstado) {
-        tr.append(el("td", { class: "estado" }, f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
+        tr.append(el("td", { class: "estado", "data-label": f.e ? ESTADOS[f.e] || f.e : "Sin gestionar" },
+          f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
       }
       for (const j of indicesCols) {
         const v = f.v[j];
-        const clases = [coinciden.has(j) ? "coincide" : "", /^-?[\d,]+(\.\d+)?$/.test(v) ? "num" : ""].join(" ").trim();
-        tr.append(el("td", { class: clases || null, title: v.length > 30 ? v : null, text: v }));
+        const clases = [coinciden.has(j) ? "coincide" : "", /^-?[\d,]+(\.\d+)?$/.test(v) ? "num" : "", v === "" ? "vacia" : ""].join(" ").trim();
+        tr.append(el("td", { class: clases || null, title: v.length > 30 ? v : null, text: v, "data-label": g.columnas[j] }));
       }
       cuerpo.append(tr);
     }
@@ -555,7 +613,7 @@
         el("span", { class: "cedula-valor", text: d.cedula }),
         el("button", { class: "boton boton-principal boton-chico", type: "button", text: "📋 Copiar cédula",
           onclick: () => copiar(d.cedula_limpia || d.cedula, "Cédula copiada, lista para pegar en Siasoft.") }),
-        d.whatsapp ? botonWhatsapp(d.whatsapp) : null));
+        d.whatsapp ? botonWhatsapp(d.whatsapp, mensajePago(d)) : null));
     }
 
     const creditos = el("div", { class: "tarjeta" }, el("h3", { text: "💳 Líneas de crédito" }));
@@ -686,31 +744,164 @@
     dialogo.scrollTop = 0;
   }
 
-  function botonWhatsapp(enlace) {
-    return el("a", { class: "boton boton-whatsapp boton-chico", href: enlace, target: "_blank", rel: "noopener noreferrer",
-      title: "Abrir el chat de WhatsApp de esta persona", text: "💬 WhatsApp" });
+  // El chat de WhatsApp con un mensaje ya escrito: se abre en WhatsApp para revisarlo y
+  // enviarlo (o cambiarlo); nada sale solo.
+  function botonWhatsapp(enlace, mensaje) {
+    const href = mensaje ? `${enlace}?text=${encodeURIComponent(mensaje)}` : enlace;
+    return el("a", { class: "boton boton-whatsapp boton-chico", href, target: "_blank", rel: "noopener noreferrer",
+      title: mensaje ? "Abre el chat con un mensaje listo para revisar y enviar" : "Abrir el chat de WhatsApp de esta persona", text: "💬 WhatsApp" });
+  }
+
+  // "PÉREZ GÓMEZ ANÍBAL" -> "Pérez Gómez Aníbal".
+  const nombrePropio = (texto) => String(texto || "").toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()).trim();
+
+  function mensajeAsociado(a, creditos) {
+    const enMora = creditos.filter((x) => x.estado.mora);
+    const partes = [`Hola, ${nombrePropio(a.nombre) || "buen día"}. Le saludamos del área de Cartera.`];
+    if (enMora.length) {
+      partes.push(enMora.length === 1 ? "Según nuestros registros, tiene una obligación pendiente:" : `Según nuestros registros, tiene ${enMora.length} obligaciones pendientes:`);
+      for (const x of enMora) {
+        const saldo = x.e.saldo_actual || x.e.saldo;
+        const datos = [saldo ? `saldo ${conPesos(saldo)}` : null, x.e.meses_mora ? `${x.e.meses_mora} ${x.e.meses_mora === "1" ? "mes" : "meses"} en mora` : null].filter(Boolean);
+        partes.push(`• ${x.e.tipo_credito && x.e.tipo_credito !== x.linea ? x.e.tipo_credito : x.linea}${datos.length ? ": " + datos.join(", ") : ""}`);
+      }
+      partes.push("Quedamos atentos para ayudarle a ponerse al día.");
+    } else {
+      partes.push("Quedamos atentos a cualquier inquietud.");
+    }
+    return partes.join("\n");
+  }
+
+  function mensajePago(d) {
+    // Exacto: «NOMBRE / TIPO» también contiene la palabra.
+    const campoNombre = (d.campos || []).find((c) => c.columna.trim().toUpperCase() === "NOMBRE");
+    const nombre = nombrePropio(campoNombre ? campoNombre.valor : "");
+    const fecha = buscarCampo(d.campos, "FECHA");
+    const valor = buscarCampo(d.campos, "VALOR");
+    const sobre = [fecha ? `del ${fecha}` : null, valor ? `por ${conPesos(valor)}` : null].filter(Boolean).join(" ");
+    return `Hola${nombre && !/^#/.test(nombre) ? ", " + nombre : ""}. Le saludamos del área de Cartera.\n`
+      + `Le escribimos sobre su pago${sobre ? " " + sobre : ""}. Quedamos atentos.`;
+  }
+
+  // "Pérez Gómez Aníbal" -> "PG".
+  const iniciales = (nombre) => String(nombre || "?").trim().split(/\s+/).slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join("") || "?";
+
+  // '15/07/2026' o '2026-07-15' -> Date (o null).
+  function aFecha(texto) {
+    let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(texto || "");
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(texto || "");
+    return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) : null;
+  }
+  const fechaCorta = (f) => `${String(f.getDate()).padStart(2, "0")} ${MESES_CORTOS[f.getMonth()]} ${f.getFullYear()}`;
+
+  // Pagos de los últimos 12 meses (hasta el mes del último pago): una columna por mes.
+  function graficoPagos(pagos) {
+    const conFecha = pagos.filter((p) => p.fecha && p.valor !== null);
+    if (!conFecha.length) return null;
+    const ultimo = aFecha(conFecha[0].fecha);
+    const meses = [];
+    for (let i = 11; i >= 0; i--) {
+      const f = new Date(ultimo.getFullYear(), ultimo.getMonth() - i, 1);
+      meses.push({ clave: `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}`, suma: 0, n: 0 });
+    }
+    const porClave = Object.fromEntries(meses.map((m) => [m.clave, m]));
+    for (const p of conFecha) {
+      const m = porClave[p.fecha.slice(0, 7)];
+      if (m) { m.suma += p.valor; m.n += 1; }
+    }
+    const tope = topeRedondo(Math.max(1, ...meses.map((m) => m.suma)));
+    const total = meses.reduce((s, m) => s + m.suma, 0);
+    return el("div", { class: "ficha-grafico" },
+      el("div", { class: "ficha-subtitulo" }, el("span", { text: "Pagos de los últimos 12 meses" }), el("strong", { text: pesos(total) })),
+      el("div", { class: "tb-columnas-marco ficha-columnas" },
+        el("div", { class: "tb-eje", "aria-hidden": "true" },
+          ...[1, 0.5, 0].map((f) => el("span", { style: `bottom:${f * 100}%` }, el("em", { text: f ? pesosCortos(tope * f) : "0" })))),
+        el("div", { class: "tb-columnas", role: "list" }, ...meses.map((m, i) => {
+          const tip = `${nombreMes(m.clave, true)}\n${m.n ? `${m.n} pago${m.n === 1 ? "" : "s"} · ${pesos(m.suma)}` : "Sin pagos"}`;
+          const anioCambia = i === 0 || meses[i - 1].clave.slice(0, 4) !== m.clave.slice(0, 4);
+          return el("span", { class: "tb-columna", role: "listitem", tabindex: "0", "data-tip": tip, "aria-label": tip.replace("\n", ": ") },
+            el("span", { class: "tb-pila", style: `height:${(m.suma / tope) * 100}%` }, m.suma ? el("span", { style: "flex:1;background:var(--g-acento)" }) : null),
+            el("span", { class: "tb-mes" + ((meses.length - 1 - i) % 3 ? " tb-mes-menor" : ""), text: nombreMes(m.clave) + (anioCambia ? " " + m.clave.slice(2, 4) : "") }));
+        }))));
+  }
+
+  // Línea de tiempo: cada pago (con su estado y las notas de la gestión) y el último pago
+  // registrado en cada crédito, del más reciente al más viejo.
+  const MOVIMIENTOS_VISIBLES = 6;
+  function lineaDeTiempo(pagos, creditos) {
+    const eventos = pagos.map((p) => ({ fecha: aFecha(p.fecha), pago: p }));
+    for (const x of creditos) {
+      const f = aFecha(x.e.fecha_ultimo_pago);
+      if (f) eventos.push({ fecha: f, credito: x });
+    }
+    if (!eventos.length) return null;
+    eventos.sort((a, b) => (b.fecha ? b.fecha.getTime() : 0) - (a.fecha ? a.fecha.getTime() : 0));
+
+    const item = (ev) => {
+      if (ev.credito) {
+        const x = ev.credito;
+        return el("li", { class: "tl-item tl-credito" },
+          el("span", { class: "tl-punto", "aria-hidden": "true" }),
+          el("time", { text: ev.fecha ? fechaCorta(ev.fecha) : "Sin fecha" }),
+          el("div", { class: "tl-cuerpo" },
+            el("strong", { text: `💳 Último pago registrado en ${x.linea}` }),
+            x.e.tipo_credito && x.e.tipo_credito !== x.linea ? el("span", { class: "gris", text: x.e.tipo_credito }) : null));
+      }
+      const p = ev.pago;
+      const notas = [
+        p.rws ? ["Recibo (RWS)", p.rws] : null,
+        p.nota_cartera ? ["Nota de Cartera", p.nota_cartera] : null,
+        p.nota_recaudo ? ["Nota de Recaudo", p.nota_recaudo] : null,
+      ].filter(Boolean);
+      return el("li", { class: "tl-item" + (p.e ? " tl-" + p.e : "") },
+        el("span", { class: "tl-punto", "aria-hidden": "true", style: `background:${colorEstado(p.e || "sin")}` }),
+        el("time", { text: ev.fecha ? fechaCorta(ev.fecha) : "Sin fecha" }),
+        el("button", { type: "button", class: "tl-cuerpo tl-pago", title: "Ver el detalle de este pago",
+          onclick: () => abrirDetalleDe(`/api/tabla/detalle/${p.p}`) },
+          el("span", { class: "tl-linea1" },
+            el("strong", { text: p.valor !== null ? pesos(p.valor) : "Pago" }),
+            el("span", { class: "tl-estado", text: NOMBRES_ESTADO[p.e || "sin"] })),
+          el("span", { class: "gris", text: [p.detalle, p.banco].filter(Boolean).join(" · ") }),
+          ...notas.map(([etiqueta, texto]) => el("span", { class: "tl-nota" }, el("em", { text: etiqueta + ": " }), texto))));
+    };
+
+    const lista = el("ol", { class: "tl-lista" }, ...eventos.slice(0, MOVIMIENTOS_VISIBLES).map(item));
+    const resto = eventos.length - MOVIMIENTOS_VISIBLES;
+    const mas = resto > 0 ? el("button", { type: "button", class: "boton boton-chico tl-mas", text: `Ver los ${eventos.length} movimientos`,
+      onclick: (ev) => { lista.replaceChildren(...eventos.map(item)); ev.currentTarget.remove(); } }) : null;
+    return el("div", { class: "ficha-tiempo" },
+      el("div", { class: "ficha-subtitulo" }, el("span", { text: "Línea de tiempo" }),
+        el("strong", { text: `${pagos.length} pago${pagos.length === 1 ? "" : "s"} en Extractos` })),
+      lista, mas);
   }
 
   function pintarAsociado(a) {
-    const inicial = (a.nombre || "?").trim().charAt(0).toUpperCase();
-    const cabecera = el("div", { class: "asociado-cabecera" },
-      el("span", { class: "asociado-avatar", "aria-hidden": "true", text: inicial }),
-      el("div", { class: "asociado-nombre" },
-        el("strong", { text: a.nombre || "Asociado" }),
-        el("span", { text: "🪪 CC " + a.cedula })),
-      el("div", { class: "asociado-acciones" },
-        el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
-          onclick: () => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.") }),
-        a.whatsapp ? botonWhatsapp(a.whatsapp) : null,
-        el("button", { class: "boton boton-chico", type: "button", text: "🖨️ Imprimir ficha",
-          title: "Imprime solo esta ficha. En la ventana de impresión se puede elegir «Guardar como PDF».",
-          onclick: imprimirFicha })));
-
+    const pagos = a.pagos || [];
     // Primero los créditos en mora (lo que hay que gestionar), después los demás; dentro de
     // cada grupo, en el orden de las líneas.
     const todos = a.lineas.flatMap((l) => l.entradas.map((e) => ({ linea: l.linea, e, estado: estadoCredito(e) })));
     const peso = (x) => (x.estado.mora ? 0 : x.estado.mora === null ? 1 : 2);
     todos.sort((x, y) => peso(x) - peso(y));
+
+    const datosClave = [
+      ["🪪", "CC " + a.cedula],
+      a.distrito ? ["📍", "Distrito " + a.distrito] : null,
+      pagos.length ? ["🧾", `${pagos.length} pago${pagos.length === 1 ? "" : "s"}${pagos[0].fecha ? " · último " + fechaCorta(aFecha(pagos[0].fecha)) : ""}`] : null,
+    ].filter(Boolean);
+    const cabecera = el("div", { class: "asociado-cabecera" },
+      el("span", { class: "asociado-avatar", "aria-hidden": "true", text: iniciales(a.nombre) }),
+      el("div", { class: "asociado-nombre" },
+        el("strong", { text: a.nombre || "Asociado" }),
+        el("div", { class: "asociado-chips" }, ...datosClave.map(([icono, texto]) => el("span", { class: "chip-dato" }, icono + " " + texto)))),
+      el("div", { class: "asociado-acciones" },
+        el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
+          onclick: () => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.") }),
+        a.whatsapp ? botonWhatsapp(a.whatsapp, mensajeAsociado(a, todos)) : null,
+        el("button", { class: "boton boton-chico", type: "button", text: "🖨️ Imprimir ficha",
+          title: "Imprime solo esta ficha. En la ventana de impresión se puede elegir «Guardar como PDF».",
+          onclick: imprimirFicha })));
+
     const creditos = el("div", { class: "asociado-creditos" },
       ...todos.map((x) => pintarCredito(x.linea, x.e, true)));
 
@@ -735,13 +926,17 @@
         el("span", { text: `Consultada el ${ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })} a las ${ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}` }),
         quien ? el("span", { text: "Por " + quien }) : null));
     const pie = el("p", { class: "ficha-pie", text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." });
+    // Pagos por mes y línea de tiempo, lado a lado (uno debajo del otro en el celular).
+    const grafico = graficoPagos(pagos);
+    const tiempo = lineaDeTiempo(pagos, todos);
+    const historia = grafico || tiempo ? el("div", { class: "ficha-historia" }, grafico, tiempo) : null;
     return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera,
       el("div", { class: "asociado-resumen" },
         el("h3", { class: "asociado-titulo" }, titulo),
         enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null,
         alDia && enMora ? el("span", { class: "asociado-dia", text: `🟢 ${alDia} al día` }) : null,
         barra),
-      a.total_creditos ? creditos : null, pie);
+      a.total_creditos ? creditos : null, historia, pie);
   }
 
   function imprimirFicha() {
@@ -881,6 +1076,255 @@
     return nodo;
   }
 
+  // ------------------------------------------------------------------ preferencias
+  // Lo que se deja marcado (tablero, tabla, densidad) se recuerda en este navegador.
+  function preferencia(clave) {
+    try { return sessionStorage.getItem(clave) === "1"; } catch (_) { return false; }
+  }
+  function recordarPreferencia(clave, si) {
+    try { si ? sessionStorage.setItem(clave, "1") : sessionStorage.removeItem(clave); } catch (_) { /* sin almacenamiento */ }
+  }
+
+  const unDecimal = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 });
+  const pesos = (n) => "$ " + formatoMiles.format(Math.round(n || 0));
+  // Como se dice aquí: 2.939.700.000 -> "$ 2,9 mil M"; 489.600.000 -> "$ 489,6 M".
+  const pesosCortos = (n) => {
+    const a = Math.abs(n || 0);
+    if (a >= 1e9) return `$ ${unDecimal.format(n / 1e9)} mil M`;
+    if (a >= 1e6) return `$ ${unDecimal.format(n / 1e6)} M`;
+    return pesos(n);
+  };
+  const porcentaje = (parte, total) => (total ? `${Math.round((parte / total) * 100)} %` : "0 %");
+  const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const nombreMes = (yyyymm, largo) => {
+    const [a, m] = yyyymm.split("-").map(Number);
+    return largo ? `${MESES_LARGOS[m - 1]} de ${a}` : MESES_CORTOS[m - 1];
+  };
+  // Un tope "redondo" para el eje: 7 -> 10, 2.340 -> 2.500.
+  function topeRedondo(n) {
+    if (n <= 0) return 1;
+    const base = Math.pow(10, Math.floor(Math.log10(n)));
+    for (const m of [1, 2, 2.5, 5, 10]) if (n <= m * base) return m * base;
+    return 10 * base;
+  }
+
+  // ------------------------------------------------------------------ globo de información
+  // Un solo globo para todos los gráficos: lo que diga data-tip (una línea por renglón) del
+  // elemento bajo el mouse o con el foco. Los gráficos no se leen solo por color: cada marca
+  // trae aquí su nombre y su cifra.
+  const globo = el("div", { class: "globo-grafico", role: "tooltip", hidden: true });
+  document.body.append(globo);
+  function mostrarGlobo(objetivo, x, y) {
+    const lineas = objetivo.dataset.tip.split("\n");
+    globo.replaceChildren(el("strong", { text: lineas[0] }), ...lineas.slice(1).map((l) => el("span", { text: l })));
+    globo.hidden = false;
+    const r = globo.getBoundingClientRect();
+    const izq = Math.min(window.innerWidth - r.width - 8, Math.max(8, x + 14));
+    const arriba = y - r.height - 12 < 8 ? y + 18 : y - r.height - 12;
+    globo.style.left = izq + "px";
+    globo.style.top = arriba + "px";
+  }
+  document.addEventListener("pointermove", (ev) => {
+    const objetivo = ev.target.closest && ev.target.closest("[data-tip]");
+    if (objetivo) mostrarGlobo(objetivo, ev.clientX, ev.clientY);
+    else if (!globo.hidden) globo.hidden = true;
+  }, { passive: true });
+  document.addEventListener("focusin", (ev) => {
+    const objetivo = ev.target.closest && ev.target.closest("[data-tip]");
+    if (!objetivo) { globo.hidden = true; return; }
+    const r = objetivo.getBoundingClientRect();
+    mostrarGlobo(objetivo, r.left + r.width / 2, r.top);
+  });
+  document.addEventListener("scroll", () => { globo.hidden = true; }, { passive: true, capture: true });
+
+  // ------------------------------------------------------------------ tablero de cartera
+  // Cómo va Cartera de un vistazo: pagos por estado, por mes y por distrito, y los créditos
+  // de cada línea al día o en mora. Opcional, como la tabla: aparece con la casilla
+  // «Tablero». Tocar un estado, un mes o un distrito abre la tabla de pagos ya filtrada.
+  const CLAVE_VER_TABLERO = "axio.verTablero";
+  // El orden en que se apilan: con él los vecinos se distinguen también con daltonismo.
+  const ORDEN_ESTADOS = ["pendiente_recaudo", "sin", "gestion_cartera", "referencia_erronea", "ingresado"];
+  const NOMBRES_ESTADO = { ...ESTADOS, sin: "Sin gestionar" };
+  const colorEstado = (e) => `var(--g-${{ pendiente_recaudo: "pendiente", gestion_cartera: "cartera", referencia_erronea: "referencia", ingresado: "ingresado" }[e] || "sin"})`;
+  const ventanaTablero = el("section", { class: "tablero", "aria-labelledby": "tb-titulo", hidden: true });
+  $(".panel-busqueda").after(ventanaTablero);
+  let firmaTablero = "";
+
+  function marcarCasillaTablero() {
+    const casilla = $("#ver-tablero");
+    if (casilla) casilla.checked = !ventanaTablero.hidden;
+  }
+
+  function cabeceraTablero(hora) {
+    return el("div", { class: "tb-barra" },
+      el("div", { class: "tc-titulos" },
+        el("h2", { id: "tb-titulo", text: "Tablero de cartera" }),
+        el("span", { class: "tc-conteo", text: hora ? "Datos de " + haceCuanto(hora) : "" })),
+      el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Ocultar el tablero", title: "Ocultar el tablero", text: "✕", onclick: cerrarTablero }));
+  }
+
+  async function abrirTablero() {
+    if (!ventanaTablero.hidden) return;
+    recordarPreferencia(CLAVE_VER_TABLERO, true);
+    ventanaTablero.hidden = false;
+    marcarCasillaTablero();
+    ventanaTablero.replaceChildren(cabeceraTablero(null),
+      el("div", { class: "tb-cifras" }, ...[0, 1, 2, 3].map(() => el("div", { class: "tb-cifra esqueleto-bloque" }))),
+      el("div", { class: "tb-rejilla" }, el("div", { class: "tb-tarjeta esqueleto-bloque esqueleto-alto" }), el("div", { class: "tb-tarjeta esqueleto-bloque esqueleto-alto" })));
+    await cargarTablero();
+  }
+
+  async function cargarTablero() {
+    try {
+      const { datos } = await apiJson("/api/tablero");
+      if (ventanaTablero.hidden) return;
+      firmaTablero = `${datos.hora}|${datos.hora_lineas}|${datos.parcial}`;
+      pintarTablero(datos);
+    } catch (e) {
+      if (!ventanaTablero.hidden) ventanaTablero.replaceChildren(cabeceraTablero(null), el("p", { class: "aviso aviso-error tc-nota", text: "❌ " + e.message }));
+    }
+  }
+
+  // Al terminar de cargar las líneas (o tras «Refrescar»), el tablero se pone al día solo.
+  function refrescarTableroSiCambio(est) {
+    const firma = `${est.matriz.hora}|${est.lineas.hora}|${est.parcial}`;
+    if (firmaTablero && firma !== firmaTablero && !est.cargando) { firmaTablero = firma; cargarTablero(); }
+  }
+
+  function cerrarTablero() {
+    if (ventanaTablero.hidden) return;
+    ventanaTablero.hidden = true;
+    ventanaTablero.replaceChildren();
+    firmaTablero = "";
+    recordarPreferencia(CLAVE_VER_TABLERO, false);
+    marcarCasillaTablero();
+  }
+
+  function cifra(etiqueta, valor, detalle, clase) {
+    return el("div", { class: "tb-cifra" + (clase ? " " + clase : "") },
+      el("span", { class: "tb-cifra-etiqueta", text: etiqueta }),
+      el("strong", { class: "tb-cifra-valor", text: valor }),
+      detalle ? el("span", { class: "tb-cifra-detalle", text: detalle }) : null);
+  }
+
+  function tarjetaTablero(titulo, nota, ...contenido) {
+    return el("article", { class: "tb-tarjeta" },
+      el("header", { class: "tb-tarjeta-cabecera" }, el("h3", { text: titulo }), nota ? el("span", { text: nota }) : null),
+      ...contenido);
+  }
+
+  function leyenda(claves, nombres) {
+    return el("ul", { class: "tb-leyenda" },
+      ...claves.map((k) => el("li", null, el("span", { class: "tb-muestra", style: `background:${colorEstado(k)}` }), nombres[k])));
+  }
+
+  function pintarTablero(d) {
+    const x = d.extractos;
+    const L = d.lineas || { lineas: [], mora_por_distrito: [] };
+    const porEstado = Object.fromEntries(x.estados.map((e) => [e.e || "sin", e]));
+    const pendientes = x.estados.filter((e) => e.e !== "ingresado");
+    const nPendientes = pendientes.reduce((s, e) => s + e.n, 0);
+    const sumaPendientes = pendientes.reduce((s, e) => s + e.suma, 0);
+    const creditos = L.lineas.reduce((s, l) => s + l.n, 0);
+    const enMora = L.lineas.reduce((s, l) => s + l.mora, 0);
+
+    const cifras = el("div", { class: "tb-cifras" },
+      cifra("Pagos en Extractos", formatoMiles.format(x.total), pesosCortos(x.suma) + " en total"),
+      cifra("Por gestionar", formatoMiles.format(nPendientes), `${porcentaje(nPendientes, x.total)} de los pagos · ${pesosCortos(sumaPendientes)}`),
+      L.lineas.length ? cifra("Créditos activos", formatoMiles.format(creditos), `en ${L.lineas.length} línea${L.lineas.length === 1 ? "" : "s"} de crédito`) : null,
+      L.lineas.length ? cifra("Créditos en mora", formatoMiles.format(enMora), `${porcentaje(enMora, creditos)} de los activos`, enMora ? "tb-cifra-alerta" : null) : null);
+
+    // Pagos por estado: una fila por estado con su barra; tocarla abre esos pagos en la tabla.
+    const ordenLista = ["pendiente_recaudo", "gestion_cartera", "referencia_erronea", "sin", "ingresado"];
+    const maxEstado = Math.max(1, ...x.estados.map((e) => e.n));
+    const estados = tarjetaTablero("Pagos por estado", "Toca uno para verlos en la tabla",
+      el("div", { class: "tb-lista" }, ...ordenLista.map((k) => {
+        const e = porEstado[k] || { n: 0, suma: 0 };
+        return el("button", { type: "button", class: "tb-fila", disabled: !e.n,
+          "data-tip": `${NOMBRES_ESTADO[k]}\n${formatoMiles.format(e.n)} pagos (${porcentaje(e.n, x.total)})\n${pesos(e.suma)}`,
+          onclick: () => verPagosFiltrados({ estado: { valores: [k === "sin" ? "" : k] } }) },
+          el("span", { class: "tb-fila-nombre" }, el("span", { class: "tb-muestra", style: `background:${colorEstado(k)}` }), NOMBRES_ESTADO[k]),
+          el("span", { class: "tb-fila-n", text: formatoMiles.format(e.n) }),
+          el("span", { class: "tb-fila-suma", text: pesosCortos(e.suma) }),
+          el("span", { class: "tb-pista" }, el("span", { class: "tb-barra-h", style: `width:${(e.n / maxEstado) * 100}%;background:${colorEstado(k)}` })));
+      })));
+
+    // Pagos por mes: columnas apiladas por estado, con eje de cantidades.
+    const meses = x.meses || [];
+    const maxMes = topeRedondo(Math.max(1, ...meses.map((m) => Object.values(m.n).reduce((s, v) => s + v, 0))));
+    const graficoMeses = meses.length ? el("div", { class: "tb-columnas-marco" },
+      el("div", { class: "tb-eje", "aria-hidden": "true" },
+        ...[1, 0.5, 0].map((f) => el("span", { style: `bottom:${f * 100}%` }, el("em", { text: formatoMiles.format(maxMes * f) })))),
+      el("div", { class: "tb-columnas", role: "list" }, ...meses.map((m, i) => {
+        const total = Object.values(m.n).reduce((s, v) => s + v, 0);
+        const ultimoDia = new Date(Number(m.mes.slice(0, 4)), Number(m.mes.slice(5, 7)), 0).getDate();
+        const tip = [nombreMes(m.mes, true), `${formatoMiles.format(total)} pagos · ${pesos(m.suma)}`,
+          ...ORDEN_ESTADOS.slice().reverse().filter((k) => m.n[k]).map((k) => `${NOMBRES_ESTADO[k]}: ${formatoMiles.format(m.n[k])}`)].join("\n");
+        const anioCambia = i === 0 || meses[i - 1].mes.slice(0, 4) !== m.mes.slice(0, 4);
+        return el("button", { type: "button", class: "tb-columna", role: "listitem", "data-tip": tip,
+          "aria-label": tip.replace(/\n/g, ". "),
+          onclick: () => x.col_fecha !== null && x.col_fecha !== undefined && verPagosFiltrados({ [x.col_fecha]: { rango: { desde: `${m.mes}-01`, hasta: `${m.mes}-${ultimoDia}` } } }) },
+          el("span", { class: "tb-pila", style: `height:${(total / maxMes) * 100}%` },
+            ...ORDEN_ESTADOS.filter((k) => m.n[k]).map((k) => el("span", { style: `flex:${m.n[k]};background:${colorEstado(k)}` }))),
+          el("span", { class: "tb-mes" + (meses.length > 6 && (meses.length - 1 - i) % 3 ? " tb-mes-menor" : ""), text: nombreMes(m.mes) + (anioCambia ? " " + m.mes.slice(2, 4) : "") }));
+      }))) : el("p", { class: "gris", text: "Los Extractos no traen una columna de fecha que se pueda leer." });
+    const porMes = tarjetaTablero("Pagos por mes", meses.length ? `Últimos ${meses.length} meses · toca uno para verlo` : null,
+      leyenda(ORDEN_ESTADOS.slice().reverse(), NOMBRES_ESTADO), graficoMeses);
+
+    // Distritos con más pagos por gestionar.
+    const maxDistrito = Math.max(1, ...(x.distritos || []).map((r) => r.pendientes));
+    const distritos = tarjetaTablero("Distritos con más pagos por gestionar", "Toca uno para verlos",
+      (x.distritos || []).length ? el("div", { class: "tb-lista" }, ...x.distritos.map((r) => el("button", {
+        type: "button", class: "tb-fila tb-fila-barra",
+        "data-tip": `Distrito ${r.distrito}\n${formatoMiles.format(r.pendientes)} por gestionar de ${formatoMiles.format(r.n)} pagos\n${pesos(r.suma)} en total`,
+        onclick: () => verPagosFiltrados({ [x.col_distrito]: { valores: [r.distrito] }, estado: { excluir: ["ingresado"] } }) },
+        el("span", { class: "tb-fila-nombre", text: "Distrito " + r.distrito }),
+        el("span", { class: "tb-pista" }, el("span", { class: "tb-barra-h", style: `width:${(r.pendientes / maxDistrito) * 100}%;background:var(--g-acento)` })),
+        el("span", { class: "tb-fila-n", text: `${formatoMiles.format(r.pendientes)} de ${formatoMiles.format(r.n)}` }))))
+        : el("p", { class: "gris", text: "Los Extractos no traen columna de distrito." }));
+
+    const tarjetas = [estados, porMes, distritos];
+
+    // Líneas de crédito: al día / en mora / sin dato, y el saldo que suman.
+    if (L.lineas.length) {
+      const nombresCredito = { pendiente_recaudo: "En mora", ingresado: "Al día", sin: "Sin dato de mora" };
+      tarjetas.push(tarjetaTablero("Líneas de crédito", d.parcial ? "⏳ Todavía se están cargando" : "Créditos activos",
+        leyenda(["pendiente_recaudo", "ingresado", "sin"], nombresCredito),
+        el("div", { class: "tb-lista" }, ...L.lineas.map((l) => {
+          const sinDato = l.n - l.mora - l.dia;
+          return el("div", { class: "tb-linea", tabindex: "0",
+            "data-tip": `${l.linea}\n${formatoMiles.format(l.n)} créditos activos\nEn mora: ${formatoMiles.format(l.mora)} · Al día: ${formatoMiles.format(l.dia)}${sinDato ? ` · Sin dato: ${formatoMiles.format(sinDato)}` : ""}\nSaldo: ${pesos(l.saldo)}` },
+            el("div", { class: "tb-linea-cabecera" },
+              el("strong", { text: l.linea }),
+              el("span", { text: `${formatoMiles.format(l.n)} activos${l.saldo ? " · " + pesosCortos(l.saldo) : ""}` })),
+            el("div", { class: "tb-apilada", "aria-hidden": "true" },
+              l.mora ? el("span", { style: `flex:${l.mora};background:var(--g-pendiente)` }) : null,
+              l.dia ? el("span", { style: `flex:${l.dia};background:var(--g-ingresado)` }) : null,
+              sinDato ? el("span", { style: `flex:${sinDato};background:var(--g-sin)` }) : null),
+            el("span", { class: "tb-linea-pie", text: `${formatoMiles.format(l.mora)} en mora (${porcentaje(l.mora, l.n)}) · ${formatoMiles.format(l.dia)} al día` }));
+        }))));
+      if (L.mora_por_distrito.length) {
+        const maxMora = Math.max(1, ...L.mora_por_distrito.map((r) => r.n));
+        tarjetas.push(tarjetaTablero("Distritos con más créditos en mora", "Sumando todas las líneas",
+          el("div", { class: "tb-lista" }, ...L.mora_por_distrito.map((r) => el("div", { class: "tb-fila tb-fila-barra", tabindex: "0",
+            "data-tip": `Distrito ${r.distrito}\n${formatoMiles.format(r.n)} créditos en mora` },
+            el("span", { class: "tb-fila-nombre", text: "Distrito " + r.distrito }),
+            el("span", { class: "tb-pista" }, el("span", { class: "tb-barra-h", style: `width:${(r.n / maxMora) * 100}%;background:var(--g-pendiente)` })),
+            el("span", { class: "tb-fila-n", text: formatoMiles.format(r.n) }))))));
+      }
+    }
+
+    ventanaTablero.replaceChildren(cabeceraTablero(d.hora), cifras, el("div", { class: "tb-rejilla" }, ...tarjetas));
+  }
+
+  // Abre la tabla de pagos con esos filtros (desde el tablero) y la trae a la vista.
+  async function verPagosFiltrados(filtros) {
+    if (ventanaTabla.hidden) await abrirTabla({ filtros });
+    else { tc.filtros = filtros; tc.orden = null; await recargarTabla(); }
+    ventanaTabla.scrollIntoView({ behavior: sinMovimiento() ? "auto" : "smooth", block: "start" });
+  }
+
   // ------------------------------------------------------------------ tabla completa
   // Los Extractos enteros, tal cual la hoja, con un filtro en cada encabezado como en Google
   // Sheets o Excel: valores con casillas, buscar entre ellos y ordenar. Filtrar y ordenar lo
@@ -891,10 +1335,12 @@
   const TRAMO_TABLA = 200;
   const SIN_ESTADO = "Sin gestionar";
   const CLAVE_VER_TABLA = "axio.verTabla";
+  const CLAVE_COMPACTA = "axio.tablaCompacta";
+  const CLAVE_VISTAS = "axio.vistasTabla";
   const ventanaTabla = el("section", { class: "tabla-completa", "aria-labelledby": "tc-titulo", hidden: true });
-  $(".panel-busqueda").after(ventanaTabla);
+  ventanaTablero.after(ventanaTabla);
   const tc = {
-    columnas: [], anchos: [], filtros: {}, orden: null, total: 0, filtradas: 0, hora: null,
+    columnas: [], tipos: [], anchos: [], filtros: {}, orden: null, total: 0, filtradas: 0, hora: null,
     tramos: new Map(), pidiendo: new Set(), version: 0, altoFila: 34, pintada: "", menu: null,
   };
 
@@ -931,18 +1377,25 @@
     marcarCasillaTabla();
   }
 
-  async function abrirTabla() {
+  // inicial: {filtros, orden} con que abre (desde el tablero o una vista guardada).
+  async function abrirTabla(inicial) {
     if (!ventanaTabla.hidden) return;
     recordarTabla(true);
-    tc.filtros = {};
-    tc.orden = null;
+    tc.filtros = (inicial && inicial.filtros) || {};
+    tc.orden = (inicial && inicial.orden) || null;
     tc.columnas = [];
+    const compacta = preferencia(CLAVE_COMPACTA);
+    ventanaTabla.classList.toggle("tc-compacta", compacta);
     ventanaTabla.replaceChildren(
       el("div", { class: "tc-barra" },
         el("div", { class: "tc-titulos" },
           el("h2", { id: "tc-titulo", text: "Extractos · todos los pagos" }),
           el("span", { class: "tc-conteo", "aria-live": "polite" })),
         el("button", { class: "boton boton-chico tc-quitar", type: "button", text: "Quitar filtros", hidden: true, onclick: quitarFiltros }),
+        el("button", { class: "boton boton-chico tc-vistas", type: "button", text: "★ Vistas", "aria-haspopup": "true",
+          title: "Guarda los filtros que usas seguido y vuelve a ellos con un clic", onclick: (ev) => { ev.stopPropagation(); abrirMenuVistas(ev.currentTarget); } }),
+        el("button", { class: "boton boton-chico tc-densidad", type: "button", "aria-pressed": String(compacta),
+          text: compacta ? "☰ Compacta" : "☰ Cómoda", title: "Cambia el alto de las filas: compacta muestra más pagos a la vez", onclick: cambiarDensidad }),
         el("button", { class: "boton boton-chico boton-exportar tc-exportar", type: "button", text: "Exportar a Excel",
           title: "Descarga lo que se ve: todas las filas filtradas, en este orden", onclick: exportarTabla }),
         el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Ocultar la tabla", title: "Ocultar la tabla", text: "✕", onclick: cerrarTabla })),
@@ -957,7 +1410,7 @@
   // Escape cierra el menú del filtro abierto; un clic fuera de él, también.
   ventanaTabla.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && tc.menu) { ev.preventDefault(); cerrarMenuFiltro(); } });
   document.addEventListener("pointerdown", (ev) => {
-    if (tc.menu && !tc.menu.contains(ev.target) && !(ev.target instanceof Element && ev.target.closest(".tc-th"))) cerrarMenuFiltro();
+    if (tc.menu && !tc.menu.contains(ev.target) && !(ev.target instanceof Element && ev.target.closest(".tc-th, .tc-vistas"))) cerrarMenuFiltro();
   });
   window.addEventListener("resize", () => { if (!ventanaTabla.hidden) { cerrarMenuFiltro(); programarPintado(); } });
 
@@ -973,6 +1426,7 @@
       if (version !== tc.version) return;
       if (primeraVez) {
         tc.columnas = datos.columnas;
+        tc.tipos = datos.tipos || [];
         tc.anchos = calcularAnchos(datos);
       }
       tc.total = datos.total;
@@ -1042,7 +1496,8 @@
     chips.replaceChildren(...Object.entries(tc.filtros).map(([clave, f]) => {
       const col = clave === "estado" ? "estado" : Number(clave);
       const lista = f.valores || f.excluir || [];
-      const que = f.texto !== undefined ? `contiene «${f.texto}»`
+      const que = f.rango ? textoRango(col, f.rango)
+        : f.texto !== undefined ? `contiene «${f.texto}»`
         : f.valores ? (lista.length === 1 ? textoValor(col, lista[0]) : `${lista.length} valores`)
         : `sin ${lista.length === 1 ? "«" + textoValor(col, lista[0]) + "»" : lista.length + " valores"}`;
       return el("span", { class: "tc-chip" },
@@ -1065,6 +1520,71 @@
   function quitarFiltros() {
     tc.filtros = {};
     recargarTabla();
+  }
+
+  // '2026-07-01' -> '01/07/2026'; '500000' -> '$ 500.000' (en las columnas de plata).
+  function textoRango(col, r) {
+    const ver = (v) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+      if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+      const n = Number(String(v).replace(/[^\d-]/g, ""));
+      return tc.tipos[col] === "numero" && String(v).trim() && isFinite(n) ? pesos(n) : v;
+    };
+    if (r.desde && r.hasta) return `de ${ver(r.desde)} a ${ver(r.hasta)}`;
+    return r.desde ? `desde ${ver(r.desde)}` : `hasta ${ver(r.hasta)}`;
+  }
+
+  // ---- densidad: cómoda (34 px por fila) o compacta (26 px), recordada en este navegador
+  function cambiarDensidad(ev) {
+    const compacta = !ventanaTabla.classList.contains("tc-compacta");
+    ventanaTabla.classList.toggle("tc-compacta", compacta);
+    recordarPreferencia(CLAVE_COMPACTA, compacta);
+    ev.currentTarget.textContent = compacta ? "☰ Compacta" : "☰ Cómoda";
+    ev.currentTarget.setAttribute("aria-pressed", String(compacta));
+    tc.pintada = "";
+    programarPintado();
+  }
+
+  // ---- vistas guardadas: filtros y orden con un nombre, en este navegador (solo los
+  // filtros, nunca datos de los pagos)
+  function leerVistas() {
+    try { const v = JSON.parse(sessionStorage.getItem(CLAVE_VISTAS)); return Array.isArray(v) ? v : []; } catch (_) { return []; }
+  }
+  function guardarVistas(lista) {
+    try { sessionStorage.setItem(CLAVE_VISTAS, JSON.stringify(lista)); return true; } catch (_) { return false; }
+  }
+
+  function abrirMenuVistas(boton) {
+    const yaAbierto = tc.menu && tc.menu.dataset.col === "vistas";
+    cerrarMenuFiltro();
+    if (yaAbierto) return;
+    const vistas = leerVistas();
+    const hayAlgo = Object.keys(tc.filtros).length || tc.orden;
+    const nombre = el("input", { type: "text", class: "tc-busca", maxlength: "60", placeholder: "Nombre, p. ej. «Sin gestionar de julio»", "aria-label": "Nombre de la vista" });
+    const guardar = el("button", { type: "button", class: "boton boton-principal boton-chico", text: "Guardar", disabled: !hayAlgo, onclick: () => {
+      const n = nombre.value.trim() || `Vista ${vistas.length + 1}`;
+      const lista = [{ nombre: n, filtros: tc.filtros, orden: tc.orden }, ...leerVistas().filter((v) => v.nombre !== n)].slice(0, 20);
+      toast(guardarVistas(lista) ? `★ Vista «${n}» guardada.` : "Este navegador no deja guardar vistas.");
+      cerrarMenuFiltro();
+    } });
+    nombre.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !guardar.disabled) { ev.preventDefault(); guardar.click(); } });
+    const lista = el("div", { class: "tc-valores tc-vistas-lista" }, ...vistas.map((v) => el("div", { class: "tc-vista" },
+      el("button", { type: "button", class: "tc-vista-abrir", title: "Aplicar esta vista", onclick: () => {
+        tc.filtros = v.filtros || {}; tc.orden = v.orden || null; cerrarMenuFiltro(); recargarTabla();
+      } }, el("strong", { text: v.nombre }), el("span", { text: `${Object.keys(v.filtros || {}).length} filtro${Object.keys(v.filtros || {}).length === 1 ? "" : "s"}${v.orden ? " · con orden" : ""}` })),
+      el("button", { type: "button", class: "tc-chip-quitar", "aria-label": "Borrar la vista " + v.nombre, title: "Borrar", text: "✕", onclick: () => {
+        guardarVistas(leerVistas().filter((x) => x.nombre !== v.nombre)); cerrarMenuFiltro(); abrirMenuVistas(boton);
+      } }))));
+    const menu = el("div", { class: "tc-menu tc-menu-vistas", "data-col": "vistas", role: "dialog", "aria-label": "Vistas guardadas" },
+      el("strong", { class: "tc-menu-titulo", text: "Vistas guardadas" }),
+      vistas.length ? lista : el("p", { class: "tc-menu-nota gris", text: "Todavía no hay vistas. Pon los filtros que usas seguido y guárdalos aquí para volver a ellos con un clic." }),
+      el("div", { class: "tc-menu-pie tc-vistas-guardar" }, nombre, guardar),
+      hayAlgo ? null : el("p", { class: "tc-menu-nota gris", text: "Para guardar, primero filtra u ordena la tabla." }));
+    tc.menu = menu;
+    ventanaTabla.append(menu);
+    ubicarMenu(menu, boton);
+    const foco = hayAlgo ? nombre : menu.querySelector(".tc-vista-abrir");
+    if (foco) foco.focus({ preventScroll: true });
   }
 
   let cuadroTabla = 0;
@@ -1143,6 +1663,23 @@
     let marcados = new Set();
     let tocado = false;      // si se marcó o desmarcó algo a mano
 
+    // Columnas de fecha y de plata: además de los valores, un rango «desde / hasta».
+    const tipo = col === "estado" ? "texto" : tc.tipos[col] || "texto";
+    const conRango = tipo === "fecha" || tipo === "numero";
+    const rangoActual = (actual && actual.rango) || {};
+    const campoRango = (clave, etiqueta) => {
+      const campo = el("input", { type: tipo === "fecha" ? "date" : "text", class: "tc-busca tc-rango-campo", "aria-label": etiqueta,
+        inputmode: tipo === "numero" ? "numeric" : null, placeholder: tipo === "numero" ? etiqueta + " $" : null });
+      campo.value = rangoActual[clave] || "";
+      campo.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); aplicar(); } });
+      return campo;
+    };
+    const desde = conRango ? campoRango("desde", "Desde") : null;
+    const hasta = conRango ? campoRango("hasta", "Hasta") : null;
+    const bloqueRango = conRango ? el("div", { class: "tc-rango" },
+      el("span", { class: "tc-menu-subtitulo", text: tipo === "fecha" ? "Entre fechas" : "Entre valores" }),
+      el("div", { class: "tc-rango-campos" }, desde, el("span", { class: "gris", text: "a" }), hasta)) : null;
+
     const busca = el("input", { type: "search", class: "tc-busca", placeholder: col === "estado" ? "" : "Buscar valores…",
       "aria-label": "Buscar valores", hidden: col === "estado" });
     if (actual && actual.texto !== undefined) busca.value = actual.texto;
@@ -1158,6 +1695,7 @@
       el("div", { class: "tc-menu-orden" },
         el("button", { type: "button", class: "tc-orden" + (esOrden(true) ? " activa" : ""), text: col === "estado" ? "↑ Rojos primero" : "↑ Ordenar A → Z", onclick: () => ordenar(true) }),
         el("button", { type: "button", class: "tc-orden" + (esOrden(false) ? " activa" : ""), text: col === "estado" ? "↓ Sin gestionar primero" : "↓ Ordenar Z → A", onclick: () => ordenar(false) })),
+      bloqueRango,
       busca,
       el("label", { class: "tc-valor tc-todos" }, todos, el("span", { text: "(Seleccionar todo)" })),
       listaNodo, nota,
@@ -1209,7 +1747,8 @@
         recortado = datos.recortado;
         // Casillas como estaban en el filtro (si no se ha tocado nada en esta lista).
         if (!tocado || busca.value.trim()) {
-          marcados = new Set(lista.filter((x) => !actual || actual.texto !== undefined || (actual.valores ? actual.valores.includes(x.v) : !actual.excluir.includes(x.v))).map((x) => x.v));
+          marcados = new Set(lista.filter((x) => !actual || actual.texto !== undefined || actual.rango
+            || (actual.valores ? actual.valores.includes(x.v) : !actual.excluir.includes(x.v))).map((x) => x.v));
           tocado = false;
         }
         nota.hidden = !recortado;
@@ -1226,6 +1765,15 @@
     busca.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); clearTimeout(espera); aplicar(); } });
 
     function aplicar() {
+      if (conRango && (desde.value.trim() || hasta.value.trim())) {
+        const rango = {};
+        if (desde.value.trim()) rango.desde = desde.value.trim();
+        if (hasta.value.trim()) rango.hasta = hasta.value.trim();
+        tc.filtros[col] = { rango };
+        cerrarMenuFiltro();
+        recargarTabla();
+        return;
+      }
       const q = busca.value.trim();
       const elegidos = lista.filter((x) => marcados.has(x.v)).map((x) => x.v);
       const quitados = lista.filter((x) => !marcados.has(x.v)).map((x) => x.v);
@@ -1332,9 +1880,22 @@
       el("p", { class: "menu-titulo", text: fuentes.length
         ? `Hojas conectadas · ${conectadas} de ${fuentes.length}` : "Hojas conectadas" }),
       lista,
+      selectorTema(),
       ES_ADMIN ? el("div", { class: "menu-pie" },
         el("button", { class: "boton boton-chico", type: "button", text: "↻ Refrescar datos", disabled: Boolean(est.cargando),
           onclick: refrescar })) : null);
+  }
+
+  function selectorTema() {
+    const actual = leerTema();
+    const opciones = [["sistema", "◐ Sistema"], ["claro", "☀ Claro"], ["oscuro", "☾ Oscuro"]];
+    return el("div", { class: "menu-tema" },
+      el("span", { class: "menu-titulo", text: "Apariencia" }),
+      el("div", { class: "segmentado", role: "radiogroup", "aria-label": "Apariencia" },
+        ...opciones.map(([valor, texto]) => el("button", {
+          type: "button", role: "radio", "aria-checked": String(valor === actual), class: valor === actual ? "activo" : null, text: texto,
+          onclick: (ev) => { ev.stopPropagation(); elegirTema(valor); pintarMenu(); },
+        }))));
   }
 
   function abrirMenu(abrir) {

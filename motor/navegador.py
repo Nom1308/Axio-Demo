@@ -19,9 +19,11 @@ Todo vive en la memoria de la pestaña (/datos es un sistema de archivos en RAM)
 cerrarla o recargarla no queda nada.
 """
 
+from datetime import datetime
 import io
 import json
 import os
+import pickle
 import re
 import sys
 import email.message
@@ -164,12 +166,19 @@ def _avisar(mensaje):
 
 
 # ------------------------------------------------------------------ motor
+from axio.dominio.buscador import descargar_linea_credito                  # noqa: E402
+from axio.nucleo.cache_nube import cargar_lineas_credito, guardar_lineas_credito  # noqa: E402
+from axio.nucleo.registro import logger                                    # noqa: E402
 from axio.nucleo.rutas import CONFIG_FILE   # noqa: E402  (después de fijar la carpeta)
 from web.servicio import MotorWeb           # noqa: E402
 
 
 class MotorNavegador(MotorWeb):
     """El MotorWeb del servidor, con el aviso de progreso conectado a la pestaña."""
+
+    # Pyodide no tiene hilos: las líneas se leen de a una (las bajadas ya van en paralelo
+    # desde trabajador.js, que las precarga mientras arranca Python).
+    LINEAS_EN_PARALELO = 1
 
     @property
     def mensaje_carga(self):
@@ -189,6 +198,71 @@ class MotorNavegador(MotorWeb):
         # los datos ya cargados; si llegara, que no intente arrancar un hilo.
         return False
 
+    def _cargar_lineas(self, config):
+        """Como en MotorWeb, pero las líneas que lee un ayudante (ver delegar) van al final:
+        este trabajador lee primero las suyas y, al llegar a una delegada, pide su resultado
+        con el paso 'esperar:<clave>' (trabajador.js lo espera sin frenar la pestaña). Si el
+        ayudante falló, la lee aquí."""
+        todas = config.get('lineas_credito', [])
+        rosters, hora = cargar_lineas_credito(todas)
+        if rosters is not None:
+            return rosters, hora, {}
+        lineas = sorted((l for l in todas if str(l.get('url', '')).strip()),
+                        key=lambda l: l.get('clave') in _delegadas)
+        rosters, errores = {}, {}
+        for linea in lineas:
+            clave = linea['clave']
+            roster = None
+            if clave in _delegadas:
+                while clave not in _de_ayudantes:
+                    yield 'esperar:' + clave
+                roster = _de_ayudantes.pop(clave)
+            if roster is None:
+                self.mensaje_carga = f"Descargando línea de crédito: {linea.get('nombre')}..."
+                try:
+                    roster = descargar_linea_credito(linea['url'], clave=clave)
+                except Exception as e:
+                    logger.exception(f"No se pudo cargar la línea de crédito '{linea.get('nombre')}'")
+                    errores[linea.get('nombre', clave)] = str(e)
+            if roster is not None:
+                rosters[clave] = roster
+            yield clave
+        guardar_lineas_credito(rosters, todas)
+        return rosters, datetime.now(), errores
+
+
+# ------------------------------------------------------------------ ayudantes
+# Otros trabajadores (estatico/ayudante.js), cada uno con su Python, leen algunas líneas a
+# la vez que este. Llegan empaquetadas con pickle: el mismo Python y el mismo código de
+# Axio de los dos lados, así que se reciben tal cual quedarían leídas aquí.
+_delegadas = set()   # claves que lee un ayudante
+_de_ayudantes = {}   # clave -> roster recibido (None si el ayudante falló)
+
+
+def delegar(texto_claves):
+    """trabajador.js dice qué líneas reparte entre los ayudantes antes de cargar."""
+    _delegadas.clear()
+    _de_ayudantes.clear()
+    _delegadas.update(json.loads(texto_claves))
+
+
+def recibir_roster(clave, datos=None):
+    """El resultado de un ayudante. Sin datos (falló): esta línea se lee aquí. Un null de
+    JavaScript llega como JsNull, no como None: se mira si trae bytes."""
+    roster = None
+    if hasattr(datos, 'to_py'):
+        try:
+            roster = pickle.loads(bytes(datos.to_py()))
+        except Exception:
+            logger.exception(f"El resultado del ayudante para '{clave}' no se pudo leer; se lee aquí")
+    _de_ayudantes[clave] = roster
+
+
+def leer_linea(url, clave):
+    """En un ayudante: lee la línea (ya precargada con guardar_precarga) y la devuelve
+    empaquetada."""
+    return pickle.dumps(descargar_linea_credito(url, clave=clave), protocol=pickle.HIGHEST_PROTOCOL)
+
 
 _motor = None
 
@@ -202,6 +276,8 @@ def _por_pasos():
         yield from _motor._pasos_carga(forzar=True)
     finally:
         _precarga.clear()   # lo que no se usó no se queda ocupando memoria
+        _delegadas.clear()
+        _de_ayudantes.clear()
     return json.dumps(_motor.estado())
 
 
@@ -444,6 +520,13 @@ def atender(url):
         if detalle is None:
             return _json({'error': "Ese resultado ya no está disponible. Vuelve a buscar."}, 404)
         return _json(detalle)
+
+    # Tablero de cartera (ver MotorWeb.tablero), igual que en web/app.py.
+    if ruta == ['api', 'tablero']:
+        datos = _motor.tablero()
+        if datos is None:
+            return _json({'error': "Los Extractos todavía no están cargados."}, 503)
+        return _json(datos)
 
     # Tabla completa de los Extractos (ver MotorWeb.tabla), igual que en web/app.py.
     if ruta[:2] == ['api', 'tabla']:

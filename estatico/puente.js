@@ -12,6 +12,14 @@
 (function () {
   "use strict";
 
+  // El tema elegido en el menú (app.js lo guarda en «axio.tema»), también en la portada:
+  // app.js entra recién después de iniciar sesión.
+  try {
+    const tema = localStorage.getItem("axio.tema");
+    if (tema === "claro") document.documentElement.dataset.theme = "light";
+    else if (tema === "oscuro") document.documentElement.dataset.theme = "dark";
+  } catch (_) { /* sin almacenamiento */ }
+
   const $ = (sel) => document.querySelector(sel);
   const AJUSTES = window.AXIO_AJUSTES || {};
   const CON_GOOGLE = Boolean(AJUSTES.clientId);
@@ -21,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-09-144810");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-09-155404");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -231,7 +239,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-09-144810";
+    script.src = "estatico/app.js?v=2026-10-09-155404";
     document.body.append(script);
   }
 

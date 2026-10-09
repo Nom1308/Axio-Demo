@@ -10,6 +10,7 @@ SIN ENCABEZADO y su llamada dentro de descargar_base_global. Conviene llevarlo a
 """
 
 from datetime import datetime
+import difflib
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.styles import PatternFill
@@ -1101,18 +1102,119 @@ def buscar_comprobante_global(termino, df_global=None, carpeta_salida=None, max_
     return resultados, totales_por_fuente
 
 
-def sugerir_termino_parecido(termino, df_global=None, limite_valores=40000):
+def _parecido(a, b):
+    """De 0 a 100, cuánto se parecen dos textos ya normalizados. Con rapidfuzz si está; si
+    no (la versión de navegador no lo trae), con difflib, que da la misma medida."""
+    if fuzz is not None:
+        return fuzz.ratio(a, b)
+    return difflib.SequenceMatcher(None, a, b).ratio() * 100
+
+
+def _mas_parecido(objetivo, candidatos, minimo):
+    """(el candidato más parecido a 'objetivo', su puntaje) o (None, 0) si ninguno llega a
+    'minimo'. Con difflib descarta primero por las cotas baratas, como get_close_matches."""
+    mejor, mejor_puntaje = None, 0
+    comparador = difflib.SequenceMatcher(None, '', objetivo) if fuzz is None else None
+    for candidato in candidatos:
+        if comparador is not None:
+            comparador.set_seq1(candidato)
+            if (comparador.real_quick_ratio() * 100 < max(minimo, mejor_puntaje)
+                    or comparador.quick_ratio() * 100 < max(minimo, mejor_puntaje)):
+                continue
+            p = comparador.ratio() * 100
+        else:
+            p = fuzz.ratio(objetivo, candidato)
+        if p > mejor_puntaje:
+            mejor, mejor_puntaje = candidato, p
+    return (mejor, mejor_puntaje) if mejor_puntaje >= minimo else (None, 0)
+
+
+def _vocabulario_palabras(df_global, cache=None):
+    """{palabra normalizada: [palabra como está escrita, en cuántos valores distintos sale]}
+    con todas las palabras de texto de la hoja (nombres, bancos, detalles). Se arma una vez
+    por versión de los datos."""
+    if cache is not None and cache.get('df') is df_global:
+        return cache['vocabulario']
+    vocabulario = {}
+    for col in df_global.columns:
+        serie = df_global[col]
+        if not (serie.dtype == object or pd.api.types.is_string_dtype(serie)):
+            continue
+        for v in serie.dropna().astype(str).unique():
+            for palabra in v.split():
+                plano = _normalizar_para_busqueda(palabra)
+                if len(plano) < 3 or plano.isdigit():
+                    continue
+                if plano in vocabulario:
+                    vocabulario[plano][1] += 1
+                else:
+                    vocabulario[plano] = [palabra.strip('.,;:()'), 1]
+    if cache is not None:
+        cache['df'], cache['vocabulario'] = df_global, vocabulario
+    return vocabulario
+
+
+def _distancia(a, b, tope):
+    """Cuántas letras hay que cambiar, poner o quitar para pasar de 'a' a 'b' (Levenshtein),
+    o tope + 1 en cuanto se sabe que pasa del tope."""
+    if abs(len(a) - len(b)) > tope:
+        return tope + 1
+    anterior = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        actual = [i]
+        for j, cb in enumerate(b, 1):
+            actual.append(min(anterior[j] + 1, actual[j - 1] + 1, anterior[j - 1] + (ca != cb)))
+        if min(actual) > tope:
+            return tope + 1
+        anterior = actual
+    return anterior[-1]
+
+
+def corregir_palabras(termino, df_global=None, cache=None):
+    """'Jesus Nio' -> 'Jesus Niño', o None si no hay nada que corregir. Cada palabra que no
+    existe tal cual en la hoja se cambia por la que sí existe a una letra de distancia (a dos
+    si la palabra es larga). Por letras y no por porcentaje: en 'Gomes'/'Gomez' una letra es
+    el 20 % de la palabra. Las cifras y las palabras cortas no se tocan: una cédula con un
+    dígito cambiado es OTRA persona, no un error de dedo."""
+    if df_global is None or df_global.empty:
+        return None
+    try:
+        vocabulario = _vocabulario_palabras(_columnas_unicas(df_global), cache)
+        palabras, cambiadas = str(termino).split(), 0
+        for i, palabra in enumerate(palabras):
+            plano = _normalizar_para_busqueda(palabra)
+            if len(plano) < 4 or any(c.isdigit() for c in plano) or plano in vocabulario:
+                continue
+            # La más cercana; entre las igual de cercanas, la que más sale en la hoja.
+            tope = 1 if len(plano) < 8 else 2
+            mejor, mejor_clave = None, (tope + 1, 0)
+            for candidato, (_, veces) in vocabulario.items():
+                d = _distancia(plano, candidato, tope)
+                if d <= tope and (d, -veces) < mejor_clave:
+                    mejor, mejor_clave = candidato, (d, -veces)
+            if mejor is None:
+                return None
+            palabras[i] = vocabulario[mejor][0]
+            cambiadas += 1
+        return " ".join(palabras) if cambiadas else None
+    except Exception:
+        logger.exception("Fallo corrigiendo las palabras de la búsqueda")
+        return None
+
+
+def sugerir_termino_parecido(termino, df_global=None, limite_valores=40000, cache=None):
     """Cuando la búsqueda no encuentra nada, propone el valor más parecido que sí existe.
 
     Hoy una búsqueda sin resultados es un callejón: no se sabe si el pago no existe, si se
     escribió mal la cédula o si falta un dígito. Con rapidfuzz -- que ya está instalado y
     lo usa el motor de conciliación-- se puede responder "no encontré 'BANCOLOMIA', ¿será
-    'BANCOLOMBIA'?".
+    'BANCOLOMBIA'?". Primero se compara con celdas enteras; si no, palabra por palabra
+    (ver corregir_palabras), para nombres con una letra mal: 'Jesus Nio' -> 'Jesus Niño'.
 
     Solo se ofrece con parecido MUY alto (85+). Una sugerencia floja es peor que ninguna:
     manda a buscar por un camino equivocado con aire de certeza.
     """
-    if fuzz is None or df_global is None or df_global.empty:
+    if df_global is None or df_global.empty:
         return None
     df_global = _columnas_unicas(df_global)
     objetivo = _normalizar_para_busqueda(termino)
@@ -1120,7 +1222,7 @@ def sugerir_termino_parecido(termino, df_global=None, limite_valores=40000):
         # Con menos de cuatro caracteres casi cualquier cosa se parece a casi todo.
         return None
     try:
-        candidatos = set()
+        candidatos = {}
         for col in df_global.columns:
             serie = df_global[col]
             if not (serie.dtype == object or pd.api.types.is_string_dtype(serie)):
@@ -1128,15 +1230,13 @@ def sugerir_termino_parecido(termino, df_global=None, limite_valores=40000):
             for v in serie.dropna().astype(str).unique()[:limite_valores // max(len(df_global.columns), 1)]:
                 plano = _normalizar_para_busqueda(v)
                 if plano and abs(len(plano) - len(objetivo)) <= 4:
-                    candidatos.add((plano, v))
+                    candidatos.setdefault(plano, v)
             if len(candidatos) > limite_valores:
                 break
-        mejor, mejor_puntaje = None, 0
-        for plano, original in candidatos:
-            p = fuzz.ratio(objetivo, plano)
-            if p > mejor_puntaje:
-                mejor, mejor_puntaje = original, p
-        return mejor if mejor_puntaje >= 85 else None
+        mejor, _ = _mas_parecido(objetivo, candidatos, 85)
+        if mejor is not None:
+            return candidatos[mejor]
+        return corregir_palabras(termino, df_global, cache)
     except Exception:
         logger.exception("Fallo buscando un término parecido")
         return None
