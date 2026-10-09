@@ -1,15 +1,16 @@
 /* Axio demo: la pantalla de la primera carga.
  *
- * Debajo del buscador: un anillo con el avance, el mensaje de lo que se está haciendo y una
- * tarjeta por hoja (Extractos, cada línea de crédito, WhatsApp) que se enciende cuando esa
- * hoja queda lista. Lo mueven los eventos de puente.js:
+ * Una franja discreta debajo del buscador: un anillo pequeño con el avance, qué se está
+ * leyendo («Leyendo Educativo · 3 de 10»), un punto por hoja (Extractos, cada línea de
+ * crédito, WhatsApp) que se llena cuando esa hoja queda lista, y una barra fina. Lo mueven
+ * los eventos de puente.js:
  *   axio-carga-inicio  { accion, fuentes: [{clave, nombre}] }
  *   axio-progreso      { mensaje }            (descargas y lecturas)
  *   axio-paso          { clave }              (esa hoja ya se leyó)
  *   axio-carga-parcial                         (ya se puede buscar en los Extractos)
  *   axio-carga-fin     { accion, error }
- * Al terminar, una onda sale del buscador hasta los bordes de la pantalla y el panel se
- * recoge. Solo en la primera carga: «Refrescar datos» no lo muestra.
+ * Al terminar, una onda suave sale del buscador hasta los bordes de la pantalla y la franja
+ * se recoge. Solo en la primera carga: «Refrescar datos» no lo muestra.
  *
  * Solo guarda en este navegador cuánto tardó la última carga, para estimar el anillo. Nada
  * de datos de las hojas.
@@ -22,7 +23,6 @@
   const guardar = (clave, valor) => { try { localStorage.setItem(clave, String(valor)); } catch (_) { /* sin almacenamiento */ } };
   const sinMovimiento = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const ICONOS = { extractos: "☁️", whatsapp: "💬" };
   const TEXTOS = { pendiente: "En espera", bajando: "Descargando", leyendo: "Leyendo", lista: "Lista", error: "Con error" };
 
   let panel = null;
@@ -55,32 +55,25 @@
     fuentes = (lista && lista.length ? lista : [{ clave: "extractos", nombre: "Extractos" }]).map((f, i) => ({ ...f, estado: "pendiente", i }));
 
     const anillo = nodo("div", { class: "carga-orbe", "aria-hidden": "true" },
-      nodo("span", { class: "carga-halo" }),
       nodo("span", { class: "carga-anillo" }),
-      nodo("span", { class: "carga-orbita" }, nodo("i"), nodo("i"), nodo("i")),
-      nodo("span", { class: "carga-centro" },
-        nodo("span", { class: "carga-logo" }),
-        nodo("strong", { class: "carga-porcentaje", text: "0 %" })));
+      nodo("strong", { class: "carga-porcentaje", text: "0" }));
 
-    const tarjetas = nodo("ul", { class: "carga-fuentes" });
+    // Un punto por hoja: discreto, pero sin perder qué está lista y qué no (el título lo dice).
+    const puntos = nodo("ul", { class: "carga-fuentes", "aria-label": "Hojas" });
     for (const f of fuentes) {
-      f.nodo = nodo("li", { class: "carga-fuente pendiente", style: `--i:${f.i}` },
-        nodo("span", { class: "carga-fuente-icono", "aria-hidden": "true", text: ICONOS[f.clave] || "💳" }),
-        nodo("span", { class: "carga-fuente-texto" },
-          nodo("strong", { text: f.nombre }),
-          nodo("span", { class: "carga-fuente-estado", text: TEXTOS.pendiente })),
-        nodo("span", { class: "carga-fuente-marca", "aria-hidden": "true" }));
-      tarjetas.append(f.nodo);
+      f.nodo = nodo("li", { class: "carga-fuente pendiente", title: `${f.nombre}: ${TEXTOS.pendiente}` });
+      puntos.append(f.nodo);
     }
 
     panel = nodo("section", { class: "carga", "aria-label": "Cargando Axio", "aria-live": "polite" },
-      nodo("div", { class: "carga-cabecera" },
-        anillo,
-        nodo("div", { class: "carga-titulos" },
+      anillo,
+      nodo("div", { class: "carga-titulos" },
+        nodo("span", { class: "carga-mensaje" },
           nodo("strong", { class: "carga-titulo", text: "Preparando tus datos" }),
-          nodo("span", { class: "carga-mensaje", text: "⏳ Preparando Axio…" }),
-          nodo("div", { class: "carga-barra" }, nodo("span", { class: "carga-relleno" })))),
-      tarjetas);
+          nodo("span", { class: "carga-detalle", text: "" })),
+        nodo("span", { class: "carga-nota", hidden: true })),
+      puntos,
+      nodo("span", { class: "carga-barra", "aria-hidden": "true" }, nodo("span", { class: "carga-relleno" })));
     const zona = $("#asociado-zona");
     zona.parentNode.insertBefore(panel, zona);
     cuadro = requestAnimationFrame(animar);
@@ -90,7 +83,18 @@
     if (!f || f.estado === estado || (f.estado === "lista" && estado !== "error")) return;
     f.estado = estado;
     f.nodo.className = "carga-fuente " + estado;
-    f.nodo.querySelector(".carga-fuente-estado").textContent = TEXTOS[estado];
+    f.nodo.title = `${f.nombre}: ${TEXTOS[estado]}`;
+    contar();
+  }
+
+  // «Leyendo Libre Inversión Mayor · 5 de 10»
+  function contar() {
+    if (!panel) return;
+    const listas = fuentes.filter((f) => f.estado === "lista" || f.estado === "error").length;
+    const leyendo = fuentes.find((f) => f.estado === "leyendo");
+    const bajando = fuentes.some((f) => f.estado === "bajando");
+    const accion = leyendo ? "Leyendo " + leyendo.nombre : bajando ? "Descargando las hojas" : "";
+    panel.querySelector(".carga-detalle").textContent = [accion, `${listas} de ${fuentes.length}`].filter(Boolean).join(" · ");
   }
 
   // Avance real: la etapa de descargas cuenta como una hoja más; cada hoja leída suma una;
@@ -121,14 +125,15 @@
   function pintarAvance(f) {
     if (!panel) return;
     panel.style.setProperty("--avance", f.toFixed(4));
-    panel.querySelector(".carga-porcentaje").textContent = Math.floor(f * 100) + " %";
+    panel.querySelector(".carga-porcentaje").textContent = Math.floor(f * 100);
   }
 
   // ------------------------------------------------------------------ eventos de la carga
   window.addEventListener("axio-progreso", (ev) => {
     if (!panel) return;
+    // El mensaje completo queda en el título del panel; a la vista va el resumen corto.
     const texto = ev.detail.mensaje || "";
-    panel.querySelector(".carga-mensaje").textContent = "⏳ " + texto;
+    panel.title = texto;
     const m = /(\d+) de (\d+) listas/.exec(texto);
     if (m) {
       descargadas = Number(m[1]) / Number(m[2]);
@@ -156,9 +161,10 @@
   });
 
   window.addEventListener("axio-carga-parcial", () => {
-    if (!panel || panel.querySelector(".carga-nota")) return;
-    panel.querySelector(".carga-titulos").append(nodo("p", { class: "carga-nota",
-      text: "✓ Ya puedes buscar en los Extractos. Las líneas de crédito se suman solas." }));
+    if (!panel) return;
+    const nota = panel.querySelector(".carga-nota");
+    nota.textContent = "Ya puedes buscar en los Extractos; las líneas de crédito se suman solas.";
+    nota.hidden = false;
   });
 
   // ------------------------------------------------------------------ final
@@ -178,14 +184,16 @@
     fuentes.forEach((f, i) => setTimeout(() => ponerEstado(f, conError.has(f.clave) ? "error" : "lista"), i * 60));
 
     p.style.setProperty("--avance", "1");
-    p.querySelector(".carga-porcentaje").textContent = "100 %";
+    p.querySelector(".carga-porcentaje").textContent = "✓";
     p.classList.add("carga-completa");
-    p.querySelector(".carga-titulo").textContent = error || conError.size ? "Axio está listo, con avisos" : "¡Axio está listo!";
-    p.querySelector(".carga-mensaje").textContent = conError.size
-      ? `⚠️ ${conError.size} hoja${conError.size === 1 ? "" : "s"} no se pudo cargar: revisa el menú de tu cuenta`
-      : "✓ Todas las hojas cargadas · ¡a buscar!";
-    const nota = p.querySelector(".carga-nota");
-    if (nota) nota.remove();
+    const fallidas = fuentes.filter((f) => conError.has(f.clave)).map((f) => f.nombre);
+    p.classList.toggle("carga-con-avisos", Boolean(fallidas.length || error));
+    if (fallidas.length || error) p.querySelector(".carga-porcentaje").textContent = "!";
+    p.querySelector(".carga-titulo").textContent = "Listo";
+    p.querySelector(".carga-detalle").textContent = fallidas.length
+      ? `Sin cargar: ${fallidas.join(", ")} (detalle en el menú de tu cuenta)`
+      : `${fuentes.length} de ${fuentes.length} hojas`;
+    p.querySelector(".carga-nota").hidden = true;
 
     const caja = $("#form-busqueda");
     setTimeout(() => {
@@ -212,21 +220,14 @@
     const radio = Math.hypot(Math.max(cx, innerWidth - cx), Math.max(cy, innerHeight - cy)) + 40;
     const capa = nodo("div", { class: "onda-capa " + tono, "aria-hidden": "true" });
     document.body.append(capa);
-    const anillos = [0, 160, 330].map((retraso, i) => {
-      const a = nodo("span", { class: "onda-anillo" + (i === 0 ? " onda-principal" : ""),
-        style: `left:${cx}px;top:${cy}px;width:${radio * 2}px;height:${radio * 2}px;margin:${-radio}px 0 0 ${-radio}px` });
-      capa.append(a);
-      return a.animate([
-        { transform: "scale(0.02)", opacity: 0 },
-        { opacity: i === 0 ? 1 : 0.7, offset: 0.12 },
-        { transform: "scale(1)", opacity: 0 },
-      ], { duration: 1500 + i * 150, delay: retraso, easing: "cubic-bezier(.16, .84, .3, 1)", fill: "both" }).finished;
-    });
-    const destello = nodo("span", { class: "onda-destello", style: `left:${cx}px;top:${cy}px` });
-    capa.append(destello);
-    destello.animate([{ opacity: 0, transform: "translate(-50%, -50%) scale(.4)" }, { opacity: 1, offset: 0.25 },
-      { opacity: 0, transform: "translate(-50%, -50%) scale(2.6)" }], { duration: 1100, easing: "ease-out", fill: "both" });
-    Promise.all(anillos).then(() => capa.remove(), () => capa.remove());
+    const anillo = nodo("span", { class: "onda-anillo",
+      style: `left:${cx}px;top:${cy}px;width:${radio * 2}px;height:${radio * 2}px;margin:${-radio}px 0 0 ${-radio}px` });
+    capa.append(anillo);
+    anillo.animate([
+      { transform: "scale(0.03)", opacity: 0 },
+      { opacity: 0.55, offset: 0.15 },
+      { transform: "scale(1)", opacity: 0 },
+    ], { duration: 1700, easing: "cubic-bezier(.16, .84, .3, 1)", fill: "both" }).finished.then(() => capa.remove(), () => capa.remove());
   }
   window.axioOnda = onda;
 
