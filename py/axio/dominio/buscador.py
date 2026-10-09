@@ -1389,8 +1389,10 @@ def descargar_linea_credito(url, clave=None):
         idx_tarifa = _buscar_columna(['TARIFA'], usar_ultimo=True)
         idx_saldo = _buscar_columna(['SALDO'], usar_ultimo=True)
         idx_mora = _buscar_columna(['MORA'])
-        idx_obs_directivos = _buscar_columna(['OBSERVACION DIRECTIVOS', 'OBSERVACIÓN DIRECTIVOS'])
-        idx_obs_general = _buscar_columna(['OBSERVACION GENERAL', 'OBSERVACIÓN GENERAL'])
+        # Por palabras y no por el texto exacto: la hoja pasó de 'OBSERVACION DIRECTIVOS' a
+        # 'OBSERVACION de DIRECTIVOS ( NO REPORTAR)'. 'OBSERVACI' cubre la tilde.
+        idx_obs_directivos = _buscar_columna_con_todas(['OBSERVACI', 'DIRECTIV'])
+        idx_obs_general = _buscar_columna_con_todas(['OBSERVACI', 'GENERAL'])
         if idx_obs_directivos is None and idx_obs_general is None:
             idx_obs_directivos = _buscar_columna(['OBSERVACION', 'OBSERVACIÓN'])
     else:
