@@ -822,7 +822,8 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 .tc-tabla th, .tc-tabla td { max-width: none; }
 .tc-tabla td { padding: 0 12px; height: 34px; line-height: 33px; }
 .tc-tabla td.estado { padding: 0 0 0 16px; }
-.tc-tabla tbody tr:nth-child(even) { background: none; }
+/* Solo las filas sin estado: las de color (verde, naranja…) conservan el suyo, sean pares o impares. */
+.tc-tabla tbody tr:nth-child(even):not([class]) { background: none; }
 .tc-tabla tbody tr:nth-child(odd):not([class]) { background: rgba(127, 127, 160, .035); }
 .tc-tabla tbody tr:focus-visible { outline: 2px solid var(--celeste); outline-offset: -2px; }
 .tc-tabla tr.tc-relleno, .tc-tabla tr.tc-relleno:hover { background: none; cursor: default; }
