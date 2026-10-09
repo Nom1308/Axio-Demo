@@ -21,12 +21,13 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-09-095742");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-09-105918");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
   let cargando = false;            // descargando las hojas: /api/... se responde desde aquí
   let parcial = false;             // ...salvo que ya estén los Extractos: entonces va a Python
+  let fuentesConfig = [];          // [{clave, nombre}] de las hojas del config
   let mensaje = "Preparando el motor de búsqueda…";
   let interfazIniciada = false;
   let usuario = null;              // datos de la cuenta de Google, si inició sesión
@@ -59,6 +60,8 @@
         ? "✓ Motor listo. Inicia sesión para empezar."
         : "✓ Motor listo. Carga tu archivo para empezar.";
       $("#estado-motor").classList.add("listo");
+    } else if (m.tipo === "paso") {
+      window.dispatchEvent(new CustomEvent("axio-paso", { detail: { clave: m.clave } }));
     } else if (m.tipo === "parcial") {
       parcial = true;
       window.dispatchEvent(new CustomEvent("axio-carga-parcial"));
@@ -100,7 +103,7 @@
   async function cargarDatos(datos, antes) {
     cargando = true;
     let error = null;
-    window.dispatchEvent(new CustomEvent("axio-carga-inicio", { detail: { accion: datos.accion } }));
+    window.dispatchEvent(new CustomEvent("axio-carga-inicio", { detail: { accion: datos.accion, fuentes: fuentesConfig } }));
     try {
       if (antes) await antes();
       const r = await pedir(datos);
@@ -207,6 +210,13 @@
       return;
     }
     urlRegistro = String(config.url_registro_gestiones || "").trim();
+    // Las hojas que se van a cargar, en el orden en que se leen (para la pantalla de carga).
+    const conUrl = (u) => Boolean(String(u || "").trim());
+    fuentesConfig = [
+      { clave: "extractos", nombre: "Extractos" },
+      ...(config.lineas_credito || []).filter((l) => conUrl(l.url)).map((l) => ({ clave: l.clave, nombre: l.nombre || l.clave })),
+      ...(conUrl(config.url_whatsapp) ? [{ clave: "whatsapp", nombre: "WhatsApp" }] : []),
+    ];
     if (!motorListo) mensaje = "Preparando el motor de búsqueda (solo la primera vez tarda)…";
     cargarDatos({ accion: "configurar", config: texto });
     iniciarInterfaz();
@@ -221,7 +231,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-09-095742";
+    script.src = "estatico/app.js?v=2026-10-09-105918";
     document.body.append(script);
   }
 

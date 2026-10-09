@@ -705,6 +705,79 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 
 .nota-parcial { display: block; color: var(--ambar); font-size: 13px; }
 
+/* ==========================================================================
+   MOVIMIENTO: detalles que hacen sentir la página viva. Todo se apaga con
+   «reducir movimiento» del sistema (regla al final) y al imprimir.
+   ========================================================================== */
+@property --borde-giro { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+
+/* La palabra dorada del título brilla despacio. */
+.degradado { background-size: 220% auto; animation: brillo-dorado 7s ease-in-out infinite; }
+@keyframes brillo-dorado { 50% { background-position: 100% center; } }
+
+/* Al escribir en el buscador, un borde de luz gira alrededor del panel. */
+.panel-busqueda { position: relative; }
+.panel-busqueda::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1.5px; pointer-events: none;
+  background: conic-gradient(from var(--borde-giro), transparent 0deg, #4FA3FF 70deg, #34D399 120deg, transparent 190deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+  opacity: 0; transition: opacity .4s ease; animation: borde-giro 4s linear infinite;
+}
+.panel-busqueda:focus-within::before { opacity: 1; }
+@keyframes borde-giro { to { --borde-giro: 360deg; } }
+
+/* Botón principal: un reflejo que lo cruza al pasar el mouse. */
+.boton-principal { overflow: hidden; isolation: isolate; }
+.boton-principal::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .35) 50%, transparent 70%);
+  transform: translateX(-120%); transition: transform .7s cubic-bezier(.2, .8, .2, 1);
+}
+.boton-principal:hover::after { transform: translateX(120%); }
+
+/* Onda al presionar cualquier botón (la pone app.js). */
+.boton { overflow: hidden; }
+.onda-boton {
+  position: absolute; border-radius: 50%; pointer-events: none; transform: scale(0);
+  background: currentColor; opacity: .28; animation: onda-boton .55s ease-out forwards;
+}
+@keyframes onda-boton { to { transform: scale(1); opacity: 0; } }
+
+/* Tarjetas de crédito: una luz suave sigue al mouse (app.js pone --mx y --my). */
+.tarjeta-credito::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .35s ease;
+  background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 50%), rgba(156, 200, 255, .13), transparent 45%);
+}
+.tarjeta-credito:hover::after { opacity: 1; }
+.tarjeta-credito { transition: transform .25s cubic-bezier(.2, .8, .2, 1), box-shadow .25s ease, border-color .25s ease; }
+.tarjeta-credito.credito-clic:hover { box-shadow: 0 18px 40px -22px rgba(47, 125, 246, .9); }
+.tarjeta-credito.credito-mora.credito-clic:hover { box-shadow: 0 18px 40px -22px rgba(239, 68, 68, .9); }
+
+/* La barra mora / al día crece desde la izquierda. */
+.asociado-barra span { transform-origin: left; animation: barra-crece .9s cubic-bezier(.2, .8, .2, 1) .15s both; }
+.asociado-barra span + span { animation-delay: .3s; }
+@keyframes barra-crece { from { transform: scaleX(0); } }
+
+/* Resultados nuevos: las filas entran en cascada (solo al buscar, no al filtrar). */
+.resultados-nuevos .grupo { animation: aparecer .45s cubic-bezier(.2, .8, .2, 1) both; }
+.resultados-nuevos tbody tr { animation: fila-entra .4s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 22ms + 80ms); }
+@keyframes fila-entra { from { opacity: 0; transform: translateY(6px); } }
+
+/* El detalle se arma por partes al abrirse. */
+.detalle[open] .detalle-cuerpo > * { animation: aparecer .4s cubic-bezier(.2, .8, .2, 1) both; }
+.detalle[open] .detalle-cuerpo > :nth-child(2) { animation-delay: .04s; }
+.detalle[open] .detalle-cuerpo > :nth-child(3) { animation-delay: .08s; }
+.detalle[open] .detalle-cuerpo > :nth-child(4) { animation-delay: .12s; }
+.detalle[open] .detalle-cuerpo > :nth-child(5) { animation-delay: .16s; }
+.detalle[open] .detalle-cuerpo > :nth-child(n+6) { animation-delay: .2s; }
+
+/* Chips de recientes y de fuentes: aparecen uno tras otro. */
+.recientes button, .fuentes > span { animation: aparecer .35s cubic-bezier(.2, .8, .2, 1) both; }
+.recientes button:nth-of-type(2), .fuentes > span:nth-of-type(2) { animation-delay: .04s; }
+.recientes button:nth-of-type(3), .fuentes > span:nth-of-type(3) { animation-delay: .08s; }
+.recientes button:nth-of-type(n+4), .fuentes > span:nth-of-type(n+4) { animation-delay: .12s; }
+
 /* ---------- aviso de cierre por inactividad ---------- */
 .aviso-inactividad {
   position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60;

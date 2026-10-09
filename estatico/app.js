@@ -127,6 +127,52 @@
 
   const formatoMiles = new Intl.NumberFormat("es-CO");
 
+  // ------------------------------------------------------------------ movimiento
+  // Detalles de animación (ver «MOVIMIENTO» en estilos.css). Con «reducir movimiento» en el
+  // sistema no se hace ninguno.
+  const sinMovimiento = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Una cifra como "$ 15,328,095" o "$ 17,333,333.33" sube desde cero hasta su valor.
+  function contarHasta(nodo, texto) {
+    const m = /^(\D*?)(\d[\d,]*(?:\.\d+)?)(\D*)$/.exec(String(texto || ""));
+    if (!m || sinMovimiento()) return;
+    const decimales = m[2].includes(".") ? m[2].split(".")[1].length : 0;
+    const valor = Number(m[2].replace(/,/g, ""));
+    if (!isFinite(valor) || valor < 100) return;
+    const cifra = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimales, maximumFractionDigits: decimales });
+    const inicio = performance.now(), duracion = 950;
+    const paso = (t) => {
+      const p = Math.min(1, (t - inicio) / duracion);
+      nodo.textContent = p < 1 ? m[1] + cifra.format(valor * (1 - Math.pow(1 - p, 3))) + m[3] : texto;
+      if (p < 1) requestAnimationFrame(paso);
+    };
+    requestAnimationFrame(paso);
+  }
+
+  // Onda al presionar un botón, desde donde se tocó.
+  document.addEventListener("pointerdown", (ev) => {
+    const boton = ev.target.closest && ev.target.closest(".boton");
+    if (!boton || boton.disabled || sinMovimiento()) return;
+    const r = boton.getBoundingClientRect();
+    const lado = Math.max(r.width, r.height) * 2.2;
+    const onda = el("span", { class: "onda-boton", "aria-hidden": "true",
+      style: `width:${lado}px;height:${lado}px;left:${ev.clientX - r.left - lado / 2}px;top:${ev.clientY - r.top - lado / 2}px` });
+    boton.append(onda);
+    setTimeout(() => onda.remove(), 600);
+  }, { passive: true });
+
+  // La luz de las tarjetas de crédito sigue al mouse.
+  document.addEventListener("pointermove", (ev) => {
+    const tarjeta = ev.target.closest && ev.target.closest(".tarjeta-credito");
+    if (!tarjeta) return;
+    const r = tarjeta.getBoundingClientRect();
+    tarjeta.style.setProperty("--mx", `${ev.clientX - r.left}px`);
+    tarjeta.style.setProperty("--my", `${ev.clientY - r.top}px`);
+  }, { passive: true });
+
+  let animarEntrada = false;   // la próxima pintada de resultados entra en cascada
+  let temporizadorEntrada = null;
+
   // ------------------------------------------------------------------ estado de fuentes
   async function cargarEstado() {
     try {
@@ -261,6 +307,7 @@
       busqueda = datos;
       if (!repetida) filtro.value = "";
       guardarReciente(termino);
+      animarEntrada = !repetida;
       pintarResultados();
       if (datos.parcial) {
         // Se buscó solo en los Extractos: las líneas de crédito siguen cargando. Al terminar,
@@ -282,6 +329,11 @@
   function pintarResultados() {
     contenedor.replaceChildren();
     if (!busqueda) return;
+    // Cascada solo en la pintada de una búsqueda nueva; al filtrar u ordenar, nada se mueve.
+    contenedor.classList.toggle("resultados-nuevos", animarEntrada);
+    clearTimeout(temporizadorEntrada);
+    if (animarEntrada) temporizadorEntrada = setTimeout(() => contenedor.classList.remove("resultados-nuevos"), 2000);
+    animarEntrada = false;
 
     // Si se buscó una cédula, primero va el resumen de la persona (sus créditos activos en
     // todas las líneas y su WhatsApp), arriba de la barra de resultados. Después, lo de siempre.
@@ -354,10 +406,11 @@
     }
 
     const cuerpo = el("tbody");
+    let n = 0;
     for (const f of filas) {
       const coinciden = new Set(f.m);
       // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
-      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", onclick: () => abrirDetalle(f.i), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i); } });
+      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n++}` : null, onclick: () => abrirDetalle(f.i), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i); } });
       if (conEstado) {
         tr.append(el("td", { class: "estado" }, f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
       }
@@ -720,8 +773,10 @@
     const saldo = e.saldo_actual ? ["Saldo actual", conPesos(e.saldo_actual)]
       : e.saldo ? [etiquetaColumna(e.columna_saldo, "Saldo"), conPesos(e.saldo)] : null;
     if (saldo) {
+      const cifra = el("strong", { text: saldo[1] });
       nodo.append(el("div", { class: "tc-saldo" + (/\d/.test(saldo[1]) ? "" : " tc-saldo-texto") },
-        el("span", { text: saldo[0] }), el("strong", { text: saldo[1] })));
+        el("span", { text: saldo[0] }), cifra));
+      contarHasta(cifra, saldo[1]);
     }
 
     const datos = [

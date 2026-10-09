@@ -141,9 +141,12 @@ async function cargarDatos(accion, config) {
   // paso deja los Extractos listos: desde ahí puente.js deja pasar las búsquedas.
   const pasos = accion === "configurar" ? nav.configurar_por_pasos(config) : nav.recargar_por_pasos();
   try {
+    let t = performance.now();
     let paso = pasos.next();
     let primero = true;
     while (!paso.done) {
+      console.info(`[Axio] Lectura de ${paso.value}: ${((performance.now() - t) / 1000).toFixed(1)} s`);
+      postMessage({ tipo: "paso", clave: paso.value });
       if (primero) {
         primero = false;
         console.info(`[Axio] Extractos listos para buscar: ${((performance.now() - inicio) / 1000).toFixed(1)} s`);
@@ -151,6 +154,7 @@ async function cargarDatos(accion, config) {
       }
       await new Promise((r) => setTimeout(r, 0));
       nav.fijar_token(tokenGoogle);   // pudo renovarse mientras tanto
+      t = performance.now();
       paso = pasos.next();
     }
     console.info(`[Axio] Lectura y armado de los datos: ${((performance.now() - inicio) / 1000).toFixed(1)} s`);

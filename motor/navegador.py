@@ -105,15 +105,23 @@ def _pedir(url):
 _precarga = {}
 
 
+# La parte después de '#' no viaja al servidor y urllib la descarta: pandas pide
+# '…export?format=csv&gid=123' aunque la URL armada terminara en '…gid=123#' (los enlaces de
+# la Matriz y de WhatsApp en el config traen '?gid=…#gid=…'). Sin esto la precarga no
+# coincidía y esas dos hojas se volvían a bajar, de a una, en plena lectura.
+def _sin_fragmento(url):
+    return url.split('#', 1)[0]
+
+
 def guardar_precarga(url, datos, estado, url_final, tipo):
-    _precarga[url] = (estado, bytes(datos.to_py()), url_final or url, tipo)
+    _precarga[_sin_fragmento(url)] = (estado, bytes(datos.to_py()), url_final or url, tipo)
 
 
 def _urlopen_navegador(url, data=None, timeout=None, **_):
     if isinstance(url, urllib.request.Request):
         url = url.full_url
-    if url in _precarga:
-        estado, datos, url_final, tipo = _precarga.pop(url)
+    if _sin_fragmento(url) in _precarga:
+        estado, datos, url_final, tipo = _precarga.pop(_sin_fragmento(url))
         return _Respuesta(url_final, estado, datos, tipo)
     if EN_NAVEGADOR:
         import js
