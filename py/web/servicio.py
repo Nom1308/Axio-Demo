@@ -92,6 +92,9 @@ class MotorWeb:
         self.listo = False
         self.cargando = False
         self.mensaje_carga = ""
+        # Primera carga a medias: los Extractos ya se pueden buscar, pero las líneas de
+        # crédito y WhatsApp siguen bajando (ver _pasos_carga).
+        self.parcial = False
 
         self.cache_normalizado = {}
         self.cache_archivos = {}
@@ -119,6 +122,18 @@ class MotorWeb:
         return True
 
     def _cargar(self, forzar):
+        for _ in self._pasos_carga(forzar):
+            pass
+
+    def _pasos_carga(self, forzar):
+        """La carga completa, como generador: se detiene (yield) después de los Extractos y
+        después de cada línea de crédito. En el servidor se recorre de corrido en su hilo; la
+        versión de navegador, que tiene un solo hilo, atiende búsquedas entre un paso y otro.
+
+        En la PRIMERA carga, los Extractos se publican apenas están (self.parcial): se puede
+        buscar en ellos mientras bajan las líneas. En un «Refrescar», todo se reemplaza de una
+        vez al final: mientras tanto se sigue buscando en la copia anterior completa, nunca
+        en una mitad nueva."""
         try:
             # La configuración se relee en cada carga: así, editar config_axio.json en el
             # servidor y darle a "Refrescar" basta, sin reiniciar el servicio.
@@ -131,12 +146,18 @@ class MotorWeb:
             if df is not None:
                 df = asegurar_columna_cedula(df, config.get('col_cedula', 'Cedula'))
                 aviso = aviso_columna_cedula(df)
+            if not self.listo:
+                self.config = config
+                self.df_global, self.hora_matriz, self.error_matriz = df, hora, error
+                self.aviso_matriz = aviso
+                self.cache_normalizado = {}
+                self.parcial = True
+                self.listo = True
+            yield 'extractos'
 
-            rosters, hora_lineas, errores = self._cargar_lineas(config)
+            rosters, hora_lineas, errores = yield from self._cargar_lineas(config)
             whatsapp, error_whatsapp = self._cargar_whatsapp(config)
 
-            # Todo se reemplaza de una vez al final: mientras se descargaba, las búsquedas
-            # siguieron usando la copia anterior completa, nunca una mitad nueva.
             self.config = config
             self.df_global, self.hora_matriz, self.error_matriz = df, hora, error
             self.aviso_matriz = aviso
@@ -149,6 +170,7 @@ class MotorWeb:
             self.error_matriz = str(e)
             self.listo = True
         finally:
+            self.parcial = False
             self.mensaje_carga = ""
             self.cargando = False
 
@@ -169,6 +191,8 @@ class MotorWeb:
             return None, None, str(e)
 
     def _cargar_lineas(self, config):
+        """Generador (se usa con yield from): un paso por línea. Devuelve
+        (rosters, hora, errores)."""
         lineas = config.get('lineas_credito', [])
         rosters, hora = cargar_lineas_credito(lineas)
         if rosters is not None:
@@ -183,6 +207,7 @@ class MotorWeb:
             except Exception as e:
                 logger.exception(f"No se pudo cargar la línea de crédito '{linea.get('nombre')}'")
                 errores[linea.get('nombre', linea.get('clave'))] = str(e)
+            yield linea['clave']
         guardar_lineas_credito(rosters, lineas)
         return rosters, datetime.now(), errores
 
@@ -209,6 +234,7 @@ class MotorWeb:
         return {
             'listo': self.listo,
             'cargando': self.cargando,
+            'parcial': self.parcial,
             'mensaje_carga': self.mensaje_carga,
             'matriz': {
                 'configurada': bool(self.config.get('url_base_global')),
@@ -263,7 +289,7 @@ class MotorWeb:
         if str(self.config.get('url_whatsapp', '')).strip():
             if self.error_whatsapp:
                 fuentes.append(fuente('whatsapp', 'WhatsApp', 'error', self.error_whatsapp))
-            elif self.listo:
+            elif self.listo and not self.parcial:
                 fuentes.append(fuente('whatsapp', 'WhatsApp', 'ok',
                                       f"{len(self.whatsapp):,} contactos".replace(',', '.')))
             else:
@@ -305,6 +331,9 @@ class MotorWeb:
             'grupos': self._agrupar(resultados, totales),
             'sugerencia': sugerencia,
             'asociado': self._asociado(termino),
+            # Buscó antes de que terminaran de cargar las líneas: la página repite la
+            # búsqueda sola al terminar, para sumar el resumen de créditos.
+            'parcial': self.parcial,
         }
 
     def _asociado(self, termino):
@@ -396,6 +425,8 @@ class MotorWeb:
             lineas = self._lineas_de_cedula(limpiar_cedula(cedula))
         elif cedula is None:
             motivo_sin_lineas = "En esta fila no hay ningún campo con forma de cédula; por eso no se consultan las líneas de crédito."
+        elif self.parcial:
+            motivo_sin_lineas = "Las líneas de crédito todavía se están cargando. Vuelve a abrir este detalle en un momento."
         elif not any(str(l.get('url', '')).strip() for l in self.config.get('lineas_credito', [])):
             motivo_sin_lineas = "No hay líneas de crédito configuradas en el servidor."
         else:

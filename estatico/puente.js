@@ -21,11 +21,12 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-08j");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-09-095742");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
   let cargando = false;            // descargando las hojas: /api/... se responde desde aquí
+  let parcial = false;             // ...salvo que ya estén los Extractos: entonces va a Python
   let mensaje = "Preparando el motor de búsqueda…";
   let interfazIniciada = false;
   let usuario = null;              // datos de la cuenta de Google, si inició sesión
@@ -58,6 +59,9 @@
         ? "✓ Motor listo. Inicia sesión para empezar."
         : "✓ Motor listo. Carga tu archivo para empezar.";
       $("#estado-motor").classList.add("listo");
+    } else if (m.tipo === "parcial") {
+      parcial = true;
+      window.dispatchEvent(new CustomEvent("axio-carga-parcial"));
     } else if (m.tipo === "error-motor") {
       mostrarErrorPortada("No se pudo preparar el motor: " + m.error + ". Revisa tu conexión a internet y recarga la página.");
       $("#estado-motor").textContent = "";
@@ -106,6 +110,7 @@
       mostrarErrorCarga(e.message);
     } finally {
       cargando = false;
+      parcial = false;
       window.dispatchEvent(new CustomEvent("axio-carga-fin", { detail: { accion: datos.accion, error } }));
     }
   }
@@ -117,7 +122,7 @@
       cargarDatos({ accion: "recargar" }, usuario ? tokenVigente : null);
       return respuestaJson({ iniciada: true, mensaje: "Descargando los datos de nuevo..." });
     }
-    if (cargando) {
+    if (cargando && !parcial) {
       if (url === "/api/estado") return respuestaJson(estadoCargando());
       if (url.startsWith("/api/buscar")) return respuestaJson({ cargando: true, mensaje: "Cargando los datos..." }, 202);
       return respuestaJson({ error: "Los datos todavía se están cargando." }, 503);
@@ -130,6 +135,7 @@
   // ------------------------------------------------------------------ portada
   function mostrarErrorPortada(texto) {
     const caja = $("#error-portada");
+    caja.classList.replace("aviso-ambar", "aviso-error");   // por si mostraba el aviso de inactividad
     caja.textContent = texto;
     caja.hidden = !texto;
   }
@@ -200,6 +206,7 @@
       mostrarErrorPortada(`${quien} es un JSON, pero no trae la URL de la Matriz_Nube en Google Sheets («url_base_global»). ¿Es el config_axio.json correcto?`);
       return;
     }
+    urlRegistro = String(config.url_registro_gestiones || "").trim();
     if (!motorListo) mensaje = "Preparando el motor de búsqueda (solo la primera vez tarda)…";
     cargarDatos({ accion: "configurar", config: texto });
     iniciarInterfaz();
@@ -214,7 +221,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-08j";
+    script.src = "estatico/app.js?v=2026-10-09-095742";
     document.body.append(script);
   }
 
@@ -288,10 +295,66 @@
 
   const conToken = (url) => fetch(url, { headers: { Authorization: "Bearer " + token } });
 
+  // ------------------------------------------------------------------ registro de gestiones
+  // Si el config trae «url_registro_gestiones» (una hoja de Google aparte), cada valor que
+  // Axio escribe en una hoja (la Matriz desde «Gestionar», o una celda de una obligación
+  // desde el visor) se anota ahí: cuándo, quién, dónde, qué columna, antes y después. Se
+  // escribe con la cuenta de la persona, así que todos los que gestionan necesitan permiso
+  // de edición en esa hoja. Sin la clave en el config, no se anota nada.
+  // Google guarda además el historial de cada celda en la propia hoja (con el correo de quien
+  // escribió, porque Axio usa su cuenta): este registro es la versión fácil de consultar.
+  let urlRegistro = "";
+  let hojaRegistro = null;   // { id, rango } una vez ubicada (y con encabezado)
+  const ENCABEZADO_REGISTRO = ["Fecha y hora", "Correo", "Nombre", "Hoja", "Ubicación", "Cédula", "Columna", "Antes", "Después"];
+
+  async function ubicarRegistro() {
+    if (hojaRegistro) return hojaRegistro;
+    const id = (/\/spreadsheets\/d\/([\w-]{20,})/.exec(urlRegistro) || [])[1];
+    if (!id) throw new Error("«url_registro_gestiones» no es la dirección de una hoja de Google");
+    const gid = (/[#&?]gid=(\d+)/.exec(urlRegistro) || [])[1];
+    const r = await conToken(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=${encodeURIComponent("sheets.properties(sheetId,title)")}`);
+    if (!r.ok) throw new Error(`no se pudo abrir la hoja del registro (Google respondió ${r.status})`);
+    const hojas = (await r.json()).sheets.map((h) => h.properties);
+    const hoja = hojas.find((h) => String(h.sheetId) === gid) || hojas[0];
+    const rango = `'${hoja.title.replace(/'/g, "''")}'!A1:I1`;
+    const actual = await conToken(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(rango)}`);
+    const valores = actual.ok ? ((await actual.json()).values || []) : [];
+    if (!valores.length || !valores[0].length) await anotar(id, rango, [ENCABEZADO_REGISTRO]);   // hoja nueva: va el encabezado
+    hojaRegistro = { id, rango };
+    return hojaRegistro;
+  }
+
+  async function anotar(id, rango, filas) {
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(rango)}:append` +
+      "?valueInputOption=RAW&insertDataOption=INSERT_ROWS", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: filas }),
+    });
+    if (r.status === 403) throw new Error("tu cuenta no puede escribir en la hoja del registro; pide permiso de edición");
+    if (!r.ok) throw new Error(`Google respondió ${r.status} al anotar en el registro`);
+  }
+
+  // cambios: [{ hoja, ubicacion, cedula, columna, antes, despues }]. Devuelve false si no
+  // hay registro configurado; lanza un error si está configurado y no se pudo anotar.
+  async function registrar(cambios) {
+    if (!urlRegistro || !cambios.length) return false;
+    await tokenVigente();
+    const { id, rango } = await ubicarRegistro();
+    const ahora = new Date();
+    const dosDigitos = (n) => String(n).padStart(2, "0");
+    const fecha = `${ahora.getFullYear()}-${dosDigitos(ahora.getMonth() + 1)}-${dosDigitos(ahora.getDate())} ` +
+      `${dosDigitos(ahora.getHours())}:${dosDigitos(ahora.getMinutes())}:${dosDigitos(ahora.getSeconds())}`;
+    await anotar(id, rango, cambios.map((c) => [fecha, (usuario && usuario.email) || "", (usuario && usuario.name) || "",
+      c.hoja || "", c.ubicacion || "", c.cedula || "", c.columna || "", c.antes == null ? "" : String(c.antes), c.despues == null ? "" : String(c.despues)]));
+    return true;
+  }
+
   // Lo que estatico/hojas.js necesita de la sesión, sin ver nada más de este módulo.
   window.axioGoogle = {
     conectado: () => Boolean(usuario && token),
     token: tokenVigente,
+    registrar,
     // Google deja a la persona desmarcar permisos en la pantalla de consentimiento: si no
     // aceptó el de hojas de cálculo, la tabla se abre en solo lectura.
     puedeEscribir: () => Boolean(respuestaToken && window.google && google.accounts.oauth2.hasGrantedAllScopes(respuestaToken, ALCANCE_HOJAS)),
@@ -372,11 +435,28 @@
 
   // "Cambiar archivo" / "Cerrar sesión": recargar la página borra todo lo que había en
   // memoria. Con sesión, además se le devuelve el token a Google para que deje de valer.
-  $("#btn-cambiar").addEventListener("click", () => {
+  // app.js llama lo mismo cuando cierra la sesión por inactividad.
+  const MARCA_INACTIVIDAD = "axio_cierre_inactividad";   // solo una marca, sin datos
+  function cerrarSesion(motivo) {
+    if (motivo === "inactividad") {
+      try { sessionStorage.setItem(MARCA_INACTIVIDAD, "1"); } catch (_) { /* sin almacenamiento */ }
+    }
     if (token && window.google && google.accounts && google.accounts.oauth2) {
       google.accounts.oauth2.revoke(token, () => window.location.reload());
     } else {
       window.location.reload();
     }
-  });
+  }
+  window.axioCerrarSesion = cerrarSesion;
+  $("#btn-cambiar").addEventListener("click", () => cerrarSesion());
+
+  try {
+    if (sessionStorage.getItem(MARCA_INACTIVIDAD)) {
+      sessionStorage.removeItem(MARCA_INACTIVIDAD);
+      const nota = $("#error-portada");
+      nota.textContent = "Se cerró la sesión por inactividad y se borraron los datos de la pestaña. Vuelve a entrar para seguir.";
+      nota.classList.replace("aviso-error", "aviso-ambar");
+      nota.hidden = false;
+    }
+  } catch (_) { /* sin almacenamiento */ }
 })();

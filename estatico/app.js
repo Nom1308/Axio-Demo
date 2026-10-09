@@ -34,7 +34,8 @@
   let busqueda = null;          // última respuesta de /api/buscar
   const orden = {};             // fuente -> {col, asc}
   let sondeo = null;
-  let alTerminarCarga = null;   // búsqueda a repetir cuando terminen de cargar los datos
+  let alTerminarCarga = null;   // búsqueda a lanzar apenas se pueda buscar
+  let alCompletarCarga = null;  // búsqueda hecha a medias, a repetir cuando termine todo
 
   // ------------------------------------------------------------------ utilidades
   function el(etiqueta, props, ...hijos) {
@@ -189,12 +190,17 @@
       caja.style.flexBasis = "100%";
     }
 
-    if (est.cargando) {
-      programarSondeo();
-    } else if (alTerminarCarga) {
-      // Una búsqueda quedó esperando a que cargaran los datos: se lanza ahora.
+    if (est.cargando) programarSondeo();
+    if (alTerminarCarga && (!est.cargando || est.parcial)) {
+      // Una búsqueda quedó esperando a que cargaran los datos: se lanza apenas se puede
+      // buscar (en la primera carga, cuando ya están los Extractos).
       const pendiente = alTerminarCarga;
       alTerminarCarga = null;
+      pendiente();
+    }
+    if (alCompletarCarga && !est.cargando) {
+      const pendiente = alCompletarCarga;
+      alCompletarCarga = null;
       pendiente();
     }
   }
@@ -251,10 +257,18 @@
         cargarEstado();
         return;
       }
+      const repetida = Boolean(busqueda && busqueda.termino === datos.termino && filtro.value);
       busqueda = datos;
-      filtro.value = "";
+      if (!repetida) filtro.value = "";
       guardarReciente(termino);
       pintarResultados();
+      if (datos.parcial) {
+        // Se buscó solo en los Extractos: las líneas de crédito siguen cargando. Al terminar,
+        // la misma búsqueda se repite sola (si nadie escribió otra cosa) y suma los créditos.
+        estadoBusqueda.append(el("span", { class: "nota-parcial",
+          text: "⏳ Las líneas de crédito todavía se están cargando: esta búsqueda se completará sola en un momento." }));
+        alCompletarCarga = () => { if (campo.value.trim() === termino) buscar(); };
+      }
       cargarEstado();
     } catch (e) {
       estadoBusqueda.className = "estado-busqueda error";
@@ -624,7 +638,10 @@
       el("div", { class: "asociado-acciones" },
         el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
           onclick: () => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.") }),
-        a.whatsapp ? botonWhatsapp(a.whatsapp) : null));
+        a.whatsapp ? botonWhatsapp(a.whatsapp) : null,
+        el("button", { class: "boton boton-chico", type: "button", text: "🖨️ Imprimir ficha",
+          title: "Imprime solo esta ficha. En la ventana de impresión se puede elegir «Guardar como PDF».",
+          onclick: imprimirFicha })));
 
     // Primero los créditos en mora (lo que hay que gestionar), después los demás; dentro de
     // cada grupo, en el orden de las líneas.
@@ -646,13 +663,28 @@
           alDia ? el("span", { class: "barra-dia", style: `flex:${alDia}` }) : null,
           todos.length - enMora - alDia ? el("span", { class: "barra-otro", style: `flex:${todos.length - enMora - alDia}` }) : null)
       : null;
-    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, cabecera,
+    // Solo se ven al imprimir la ficha (ver «ficha del asociado» en estilos.css).
+    const ahora = new Date();
+    const quien = (($(".usuario-nombre") || {}).textContent || "").trim();
+    const membrete = el("div", { class: "ficha-impresion" },
+      el("strong", { text: "Axio · Ficha del asociado" }),
+      el("div", null,
+        el("span", { text: `Consultada el ${ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })} a las ${ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}` }),
+        quien ? el("span", { text: "Por " + quien }) : null));
+    const pie = el("p", { class: "ficha-pie", text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." });
+    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera,
       el("div", { class: "asociado-resumen" },
         el("h3", { class: "asociado-titulo" }, titulo),
         enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null,
         alDia && enMora ? el("span", { class: "asociado-dia", text: `🟢 ${alDia} al día` }) : null,
         barra),
-      a.total_creditos ? creditos : null);
+      a.total_creditos ? creditos : null, pie);
+  }
+
+  function imprimirFicha() {
+    document.body.classList.add("imprimir-ficha");
+    window.addEventListener("afterprint", () => document.body.classList.remove("imprimir-ficha"), { once: true });
+    window.print();
   }
 
   // "$ 15,328,095" si es una cifra; "PAZ Y SALVO" tal cual (sin el signo de pesos delante).
@@ -861,6 +893,69 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && !menu.hidden) { abrirMenu(false); zonaUsuario.focus(); }
   });
+
+  // ------------------------------------------------------------------ atajos de teclado
+  // «/» o Ctrl+K: al buscador, con el texto seleccionado para escribir encima. No se activan
+  // mientras se escribe en otro campo ni con una ventana abierta (detalle, visor de hojas),
+  // que tienen su propio teclado. Esc ya cierra las ventanas (lo hace el navegador).
+  const escribiendo = (n) => n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName));
+  document.addEventListener("keydown", (ev) => {
+    if (ev.defaultPrevented || document.querySelector("dialog[open]")) return;
+    const ctrlK = (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K");
+    const barra = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target);
+    if (!ctrlK && !barra) return;
+    ev.preventDefault();
+    campo.focus();
+    campo.select();
+  });
+  campo.title = "Atajo: / o Ctrl+K";
+
+  // ------------------------------------------------------------------ cierre por inactividad
+  // Un equipo que queda abierto con una cédula en pantalla deja datos personales a la vista
+  // (Ley 1581). Tras data-inactividad minutos sin tocar la página (0 = nunca), se avisa un
+  // minuto antes y luego se cierra la sesión: en el servidor, el mismo «Salir»; en la
+  // versión de navegador, window.axioCerrarSesion (devuelve el token y borra la memoria).
+  // Se mide con la hora y no con un temporizador largo: con la pestaña en segundo plano el
+  // navegador frena los temporizadores, y al volver se cierra en el acto si ya venció.
+  const MINUTOS_INACTIVIDAD = Number(document.body.dataset.inactividad || 0);
+  if (MINUTOS_INACTIVIDAD > 0) {
+    const LIMITE = MINUTOS_INACTIVIDAD * 60000;
+    const AVISO = Math.min(60000, LIMITE / 2);
+    let ultimaActividad = Date.now();
+    let aviso = null;
+
+    const cerrarSesion = () => {
+      if (typeof window.axioCerrarSesion === "function") return window.axioCerrarSesion("inactividad");
+      const salir = document.querySelector('form[action$="logout"]');
+      if (!salir) { window.location.href = "/login"; return; }
+      salir.append(el("input", { type: "hidden", name: "motivo", value: "inactividad" }));
+      salir.submit();
+    };
+    const quitarAviso = () => { if (aviso) { aviso.remove(); aviso = null; } };
+    const actividad = () => { ultimaActividad = Date.now(); quitarAviso(); };
+    for (const evento of ["pointerdown", "keydown", "wheel", "touchstart"]) {
+      document.addEventListener(evento, actividad, { capture: true, passive: true });
+    }
+
+    const revisar = () => {
+      const quedan = LIMITE - (Date.now() - ultimaActividad);
+      if (quedan <= 0) { clearInterval(reloj); quitarAviso(); cerrarSesion(); return; }
+      if (quedan > AVISO) return;
+      const segundos = Math.ceil(quedan / 1000);
+      if (aviso && !aviso.isConnected) aviso = null;   // se fue con la ventana que lo tenía
+      if (!aviso) {
+        aviso = el("div", { class: "aviso-inactividad", role: "alertdialog", "aria-live": "assertive" },
+          el("strong", { text: "¿Sigues ahí?" }),
+          el("span", { class: "aviso-inactividad-texto" }),
+          el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Seguir aquí", onclick: actividad }));
+        (document.querySelector("dialog[open]") || document.body).append(aviso);
+      }
+      aviso.querySelector(".aviso-inactividad-texto").textContent =
+        `Por seguridad, la sesión se cerrará en ${segundos} s por inactividad.`;
+    };
+    const reloj = setInterval(revisar, 1000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) revisar(); });
+  }
 
   // ------------------------------------------------------------------ eventos
   form.addEventListener("submit", (ev) => { ev.preventDefault(); buscar(); });

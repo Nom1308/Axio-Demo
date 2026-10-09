@@ -720,6 +720,7 @@
   async function guardar(v, td, celda, texto) {
     const f = Number(td.dataset.f), c = Number(td.dataset.c);
     const r = rango(v.hoja.title, f, c);
+    const antes = celda.formattedValue || "";
     td.classList.add("celda-guardando");
     td.replaceChildren(nodo("div", { class: "visor-c" }, texto));
     avisar("⏳ Guardando " + letra(c) + (f + 1) + "…", "gris");
@@ -738,7 +739,15 @@
       td.classList.add("celda-guardada");
       setTimeout(() => td.classList.remove("celda-guardada"), 1600);
       if (td.classList.contains("sel")) seleccionar(v, v.sel.i, v.sel.j, false);
-      avisar(`✓ Guardado en Google Sheets · ${letra(c)}${f + 1} · ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`, "ok");
+      const guardado = `✓ Guardado en Google Sheets · ${letra(c)}${f + 1} · ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`;
+      avisar(guardado, "ok");
+      // Al registro de gestiones (si el config lo trae). La celda ya quedó guardada.
+      try {
+        if (google().registrar) await google().registrar([{ hoja: `${v.archivo.name} · ${v.hoja.title}`, ubicacion: `${letra(c)}${f + 1}`,
+          columna: "", antes, despues: texto }]);
+      } catch (e) {
+        avisar(guardado + " · ⚠️ No quedó en el registro de gestiones: " + e.message, "ambar");
+      }
     } catch (e) {
       td.classList.remove("celda-guardando");
       escribirContenido(td, celda);

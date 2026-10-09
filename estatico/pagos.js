@@ -384,15 +384,26 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: datos }),
         });
+        // Al registro de gestiones (si el config lo trae). Ya se guardó en la Matriz: si
+        // anotar falla, se avisa pero no se deshace nada.
+        let avisoRegistro = "";
+        try {
+          if (google().registrar) await google().registrar(lista.map((k) => ({
+            hoja: "Matriz · " + m.titulo, ubicacion: `Fila ${fila}`, cedula: h.cedula || "",
+            columna: m.nombres[m.columnas[k]] || k, antes: originales[k], despues: entradas[k].value.trim(),
+          })));
+        } catch (e) {
+          avisoRegistro = " ⚠️ No quedó en el registro de gestiones: " + e.message + ".";
+        }
         m.filas[fila - 1] = await leerFila(m, fila);
         const estado = estadoDe(m, fila);
         mostrarEstado(estado);
         await formulario(d, cuerpo, mostrarEstado, m, fila, h);
         const linea = cuerpo.querySelector(".gestion-estado");
         if (linea) {
-          linea.className = "gestion-estado ok";
+          linea.className = "gestion-estado " + (avisoRegistro ? "ambar" : "ok");
           linea.textContent = `✓ Guardado en la Matriz · ${hora()} · ${estado ? estado.icono + " " + estado.etiqueta : "sin gestionar"}. ` +
-            "La lista de resultados se actualiza con «Refrescar datos».";
+            "La lista de resultados se actualiza con «Refrescar datos»." + avisoRegistro;
         }
       } catch (e) {
         estadoLinea.className = "gestion-estado error";

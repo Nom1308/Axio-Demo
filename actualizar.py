@@ -5,16 +5,30 @@ del proyecto principal (ejecutados con Pyodide) y la misma interfaz de Axio Web.
 esto después de cambiar el proyecto principal deja la demo igual al original:
 
     python actualizar.py [ruta del proyecto Axio]     (por defecto ../Axio)
+    python actualizar.py --solo-version               (cambié solo archivos de la demo)
 
 Solo se copia código. Nada de config, cachés, índices ni logs: este repo es público.
+
+Además sube la versión (?v=...) de cada css y js en index.html y en puente.js. GitHub Pages
+deja que el navegador guarde los archivos 10 minutos (max-age=600) y sin esto alguien
+puede quedarse con el app.js nuevo y el puente.js viejo. Correr esto antes de cada
+publicación, aunque el cambio sea solo de la demo (con --solo-version).
 """
 
+import re
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
-ORIGEN = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else AQUI.parent / "Axio"
+ARGUMENTOS = [a for a in sys.argv[1:] if not a.startswith("--")]
+SOLO_VERSION = "--solo-version" in sys.argv[1:]
+ORIGEN = Path(ARGUMENTOS[0]).resolve() if ARGUMENTOS else AQUI.parent / "Axio"
+
+# Dónde se piden los archivos con ?v=: la página y el puente (que carga el trabajador y app.js).
+ARCHIVOS_CON_VERSION = ["index.html", "estatico/puente.js"]
+VERSION = re.compile(r"\?v=[0-9A-Za-z_-]+")
 
 # Paquetes de Python que necesita web/servicio.py. axio/ui queda fuera: es tkinter.
 CARPETAS_PY = ["axio", "axio/nucleo", "axio/dominio"]
@@ -30,7 +44,22 @@ ALMACEN_ORIGINAL = "localStorage."
 ALMACEN_DEMO = "sessionStorage."
 
 
+def subir_version():
+    nueva = "?v=" + datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    for relativo in ARCHIVOS_CON_VERSION:
+        ruta = AQUI / relativo
+        texto = ruta.read_text(encoding="utf-8")
+        cambiado, cuantos = VERSION.subn(nueva, texto)
+        if not cuantos:
+            sys.exit(f"{relativo} ya no tiene ningún ?v=: revisa ARCHIVOS_CON_VERSION en actualizar.py.")
+        ruta.write_text(cambiado, encoding="utf-8", newline="\n")
+        print(f"{relativo}: {cuantos} archivo(s) con {nueva}")
+
+
 def main():
+    if SOLO_VERSION:
+        subir_version()
+        return
     if not (ORIGEN / "axio" / "dominio" / "buscador.py").exists():
         sys.exit(f"No encuentro el proyecto Axio en {ORIGEN}")
 
@@ -66,6 +95,7 @@ def main():
     (estatico / "app.js").write_text(app_js, encoding="utf-8")
 
     print(f"Copiados {len(copiados)} archivos de Python, estilos, ícono y app.js desde {ORIGEN}")
+    subir_version()
 
 
 if __name__ == "__main__":

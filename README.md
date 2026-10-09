@@ -30,6 +30,24 @@ Sin `clientId`, la página funciona como antes: se carga el config a mano y las 
 4. **Credenciales → ID de cliente de OAuth**, tipo **Aplicación web**. Orígenes autorizados de JavaScript: `https://nom1308.github.io` y `http://localhost:8000`.
 5. Poner el ID en `estatico/ajustes.js`. No es secreto.
 
+## Registro de gestiones
+
+Si el `config_axio.json` trae `"url_registro_gestiones": "https://docs.google.com/spreadsheets/d/…/edit#gid=…"`,
+cada valor que Axio escribe en una hoja (desde «Gestionar en la Matriz» o editando una celda en el visor) queda
+anotado en esa hoja: fecha y hora, correo, nombre, hoja, ubicación, cédula, columna, antes y después.
+
+- Si la hoja está vacía, Axio pone el encabezado la primera vez.
+- Se escribe con la cuenta de cada persona: todos los que gestionan necesitan **permiso de edición** en esa hoja.
+  Por lo mismo, un editor podría borrar filas del registro; el respaldo a prueba de eso es el historial de
+  versiones de Google («Archivo → Historial de versiones», o clic derecho en una celda → «Mostrar historial de
+  ediciones»), que también guarda el correo de quien escribió.
+- Sin la clave en el config, no se anota nada y todo funciona igual.
+
+## Cierre por inactividad
+
+`data-inactividad="15"` en `index.html`: tras 15 minutos sin tocar la página, Axio avisa un minuto antes y luego
+cierra la sesión (devuelve el token a Google y borra todo lo que había en la pestaña). `0` lo apaga.
+
 ## Qué hay en el repo
 
 | Ruta | Qué es |
@@ -50,7 +68,9 @@ Sin `clientId`, la página funciona como antes: se carga el config a mano y las 
 python actualizar.py
 ```
 
-Copia de nuevo `py/`, los estilos y `app.js` desde `../Axio`.
+Copia de nuevo `py/`, los estilos y `app.js` desde `../Axio`, y sube la versión (`?v=…`) de cada css y js
+para que nadie se quede con archivos viejos en caché. Si solo cambiaste archivos propios de la demo
+(`puente.js`, `hojas.js`, `pagos.js`, `demo.css`…), corre `python actualizar.py --solo-version` antes de publicar.
 
 ## Probar en local
 

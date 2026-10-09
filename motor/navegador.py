@@ -145,30 +145,8 @@ if EN_NAVEGADOR:
     urllib.request.urlopen = _urlopen_navegador
 
 
-# ------------------------------------------------------------------ openpyxl más rápido
-# Cada línea de crédito trae ~20.000 hipervínculos (uno por obligación), y openpyxl busca
-# el destino de cada uno recorriendo TODA la lista de relaciones de la hoja: millones de
-# comparaciones. Con Libre Inversión Menor eran 9 de los 13 s de lectura (más aún aquí,
-# en WebAssembly). Con un índice por Id la búsqueda es inmediata y el resultado, el mismo:
-# probado celda por celda (valor e hipervínculo) con las 7 líneas reales.
-try:
-    from openpyxl.packaging.relationship import RelationshipList
-
-    def _relacion_por_id(self, key):
-        indice = self.__dict__.get('_axio_indice')
-        if indice is None or indice[0] != len(self):   # la lista cambió: se rehace
-            mapa = {}
-            for r in self:
-                mapa.setdefault(r.Id, r)   # como el original: gana la primera con ese Id
-            indice = self.__dict__['_axio_indice'] = (len(self), mapa)
-        r = indice[1].get(key)
-        if r is None:
-            raise KeyError("Unknown relationship: {0}".format(key))
-        return r
-
-    RelationshipList.get = _relacion_por_id
-except ImportError:   # sin openpyxl (pruebas fuera del navegador): nada que acelerar
-    pass
+# Las líneas de crédito se leen con el lector rápido de axio/nucleo/utils.py (LibroRapido),
+# que también deja openpyxl con el índice de hipervínculos para leer_excel.
 
 
 def _avisar(mensaje):
@@ -207,9 +185,21 @@ class MotorNavegador(MotorWeb):
 _motor = None
 
 
-def configurar(texto_config):
-    """Recibe el contenido de config_axio.json, lo deja en /datos y descarga todo.
-    Devuelve el estado (JSON) para pintar las fuentes."""
+def _por_pasos():
+    """La carga de MotorWeb paso a paso (ver _pasos_carga en web/servicio.py). Aquí hay un
+    solo hilo: entre paso y paso el trabajador le devuelve el control a la pestaña y atiende
+    las búsquedas que llegaron. Termina devolviendo el estado (JSON)."""
+    _motor.cargando = True
+    try:
+        yield from _motor._pasos_carga(forzar=True)
+    finally:
+        _precarga.clear()   # lo que no se usó no se queda ocupando memoria
+    return json.dumps(_motor.estado())
+
+
+def configurar_por_pasos(texto_config):
+    """Recibe el contenido de config_axio.json, lo deja en /datos y descarga todo, por
+    pasos: después del primero ya se puede buscar en los Extractos."""
     global _motor
     config = json.loads(texto_config)
     if not isinstance(config, dict):
@@ -219,20 +209,30 @@ def configurar(texto_config):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False)
     _motor = MotorNavegador()
+    return _por_pasos()
+
+
+def recargar_por_pasos():
+    """El «Refrescar datos» de la barra: vuelve a bajar todo con el mismo config. Mientras
+    tanto se sigue buscando en la copia anterior."""
+    return _por_pasos()
+
+
+def _de_corrido(pasos):
     try:
-        _motor.cargar_ahora(forzar=True)
-    finally:
-        _precarga.clear()   # lo que no se usó no se queda ocupando memoria
-    return json.dumps(_motor.estado())
+        while True:
+            next(pasos)
+    except StopIteration as fin:
+        return fin.value
+
+
+def configurar(texto_config):
+    """configurar_por_pasos de una sola vez (pruebas fuera del navegador)."""
+    return _de_corrido(configurar_por_pasos(texto_config))
 
 
 def recargar():
-    """El «Refrescar datos» de la barra: vuelve a bajar todo con el mismo config."""
-    try:
-        _motor.cargar_ahora(forzar=True)
-    finally:
-        _precarga.clear()
-    return json.dumps(_motor.estado())
+    return _de_corrido(recargar_por_pasos())
 
 
 def _estado_con_enlaces():

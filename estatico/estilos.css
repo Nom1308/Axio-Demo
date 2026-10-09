@@ -703,6 +703,58 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 }
 @keyframes toast-entra { from { opacity: 0; transform: translate(-50%, 12px) scale(.95); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+.nota-parcial { display: block; color: var(--ambar); font-size: 13px; }
+
+/* ---------- aviso de cierre por inactividad ---------- */
+.aviso-inactividad {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; width: max-content; max-width: calc(100vw - 32px);
+  padding: 12px 14px 12px 18px; border-radius: 16px; font-size: 13.5px;
+  background: var(--vidrio-solido); border: 1px solid rgba(252, 180, 0, .45); box-shadow: var(--sombra);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  animation: toast-entra .35s cubic-bezier(.2, .9, .25, 1.2) both;
+}
+.aviso-inactividad strong { color: var(--ambar); }
+.aviso-inactividad-texto { color: var(--texto-2); font-variant-numeric: tabular-nums; }
+
+/* ---------- ficha del asociado para imprimir o guardar en PDF ---------- */
+/* El botón «Imprimir ficha» pone body.imprimir-ficha mientras dura la impresión: sale solo
+   la ficha, en hoja blanca. Un Ctrl+P normal imprime la página como siempre. */
+.ficha-impresion, .ficha-pie { display: none; }
+@media print {
+  body.imprimir-ficha {
+    --texto: #0B1A5C; --texto-2: #3C4A75; --texto-3: #6B7699;
+    --borde: #CBD3E6; --borde-fuerte: #AEB8D2; --campo: #F4F6FB; --vidrio: #fff;
+    --verde: #047857; --rojo: #B91C1C; --morado: #1E3A8A;
+    background: #fff; color: var(--texto); font-size: 12px;
+    print-color-adjust: exact; -webkit-print-color-adjust: exact;
+  }
+  html:has(body.imprimir-ficha) { background: #fff; }
+  body.imprimir-ficha::after, body.imprimir-ficha .aurora, body.imprimir-ficha .barra,
+  body.imprimir-ficha .contenido > :not(#asociado-zona), body.imprimir-ficha dialog,
+  body.imprimir-ficha .toast, body.imprimir-ficha .asociado-acciones,
+  body.imprimir-ficha .tc-pie, body.imprimir-ficha .credito-ver { display: none !important; }
+  body.imprimir-ficha .contenido { padding: 0; max-width: none; }
+  body.imprimir-ficha * { animation: none !important; transition: none !important; box-shadow: none !important; }
+  body.imprimir-ficha .asociado { margin: 0; padding: 0; border: 0; background: none; }
+  body.imprimir-ficha .ficha-impresion {
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;
+    padding-bottom: 10px; margin-bottom: 16px; border-bottom: 2px solid #0B1A5C;
+  }
+  .ficha-impresion strong { font-size: 18px; letter-spacing: -.01em; }
+  .ficha-impresion span { display: block; font-size: 11px; color: var(--texto-2); text-align: right; }
+  body.imprimir-ficha .asociado-creditos { grid-template-columns: repeat(2, 1fr); }
+  body.imprimir-ficha .tarjeta-credito { break-inside: avoid; background: #fff; border: 1px solid var(--borde-fuerte); }
+  body.imprimir-ficha .tarjeta-credito.credito-mora { border-color: #E8A0A0; }
+  body.imprimir-ficha .tarjeta-credito.credito-dia { border-color: #9BD5BE; }
+  body.imprimir-ficha .tc-saldo { background: var(--campo); }
+  body.imprimir-ficha .credito-mora .tc-saldo strong, body.imprimir-ficha .insignia-mora,
+  body.imprimir-ficha .asociado-mora { color: #B91C1C; }
+  body.imprimir-ficha .credito-dia .tc-saldo strong { color: #047857; }
+  body.imprimir-ficha .ficha-pie { display: block; margin-top: 18px; font-size: 10px; color: var(--texto-3); text-align: center; }
+  @page { margin: 14mm; }
+}
+
 /* ---------- pantallas chicas ---------- */
 @media (max-width: 720px) {
   .usuario-nombre, .etiqueta-admin { display: none; }

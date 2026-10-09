@@ -136,9 +136,28 @@ async function cargarDatos(accion, config) {
   const nav = await motorConToken();
   for (const b of await descargas) nav.guardar_precarga(b.url, b.datos, b.estado, b.urlFinal, b.tipo);
   const inicio = performance.now();
-  const estado = accion === "configurar" ? nav.configurar(config) : nav.recargar();
-  console.info(`[Axio] Lectura y armado de los datos: ${((performance.now() - inicio) / 1000).toFixed(1)} s`);
-  return estado;
+  // Por pasos (ver _pasos_carga en web/servicio.py): después de cada uno se suelta el
+  // control un instante, y las búsquedas que llegaron mientras tanto se atienden. El primer
+  // paso deja los Extractos listos: desde ahí puente.js deja pasar las búsquedas.
+  const pasos = accion === "configurar" ? nav.configurar_por_pasos(config) : nav.recargar_por_pasos();
+  try {
+    let paso = pasos.next();
+    let primero = true;
+    while (!paso.done) {
+      if (primero) {
+        primero = false;
+        console.info(`[Axio] Extractos listos para buscar: ${((performance.now() - inicio) / 1000).toFixed(1)} s`);
+        postMessage({ tipo: "parcial" });
+      }
+      await new Promise((r) => setTimeout(r, 0));
+      nav.fijar_token(tokenGoogle);   // pudo renovarse mientras tanto
+      paso = pasos.next();
+    }
+    console.info(`[Axio] Lectura y armado de los datos: ${((performance.now() - inicio) / 1000).toFixed(1)} s`);
+    return paso.value;
+  } finally {
+    pasos.destroy();
+  }
 }
 motor.then(() => { motorListo = true; }, () => {});
 
@@ -151,8 +170,8 @@ async function motorConToken() {
   return nav;
 }
 
-// Python corre en un solo hilo y cada llamada es síncrona: mientras carga, lo demás espera.
-// puente.js no manda búsquedas hasta que la carga termina.
+// Python corre en un solo hilo y cada llamada es síncrona. La carga va por pasos: las
+// búsquedas se atienden entre uno y otro (puente.js las manda desde el aviso "parcial").
 self.onmessage = async (ev) => {
   const { id, accion } = ev.data;
   try {

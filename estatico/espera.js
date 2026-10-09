@@ -229,6 +229,14 @@
     }, 3200);
   }
 
+  // Los Extractos ya están (la carga va por pasos): se puede buscar mientras siguen las líneas.
+  window.addEventListener("axio-carga-parcial", () => {
+    if (!panel || panel.querySelector(".espera-nota")) return;
+    pisoBarra = Math.max(pisoBarra, 0.55);
+    panel.querySelector(".espera-barra").after(nodo("p", { class: "espera-nota",
+      text: "✓ Ya puedes buscar en los Extractos. Las líneas de crédito siguen cargando y se suman solas." }));
+  });
+
   // Solo en la primera carga (al entrar); «Refrescar datos» no lo muestra.
   window.addEventListener("axio-carga-inicio", (ev) => { if (ev.detail.accion === "configurar") abrir(); });
   window.addEventListener("axio-carga-fin", (ev) => { if (ev.detail.accion === "configurar") terminar(ev.detail.error); });
