@@ -1,10 +1,12 @@
-/* Axio demo: la primera carga de las hojas, escondida en el logo.
+/* Axio demo: la primera carga de las hojas, como una escena con la lupa del logo.
  *
- * Nada de franjas, anillos ni porcentajes: los tres puntos dorados del logo de la barra
- * empiezan apagados y se van encendiendo, uno tras otro, a medida que llegan las hojas
- * (Extractos, cada línea de crédito, WhatsApp). Al terminar, el logo da un destello y el
- * buscador un brillo suave. Nadie lo lee como una carga: el logo cobra vida. El detalle de
- * cada hoja (lista o con error) sigue en el menú de la cuenta y en los avisos del buscador.
+ * Al iniciar sesión la lupa baja desde la tarjeta al lugar del buscador (la transición la
+ * hace puente.js) y se queda ahí, grande: sus tres puntos dorados se van encendiendo a
+ * medida que llegan las hojas, unas chispas doradas giran alrededor y debajo se lee qué se
+ * está haciendo («Trayendo los Extractos…», «Leyendo Libre Inversión Mayor…»). El buscador
+ * no se ve todavía. Al terminar, la lupa da un destello, dice «Todo listo», sube volando a
+ * su lugar en la barra y en su lugar aparece el buscador.
+ *
  * Lo mueven los eventos de puente.js:
  *   axio-carga-inicio  { accion, fuentes: [{clave, nombre}] }
  *   axio-progreso      { mensaje }            (descargas y lecturas)
@@ -21,9 +23,14 @@
   const $ = (sel) => document.querySelector(sel);
   const leer = (clave, porDefecto) => { try { return localStorage.getItem(clave) ?? porDefecto; } catch (_) { return porDefecto; } };
   const guardar = (clave, valor) => { try { localStorage.setItem(clave, String(valor)); } catch (_) { /* sin almacenamiento */ } };
+  const sinMovimiento = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // La escena se ve al menos esto, aunque los datos lleguen al instante: que se alcance a
+  // ver la lupa con su animación y no un parpadeo.
+  const MS_MINIMO_ESCENA = 2600;
 
   let activa = false;
-  let fuentes = [];          // [{clave, estado}]  estado: pendiente | leyendo | lista
+  let fuentes = [];          // [{clave, nombre, estado}]  estado: pendiente | leyendo | lista
   let inicioCarga = 0;
   let inicioPaso = 0;
   let descargadas = 0;       // fracción de la etapa de descargas
@@ -32,10 +39,37 @@
   let ultimoCuadro = 0;
   const duracionEsperada = Math.max(10, Number(leer("axio-duracion-carga", 30)) || 30);   // segundos
 
-  const logo = () => $(".barra .logo-barra");
+  const escena = () => $("#carga-escena");
+  const logoEscena = () => $("#carga-escena .ce-logo");
 
-  // Avance real: la etapa de descargas cuenta como una hoja más; cada hoja leída suma una;
-  // la que se está leyendo avanza sola, sin pasar del 90 % de su parte.
+  // ------------------------------------------------------------------ lo que se lee
+  let fraseActual = "";
+  function frase(texto) {
+    const n = $("#carga-escena .ce-frase");
+    if (!n || texto === fraseActual) return;
+    fraseActual = texto;
+    // Cada frase entra de nuevo (ver «escena de carga» en demo.css).
+    const nueva = n.cloneNode(false);
+    nueva.textContent = texto;
+    n.replaceWith(nueva);
+  }
+  function cuenta() {
+    const n = $("#carga-escena .ce-cuenta");
+    if (!n) return;
+    const listas = fuentes.filter((f) => f.estado === "lista").length;
+    n.textContent = `${listas} de ${fuentes.length} hoja${fuentes.length === 1 ? "" : "s"} lista${listas === 1 ? "" : "s"}`;
+  }
+  // «Leyendo Libre Inversión Mayor…»; WhatsApp y los Extractos con sus propias palabras.
+  function fraseDe(f) {
+    if (!f) return "Terminando…";
+    if (f.clave === "extractos") return "Leyendo los Extractos…";
+    if (f.clave === "whatsapp") return "Trayendo los contactos de WhatsApp…";
+    return `Leyendo ${f.nombre}…`;
+  }
+
+  // ------------------------------------------------------------------ avance
+  // La etapa de descargas cuenta como una hoja más; cada hoja leída suma una; la que se está
+  // leyendo avanza sola, sin pasar del 90 % de su parte.
   function avanceReal() {
     const total = fuentes.length + 1;
     const listas = fuentes.filter((f) => f.estado === "lista").length;
@@ -47,7 +81,7 @@
 
   // Cada punto se enciende en su tercio del avance: el de la izquierda primero.
   function pintar(avance) {
-    const l = logo();
+    const l = logoEscena();
     if (!l) return;
     for (let i = 0; i < 3; i++) l.style.setProperty(`--p${i + 1}`, Math.max(0, Math.min(1, avance * 3 - i)).toFixed(3));
   }
@@ -64,14 +98,21 @@
     cuadro = requestAnimationFrame(animar);
   }
 
+  // ------------------------------------------------------------------ empieza
   function empezar(lista) {
-    if (activa) return;
+    if (activa || !escena()) return;
     activa = true;
     inicioCarga = inicioPaso = performance.now();
     mostrado = descargadas = 0;
-    fuentes = (lista && lista.length ? lista : [{ clave: "extractos" }]).map((f) => ({ clave: f.clave, estado: "pendiente" }));
-    const l = logo();
-    if (l) { l.classList.add("cargando"); pintar(0); }
+    fuentes = (lista && lista.length ? lista : [{ clave: "extractos", nombre: "Extractos" }])
+      .map((f) => ({ clave: f.clave, nombre: f.nombre || f.clave, estado: "pendiente" }));
+    document.body.classList.add("cargando-app");
+    escena().hidden = false;
+    escena().classList.remove("ce-terminada");
+    logoEscena().classList.add("cargando");
+    frase("Conectando con tus hojas de Google…");
+    cuenta();
+    pintar(0);
     cuadro = requestAnimationFrame(animar);
   }
 
@@ -79,12 +120,18 @@
     if (!activa) return;
     const texto = (ev.detail && ev.detail.mensaje) || "";
     const m = /(\d+) de (\d+) listas/.exec(texto);
-    if (m) descargadas = Number(m[1]) / Number(m[2]);
-    if (/descargadas en/.test(texto)) descargadas = 1;
-    // El primer «Leyendo…» es el de los Extractos.
-    if (/^Leyendo/.test(texto) && !fuentes.some((f) => f.estado !== "pendiente")) {
-      inicioPaso = performance.now();
-      fuentes[0].estado = "leyendo";
+    if (m) {
+      descargadas = Number(m[1]) / Number(m[2]);
+      frase("Trayendo los Extractos y las líneas de crédito…");
+    }
+    // Ya bajaron todas: empieza la lectura, por los Extractos.
+    if (/descargadas en/.test(texto)) {
+      descargadas = 1;
+      if (!fuentes.some((f) => f.estado !== "pendiente")) {
+        inicioPaso = performance.now();
+        fuentes[0].estado = "leyendo";
+        frase(fraseDe(fuentes[0]));
+      }
     }
   });
 
@@ -92,44 +139,82 @@
     if (!activa) return;
     const f = fuentes.find((x) => x.clave === ev.detail.clave);
     if (f) f.estado = "lista";
+    fuentes.filter((x) => x.estado === "leyendo").forEach((x) => { if (x !== f) x.estado = "pendiente"; });
     const siguiente = fuentes.find((x) => x.estado === "pendiente");
     inicioPaso = performance.now();
     if (siguiente) siguiente.estado = "leyendo";
+    frase(fraseDe(siguiente));
+    cuenta();
   });
 
-  // Terminó: los tres puntos encendidos, el destello del logo y un brillo en el buscador.
-  function terminar() {
+  // ------------------------------------------------------------------ termina
+  async function terminar(error) {
     if (!activa) return;
+    guardar("axio-duracion-carga", Math.round((performance.now() - inicioCarga) / 1000));
+    // Qué hoja quedó con error, según el estado del motor.
+    let fallidas = 0;
+    try {
+      const est = await (await window.axioFetch("/api/estado")).json();
+      fallidas = (est.fuentes || []).filter((f) => f.estado === "error").length;
+    } catch (_) { /* sin estado */ }
+    const quedan = MS_MINIMO_ESCENA - (performance.now() - inicioCarga);
+    if (quedan > 0) await new Promise((r) => setTimeout(r, quedan));
     activa = false;
     cancelAnimationFrame(cuadro);
-    guardar("axio-duracion-carga", Math.round((performance.now() - inicioCarga) / 1000));
-    const l = logo();
-    if (l) {
-      // Los puntos que faltan se encienden uno tras otro (~0,65 s) y después el destello.
-      const desde = mostrado, t0 = performance.now(), DURACION = 650;
+    fuentes.forEach((f) => { f.estado = "lista"; });
+    cuenta();
+
+    // Los puntos que faltan se encienden uno tras otro y la lupa da su destello.
+    const l = logoEscena();
+    const desde = mostrado, t0 = performance.now(), DURACION = sinMovimiento() ? 0 : 650;
+    await new Promise((listo) => {
       const paso = (ahora) => {
-        const k = Math.min(1, (ahora - t0) / DURACION);
+        const k = DURACION ? Math.min(1, (ahora - t0) / DURACION) : 1;
         pintar(desde + (1 - desde) * (1 - Math.pow(1 - k, 3)));
-        if (k < 1) { requestAnimationFrame(paso); return; }
-        l.classList.remove("cargando");
-        l.classList.add("destello");
-        setTimeout(() => l.classList.remove("destello"), 1400);
+        if (k < 1) requestAnimationFrame(paso); else listo();
       };
       requestAnimationFrame(paso);
-    }
-    const caja = $("#form-busqueda");
-    if (caja) {
-      setTimeout(() => {
+    });
+    if (l) { l.classList.remove("cargando"); l.classList.add("destello"); }
+    escena().classList.add("ce-terminada");
+    frase(error ? "No se pudieron cargar los datos" : fallidas ? `Listo · ${fallidas} hoja${fallidas === 1 ? "" : "s"} sin cargar` : "Todo listo");
+    await new Promise((r) => setTimeout(r, sinMovimiento() ? 300 : 1100));
+    revelar();
+  }
+
+  // La lupa sube a la barra y el buscador aparece donde ella estaba (View Transitions: la
+  // lupa de la escena y el logo de la barra se llaman igual, «logo-axio»).
+  function revelar() {
+    const cambio = () => {
+      escena().hidden = true;
+      document.body.classList.remove("cargando-app");
+      const panel = $(".panel-busqueda");
+      if (panel) panel.classList.add("panel-llega");
+    };
+    const alFinal = () => {
+      const logoBarra = $(".barra .logo-barra");
+      if (logoBarra) {
+        logoBarra.classList.add("destello");
+        setTimeout(() => logoBarra.classList.remove("destello"), 1400);
+      }
+      const caja = $("#form-busqueda");
+      if (caja) {
         caja.classList.add("axio-listo");
         setTimeout(() => caja.classList.remove("axio-listo"), 1600);
-      }, 450);
-    }
-    const q = $("#q");
-    if (q && !document.querySelector("dialog[open]") && !(document.activeElement && document.activeElement.closest("input, textarea, select"))) {
-      q.focus({ preventScroll: true });
+      }
+      const q = $("#q");
+      if (q && !document.querySelector("dialog[open]")) q.focus({ preventScroll: true });
+    };
+    if (document.startViewTransition && !sinMovimiento()) {
+      const t = document.startViewTransition(cambio);
+      t.ready.catch(() => {});
+      t.finished.then(alFinal, alFinal);
+    } else {
+      cambio();
+      alFinal();
     }
   }
 
   window.addEventListener("axio-carga-inicio", (ev) => { if (ev.detail.accion === "configurar") empezar(ev.detail.fuentes); });
-  window.addEventListener("axio-carga-fin", (ev) => { if (ev.detail.accion === "configurar") terminar(); });
+  window.addEventListener("axio-carga-fin", (ev) => { if (ev.detail.accion === "configurar") terminar(ev.detail.error); });
 })();

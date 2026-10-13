@@ -293,6 +293,63 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .visor-barra .visor-copiar:hover { background: #e8f0fe; border-color: #aecbfa; color: #0b57d0; }
 .visor-barra .visor-copiar[hidden] { display: none; }
 
+/* ==========================================================================
+   Escena de carga (estatico/espera.js)
+   La lupa grande en el lugar del buscador mientras llegan las hojas: sus puntos dorados se
+   encienden, unas chispas giran alrededor y debajo se lee qué se está haciendo. El buscador
+   (y el tablero o la tabla, si se habían dejado abiertos) esperan escondidos; el logo de la
+   barra también, porque es a donde la lupa va a subir.
+   ========================================================================== */
+body.cargando-app .panel-busqueda, body.cargando-app .tablero, body.cargando-app .tabla-completa { display: none !important; }
+body.cargando-app .barra .logo { visibility: hidden; view-transition-name: none; }
+/* La lupa baja y sube con más recorrido que en el servidor: un poco más lenta y elástica. */
+::view-transition-group(logo-axio) { animation-duration: .9s; animation-timing-function: cubic-bezier(.65, 0, .25, 1); }
+
+.carga-escena { display: grid; justify-items: center; gap: 8px; max-width: 920px; margin: 4px auto 0; padding: 26px 0 10px; text-align: center; }
+.ce-lupa { position: relative; width: 112px; height: 112px; margin-bottom: 14px; }
+.ce-logo {
+  display: block; width: 112px; height: 112px; border-radius: 28px; overflow: hidden; view-transition-name: logo-axio;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .14), 0 24px 60px -14px rgba(47, 125, 246, .8);
+  animation: ce-respira 3.4s ease-in-out infinite;
+}
+.ce-logo svg { display: block; width: 100%; height: 100%; }
+@keyframes ce-respira {
+  50% { transform: translateY(-4px); box-shadow: 0 0 0 1px rgba(255, 255, 255, .2), 0 30px 70px -12px rgba(79, 163, 255, .95); }
+}
+.ce-logo.destello { animation: ce-destello 1.1s ease-out; }
+@keyframes ce-destello {
+  30% { transform: scale(1.06); box-shadow: 0 0 0 2px rgba(255, 210, 90, .6), 0 0 60px 14px rgba(252, 180, 0, .55); }
+}
+
+/* Chispas doradas en órbita: cada una con su radio, su vuelta y su brillo. */
+.ce-orbita { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; animation: ce-gira-todo 40s linear infinite; transition: opacity .6s ease, scale .7s cubic-bezier(.6, 0, .4, 1); }
+.ce-orbita i {
+  position: absolute; left: -2.5px; top: -2.5px; width: 5px; height: 5px; border-radius: 50%;
+  background: #FFD25A; box-shadow: 0 0 10px 2px rgba(252, 180, 0, .55);
+  animation: ce-gira var(--t, 6s) linear infinite; animation-delay: var(--d, 0s); opacity: var(--o, .8);
+}
+.ce-orbita i:nth-child(1) { --r: 84px; --t: 5.5s; --d: -1s; }
+.ce-orbita i:nth-child(2) { --r: 96px; --t: 7.2s; --d: -3.4s; --o: .55; width: 4px; height: 4px; }
+.ce-orbita i:nth-child(3) { --r: 76px; --t: 4.6s; --d: -2.2s; }
+.ce-orbita i:nth-child(4) { --r: 104px; --t: 9s; --d: -6s; --o: .45; width: 3px; height: 3px; }
+.ce-orbita i:nth-child(5) { --r: 90px; --t: 6.4s; --d: -4.8s; --o: .7; }
+.ce-orbita i:nth-child(6) { --r: 70px; --t: 3.9s; --d: -.6s; --o: .6; width: 4px; height: 4px; }
+.ce-orbita i:nth-child(7) { --r: 112px; --t: 11s; --d: -8s; --o: .4; width: 3px; height: 3px; }
+@keyframes ce-gira { from { transform: rotate(0deg) translateX(var(--r)); } to { transform: rotate(360deg) translateX(var(--r)); } }
+@keyframes ce-gira-todo { to { transform: rotate(-360deg); } }
+/* Al terminar, las chispas se recogen dentro de la lupa. */
+.ce-terminada .ce-orbita { opacity: 0; scale: .2; }
+
+.ce-texto { margin: 0; min-height: 1.6em; font-size: 15.5px; font-weight: 600; letter-spacing: -.005em; color: var(--texto); }
+.ce-frase { display: inline-block; animation: ce-frase .55s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes ce-frase { from { opacity: 0; transform: translateY(7px); filter: blur(4px); } }
+.ce-terminada .ce-texto { color: var(--dorado-claro); }
+.ce-cuenta { margin: 0; font-size: 12.5px; color: var(--texto-3); font-variant-numeric: tabular-nums; }
+
+/* El buscador llega cuando la lupa se va. */
+.panel-busqueda.panel-llega { animation: panel-llega .75s .12s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes panel-llega { from { opacity: 0; transform: translateY(16px) scale(.97); } }
+
 /* El buscador queda listo: un destello azul. */
 .caja-busqueda.axio-listo { animation: axio-listo 1.5s ease; }
 @keyframes axio-listo {
