@@ -63,7 +63,7 @@
 .esperando-motor .portada-resto { grid-template-rows: 0fr; }
 .login-marca { transition: margin-bottom .8s cubic-bezier(.2, .8, .2, 1); }
 .esperando-motor .login-marca { margin-bottom: 0; }
-#portada.tarjeta-login { transition: padding-bottom .8s cubic-bezier(.2, .8, .2, 1), box-shadow .2s, transform .2s; }
+#portada.tarjeta-login { transition: padding-bottom .8s cubic-bezier(.2, .8, .2, 1), box-shadow .2s, transform .6s cubic-bezier(.2, .8, .2, 1); }
 .esperando-motor #portada.tarjeta-login { padding-bottom: 38px; }
 .esperando-motor .portada-resto-dentro > * { opacity: 0; }
 

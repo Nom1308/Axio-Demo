@@ -82,7 +82,7 @@ def main():
 
     estatico = AQUI / "estatico"
     estatico.mkdir(exist_ok=True)
-    for nombre in ["estilos.css", "icono.svg"]:
+    for nombre in ["estilos.css", "icono.svg", "portada.js"]:
         shutil.copy2(ORIGEN / "web" / "estatico" / nombre, estatico / nombre)
 
     app_js = (ORIGEN / "web" / "estatico" / "app.js").read_text(encoding="utf-8")
@@ -94,7 +94,7 @@ def main():
     app_js = app_js.replace(LLAMADA_ORIGINAL, LLAMADA_DEMO).replace(ALMACEN_ORIGINAL, ALMACEN_DEMO)
     (estatico / "app.js").write_text(app_js, encoding="utf-8")
 
-    print(f"Copiados {len(copiados)} archivos de Python, estilos, ícono y app.js desde {ORIGEN}")
+    print(f"Copiados {len(copiados)} archivos de Python, estilos, ícono, portada.js y app.js desde {ORIGEN}")
     subir_version()
 
 

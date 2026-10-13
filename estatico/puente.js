@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-094826");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-102109");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -68,7 +68,10 @@
   function terminarEsperaMotor(despues) {
     if (!esperandoMotor) { if (despues) despues(); return; }
     esperandoMotor = false;
-    setTimeout(() => {
+    setTimeout(async () => {
+      // Los puntos dorados del fondo viajan al logo (portada.js); la lupa se completa
+      // cuando llegan.
+      if (window.axioPortada) await window.axioPortada.reunir();
       document.body.classList.replace("esperando-motor", "motor-listo");
       if (despues) despues();
       // Ya desplegada, la tarjeta deja de recortar (las sombras del botón se ven enteras).
@@ -258,13 +261,23 @@
   function iniciarInterfaz() {
     if (interfazIniciada) return;
     interfazIniciada = true;
-    document.body.classList.remove("pagina-login");
-    $("#portada").hidden = true;
-    for (const nodo of document.querySelectorAll("[data-app]")) nodo.hidden = false;
+    if (window.axioPortada) window.axioPortada.apagar();
+    const entrar = () => {
+      document.body.classList.remove("pagina-login");
+      $("#portada").hidden = true;
+      for (const nodo of document.querySelectorAll("[data-app]")) nodo.hidden = false;
+    };
+    // El logo viaja de la tarjeta a la barra mientras aparece la aplicación (View
+    // Transitions; ver «logo-axio» en estilos.css). Sin soporte o sin movimiento, directo.
+    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.startViewTransition(entrar);
+    } else {
+      entrar();
+    }
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-13-094826";
+    script.src = "estatico/app.js?v=2026-10-13-102109";
     document.body.append(script);
   }
 
