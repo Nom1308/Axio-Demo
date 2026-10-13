@@ -1045,6 +1045,9 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
 }
 .ficha-historia { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; margin-top: 14px; }
 .ficha-grafico, .ficha-tiempo { min-width: 0; padding: 14px 16px; border-radius: 16px; background: var(--campo); border: 1px solid var(--borde); }
+/* Van debajo de la tabla de los Extractos, sueltos sobre el fondo: el mismo vidrio de los grupos. */
+#resultados > .ficha-historia { margin: 0 0 18px; }
+#resultados > .ficha-historia > * { background: var(--vidrio); box-shadow: var(--sombra-chica), var(--brillo); }
 .ficha-subtitulo { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; font-size: 12.5px; color: var(--texto-2); }
 .ficha-subtitulo strong { color: var(--texto); font-variant-numeric: tabular-nums; }
 .ficha-columnas { height: 150px; }
@@ -1169,7 +1172,8 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   }
   html:has(body.imprimir-ficha) { background: #fff; }
   body.imprimir-ficha::after, body.imprimir-ficha .aurora, body.imprimir-ficha .barra,
-  body.imprimir-ficha .contenido > :not(#asociado-zona), body.imprimir-ficha dialog,
+  body.imprimir-ficha .contenido > :not(#asociado-zona, #resultados),
+  body.imprimir-ficha #resultados > :not(.ficha-historia), body.imprimir-ficha dialog,
   body.imprimir-ficha .toast, body.imprimir-ficha .asociado-acciones,
   body.imprimir-ficha .tc-pie, body.imprimir-ficha .credito-ver { display: none !important; }
   body.imprimir-ficha .contenido { padding: 0; max-width: none; }
@@ -1189,6 +1193,7 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   body.imprimir-ficha .credito-mora .tc-saldo strong, body.imprimir-ficha .insignia-mora,
   body.imprimir-ficha .asociado-mora { color: #B91C1C; }
   body.imprimir-ficha .credito-dia .tc-saldo strong { color: #047857; }
+  body.imprimir-ficha #resultados > .ficha-historia { margin-top: 14px; }
   body.imprimir-ficha .ficha-pie { display: block; margin-top: 18px; font-size: 10px; color: var(--texto-3); text-align: center; }
   @page { margin: 14mm; }
 }

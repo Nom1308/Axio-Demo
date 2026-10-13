@@ -51,6 +51,7 @@
   const cuerpoDetalle = $("#detalle-cuerpo");
 
   let busqueda = null;          // última respuesta de /api/buscar
+  let historiaAsociado = null;  // pagos y línea de tiempo de la persona (ver pintarAsociado)
   const orden = {};             // fuente -> {col, asc}
   let sondeo = null;
   let alTerminarCarga = null;   // búsqueda a lanzar apenas se pueda buscar
@@ -373,9 +374,11 @@
     // Si se buscó una cédula, primero va el resumen de la persona (sus créditos activos en
     // todas las líneas y su WhatsApp), arriba de la barra de resultados. Después, lo de siempre.
     zonaAsociado.replaceChildren();
+    historiaAsociado = null;
     if (busqueda.asociado) zonaAsociado.append(pintarAsociado(busqueda.asociado));
 
     if (!busqueda.grupos.length) {
+      if (historiaAsociado) contenedor.append(historiaAsociado);
       barraResultados.hidden = true;
       estadoBusqueda.className = "estado-busqueda";
       estadoBusqueda.replaceChildren(`Sin resultados para «${busqueda.termino}».`);
@@ -398,10 +401,14 @@
 
     const textoFiltro = normalizar(filtro.value.trim());
     let visibles = 0;
+    let historiaPuesta = !historiaAsociado;
     for (const g of busqueda.grupos) {
       const nodo = pintarGrupo(g, textoFiltro);
       if (nodo) { contenedor.append(nodo); visibles++; }
+      // Los pagos y la línea de tiempo de la persona, justo después de sus Extractos.
+      if (!historiaPuesta && g.fuente === "Extractos") { contenedor.append(historiaAsociado); historiaPuesta = true; }
     }
+    if (!historiaPuesta) contenedor.append(historiaAsociado);
     if (!visibles) estadoBusqueda.textContent = "Ningún resultado coincide con el filtro.";
   }
 
@@ -926,17 +933,18 @@
         el("span", { text: `Consultada el ${ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })} a las ${ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}` }),
         quien ? el("span", { text: "Por " + quien }) : null));
     const pie = el("p", { class: "ficha-pie", text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." });
-    // Pagos por mes y línea de tiempo, lado a lado (uno debajo del otro en el celular).
+    // Pagos por mes y línea de tiempo, lado a lado (uno debajo del otro en el celular). No van
+    // en la ficha: pintarResultados los pone debajo de la tabla de los Extractos.
     const grafico = graficoPagos(pagos);
     const tiempo = lineaDeTiempo(pagos, todos);
-    const historia = grafico || tiempo ? el("div", { class: "ficha-historia" }, grafico, tiempo) : null;
+    historiaAsociado = grafico || tiempo ? el("div", { class: "ficha-historia" }, grafico, tiempo) : null;
     return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera,
       el("div", { class: "asociado-resumen" },
         el("h3", { class: "asociado-titulo" }, titulo),
         enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null,
         alDia && enMora ? el("span", { class: "asociado-dia", text: `🟢 ${alDia} al día` }) : null,
         barra),
-      a.total_creditos ? creditos : null, historia, pie);
+      a.total_creditos ? creditos : null, pie);
   }
 
   function imprimirFicha() {
