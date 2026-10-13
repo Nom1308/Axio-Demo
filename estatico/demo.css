@@ -31,40 +31,53 @@
 .sesion-texto strong { font-size: 14px; overflow-wrap: anywhere; }
 .sesion-texto span { font-size: 12.5px; color: var(--texto-2); overflow-wrap: anywhere; }
 
-/* ==========================================================================
-   Espera del motor en la portada (puente.js)
-   body.esperando-motor desde que abre la página: el aro de la lupa se dibuja y una luz gira
-   en él mientras se prepara el motor de Python; el botón de entrar todavía no se ve (ocupa
-   su lugar, así nada salta). Al estar listo, puente.js cambia a body.motor-listo: la luz se
-   apaga, se trazan el mango y los puntos dorados, sale el halo y aparece el botón.
-   ========================================================================== */
-.le-cometa { opacity: 0; stroke-dasharray: .2 .8; transform-box: fill-box; transform-origin: center; transform: rotate(-90deg); }
-.esperando-motor .le-cometa { animation: le-cometa-entra .4s 1.05s both, le-giro 1.2s 1.05s linear infinite; }
-@keyframes le-cometa-entra { to { opacity: .95; } }
-@keyframes le-giro { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
-.motor-listo .le-cometa { animation: le-cometa-sale .35s ease-out both; }
-@keyframes le-cometa-sale { from { opacity: .95; } to { opacity: 0; } }
+.estado-motor:empty { display: none; }
 
-/* Mientras espera: sin mango, sin puntos, sin halo ni reflejo; el logo respira. */
+/* ==========================================================================
+   Presentación de la portada (puente.js)
+   Dura lo que tarda el motor de Python, sin que parezca una carga: nada que gire, ningún
+   texto de espera, ningún hueco. body.esperando-motor desde que abre la página: la tarjeta
+   es solo la marca (logo, nombre y frase); el aro de la lupa ya dibujado, el logo flota
+   despacio y cada tanto lo cruza un brillo. Al estar listo, puente.js pone body.motor-listo:
+   se trazan el mango y los puntos dorados, sale el halo y la tarjeta se despliega hacia
+   abajo con el botón para entrar, como el final de la presentación.
+   ========================================================================== */
+/* En reposo: sin mango, sin puntos, sin halo ni reflejo. */
 .esperando-motor .le-mango { animation: none; stroke-dashoffset: 1; }
 .esperando-motor .le-punto { animation: none; opacity: 0; }
 .esperando-motor .logo-entrada::after, .esperando-motor .tarjeta-login::after { animation: none; }
-.esperando-motor .logo-entrada svg { animation: le-respira 2.4s 1.1s ease-in-out infinite; }
-@keyframes le-respira { 50% { filter: drop-shadow(0 16px 36px rgba(79, 163, 255, .85)); } }
+.esperando-motor .logo-entrada { animation: le-flota 3.6s 1.1s ease-in-out infinite; }
+@keyframes le-flota { 50% { transform: translateY(-3px); } }
+.le-brillo { opacity: 0; }
+.esperando-motor .le-brillo { animation: le-brillo 3.2s 1.2s cubic-bezier(.45, 0, .25, 1) infinite; }
+@keyframes le-brillo {
+  0% { opacity: 1; transform: translateX(0); }
+  40% { opacity: 1; transform: translateX(100px); }
+  100% { opacity: 1; transform: translateX(100px); }
+}
 
-/* Listo: la lupa se completa en ~0,8 s. */
-.motor-listo .le-mango { animation: le-trazo .3s .15s cubic-bezier(.4, 0, .2, 1) both; }
-.motor-listo .le-punto { animation: le-punto .45s .4s cubic-bezier(.3, 1.6, .5, 1) both; }
-.motor-listo .le-punto:nth-of-type(2) { animation-delay: .5s; }
-.motor-listo .le-punto:nth-of-type(3) { animation-delay: .6s; }
-.motor-listo .logo-entrada::after { animation: le-halo 1.4s .55s ease-out both; }
-.pagina-login.motor-listo .tarjeta-login::after { animation: le-reflejo 1.1s .6s cubic-bezier(.4, 0, .2, 1) both; }
+/* Solo la marca: lo de abajo plegado (sin altura) hasta el final. */
+.portada-resto { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .8s cubic-bezier(.2, .8, .2, 1); }
+.portada-resto-dentro { min-height: 0; overflow: hidden; }
+.portada-abierta .portada-resto-dentro { overflow: visible; }
+.esperando-motor .portada-resto { grid-template-rows: 0fr; }
+.login-marca { transition: margin-bottom .8s cubic-bezier(.2, .8, .2, 1); }
+.esperando-motor .login-marca { margin-bottom: 0; }
+#portada.tarjeta-login { transition: padding-bottom .8s cubic-bezier(.2, .8, .2, 1), box-shadow .2s, transform .2s; }
+.esperando-motor #portada.tarjeta-login { padding-bottom: 38px; }
+.esperando-motor .portada-resto-dentro > * { opacity: 0; }
 
-/* El botón (Google o cargar el archivo) espera invisible en su lugar y sube al estar listo. */
-#paso-google, #paso-archivo { transition: opacity .5s .7s ease, transform .5s .7s cubic-bezier(.2, .8, .2, 1); }
-.esperando-motor #paso-google, .esperando-motor #paso-archivo { visibility: hidden; opacity: 0; transform: translateY(8px); }
-.esperando-motor .estado-motor { animation: le-latido-texto 2s ease-in-out infinite; }
-@keyframes le-latido-texto { 50% { opacity: .6; } }
+/* Final: la lupa se completa y la tarjeta se despliega con el botón. */
+.motor-listo .le-mango { animation: le-trazo .3s .1s cubic-bezier(.4, 0, .2, 1) both; }
+.motor-listo .le-punto { animation: le-punto .45s .35s cubic-bezier(.3, 1.6, .5, 1) both; }
+.motor-listo .le-punto:nth-of-type(2) { animation-delay: .45s; }
+.motor-listo .le-punto:nth-of-type(3) { animation-delay: .55s; }
+.motor-listo .logo-entrada::after { animation: le-halo 1.4s .5s ease-out both; }
+.pagina-login.motor-listo .tarjeta-login::after { animation: le-reflejo 1.1s .7s cubic-bezier(.4, 0, .2, 1) both; }
+.motor-listo .portada-resto { transition-delay: .35s; }
+.motor-listo .login-marca { transition-delay: .35s; }
+.motor-listo .portada-resto-dentro > * { animation: aparecer .6s .6s cubic-bezier(.2, .8, .2, 1) both; }
+.motor-listo .portada-resto-dentro > :nth-child(n+3) { animation-delay: .72s; }
 
 #portada { transition: box-shadow .2s, transform .2s; }
 #portada.arrastrando { box-shadow: 0 0 0 2px var(--celeste), 0 24px 60px -18px rgba(47, 125, 246, .8); transform: scale(1.01); }

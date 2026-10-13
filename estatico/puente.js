@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-091353");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-092842");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -55,13 +55,14 @@
   olvidarRecientes();
   window.addEventListener("pagehide", olvidarRecientes);
 
-  // ------------------------------------------------------------------ espera del motor
-  // La animación de entrada dura lo que tarda el motor de Python: el botón para entrar sale
-  // cuando ya está listo, así al iniciar sesión no hay que esperarlo (ver «espera del motor»
-  // en demo.css). Nunca antes de que el aro termine de dibujarse (~1,1 s), para que la
-  // animación se vea completa aunque el motor llegue al instante. Si tarda demasiado, el
-  // botón sale igual: se puede entrar y la carga espera al motor sola.
-  const MS_ARO_DIBUJADO = 1100;
+  // ------------------------------------------------------------------ presentación
+  // La portada se presenta mientras se prepara el motor de Python, sin que parezca una
+  // carga: solo la marca, con el logo en reposo. Cuando el motor está listo, la lupa se
+  // completa y la tarjeta se abre con el botón para entrar, así al iniciar sesión no hay que
+  // esperarlo (ver «presentación» en demo.css). Nunca antes de ~1,6 s, para que la
+  // presentación se vea completa aunque el motor llegue al instante. Si tarda demasiado,
+  // la tarjeta se abre igual: se puede entrar y la carga espera al motor sola.
+  const MS_PRESENTACION_MINIMA = 1600;
   const MS_MAXIMO_ESPERA = 30000;
   let esperandoMotor = document.body.classList.contains("esperando-motor");
   function terminarEsperaMotor(despues) {
@@ -70,13 +71,11 @@
     setTimeout(() => {
       document.body.classList.replace("esperando-motor", "motor-listo");
       if (despues) despues();
-    }, Math.max(0, MS_ARO_DIBUJADO - performance.now()));
+      // Ya desplegada, la tarjeta deja de recortar (las sombras del botón se ven enteras).
+      setTimeout(() => document.body.classList.add("portada-abierta"), 1300);
+    }, Math.max(0, MS_PRESENTACION_MINIMA - performance.now()));
   }
-  setTimeout(() => {
-    if (!esperandoMotor) return;
-    terminarEsperaMotor();
-    $("#estado-motor").textContent = "⏳ El motor sigue preparándose. Puedes entrar: la carga empezará apenas esté listo.";
-  }, MS_MAXIMO_ESPERA);
+  setTimeout(() => { if (esperandoMotor) terminarEsperaMotor(); }, MS_MAXIMO_ESPERA);
 
   // ------------------------------------------------------------------ trabajador
   trabajador.onmessage = (ev) => {
@@ -84,14 +83,14 @@
     if (m.tipo === "progreso") {
       mensaje = m.mensaje;
       window.dispatchEvent(new CustomEvent("axio-progreso", { detail: { mensaje } }));
-      if (!motorListo) $("#estado-motor").textContent = "⏳ " + mensaje;
+      // En la portada solo si ya se abrió sin el motor (tardó más de la cuenta).
+      if (!motorListo && !esperandoMotor) $("#estado-motor").textContent = "⏳ " + mensaje;
     } else if (m.tipo === "motor-listo") {
       motorListo = true;
+      // Sin «listo» ni palomita: nada que delate que hubo una carga. Con Google basta el
+      // botón; sin Google se dice qué hacer.
       terminarEsperaMotor(() => {
-        $("#estado-motor").textContent = CON_GOOGLE && !usuario
-          ? "✓ Todo listo. Inicia sesión para empezar."
-          : "✓ Todo listo. Carga tu archivo para empezar.";
-        $("#estado-motor").classList.add("listo");
+        $("#estado-motor").textContent = CON_GOOGLE ? "" : "Carga tu archivo para empezar.";
       });
     } else if (m.tipo === "paso") {
       window.dispatchEvent(new CustomEvent("axio-paso", { detail: { clave: m.clave } }));
@@ -265,7 +264,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-13-091353";
+    script.src = "estatico/app.js?v=2026-10-13-092842";
     document.body.append(script);
   }
 
