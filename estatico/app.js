@@ -193,6 +193,15 @@
       if (e.target.alVer) { e.target.alVer(); e.target.alVer = null; }
     }
   }, { threshold: 0.2 }) : null;
+  // Al imprimir (botón o Ctrl+P), lo que no se alcanzó a ver sale completo y no en pausa.
+  function soltarPorVer() {
+    document.querySelectorAll(".por-ver").forEach((n) => {
+      if (observadorVista) observadorVista.unobserve(n);
+      n.classList.remove("por-ver");
+      if (n.alVer) { n.alVer(); n.alVer = null; }
+    });
+  }
+  window.addEventListener("beforeprint", soltarPorVer);
   function animarAlVer(nodo, alVer) {
     if (!observadorVista || sinMovimiento()) { if (alVer) alVer(); return; }
     nodo.classList.add("por-ver");
@@ -300,7 +309,6 @@
       caja.style.flexBasis = "100%";
     }
 
-    cargarCifrasSaludo(est);
     if (est.cargando) programarSondeo();
     if (alTerminarCarga && (!est.cargando || est.parcial)) {
       // Una búsqueda quedó esperando a que cargaran los datos: se lanza apenas se puede
@@ -969,6 +977,13 @@
             onclick: (ev) => { lista.replaceChildren(...items(eventos)); ev.currentTarget.remove(); } })
         : "");
     };
+    // Para imprimir la ficha: todos los movimientos, sin filtro de mes.
+    nodo.mostrarTodo = () => {
+      nodo.filtrarMes(null);
+      if (alQuitarMes) alQuitarMes();
+      lista.replaceChildren(...items(eventos));
+      pie.replaceChildren();
+    };
     nodo.filtrarMes(null);
     return nodo;
   }
@@ -1046,6 +1061,11 @@
   }
 
   function imprimirFicha() {
+    // Los gráficos que aún no se vieron siguen en pausa en su primer cuadro (invisibles):
+    // al papel van completos, con todos los movimientos de la línea de tiempo.
+    soltarPorVer();
+    const tiempo = document.querySelector(".ficha-tiempo");
+    if (tiempo && tiempo.mostrarTodo) tiempo.mostrarTodo();
     document.body.classList.add("imprimir-ficha");
     window.addEventListener("afterprint", () => document.body.classList.remove("imprimir-ficha"), { once: true });
     window.print();
@@ -1307,11 +1327,21 @@
     marcarCasillaTablero();
   }
 
-  function cifra(etiqueta, valor, detalle, clase) {
-    return el("div", { class: "tb-cifra" + (clase ? " " + clase : "") },
+  // accion: la cifra es un botón que abre lo que cuenta (la tabla de pagos ya filtrada).
+  function cifra(etiqueta, valor, detalle, clase, accion, titulo) {
+    return el(accion ? "button" : "div", { class: "tb-cifra" + (clase ? " " + clase : "") + (accion ? " tb-cifra-boton" : ""),
+      type: accion ? "button" : null, title: titulo, onclick: accion },
       el("span", { class: "tb-cifra-etiqueta", text: etiqueta }),
       el("strong", { class: "tb-cifra-valor", text: valor }),
       detalle ? el("span", { class: "tb-cifra-detalle", text: detalle }) : null);
+  }
+
+  // '2026-10-13' -> 'de hoy', 'de ayer' o 'del 18 sep'.
+  function diaRelativo(iso) {
+    const f = aFecha(iso);
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dias = Math.round((hoy - f) / 86400000);
+    return dias === 0 ? "de hoy" : dias === 1 ? "de ayer" : `del ${f.getDate()} ${MESES_CORTOS[f.getMonth()]}`;
   }
 
   function tarjetaTablero(titulo, nota, ...contenido) {
@@ -1335,9 +1365,15 @@
     const creditos = L.lineas.reduce((s, l) => s + l.n, 0);
     const enMora = L.lineas.reduce((s, l) => s + l.mora, 0);
 
+    const u = x.ultimo_dia;
+    const conFecha = x.col_fecha !== null && x.col_fecha !== undefined;
     const cifras = el("div", { class: "tb-cifras" },
       cifra("Pagos en Extractos", formatoMiles.format(x.total), pesosCortos(x.suma) + " en total"),
-      cifra("Por gestionar", formatoMiles.format(nPendientes), `${porcentaje(nPendientes, x.total)} de los pagos · ${pesosCortos(sumaPendientes)}`),
+      // El último día con pagos: tocarlo abre esos pagos en la tabla.
+      u && conFecha ? cifra(`Pagos ${diaRelativo(u.fecha)}`, formatoMiles.format(u.n), pesosCortos(u.suma), null,
+        () => verPagosFiltrados({ [x.col_fecha]: { rango: { desde: u.fecha, hasta: u.fecha } } }), "Ver esos pagos en la tabla") : null,
+      cifra("Por gestionar", formatoMiles.format(nPendientes), `${porcentaje(nPendientes, x.total)} de los pagos · ${pesosCortos(sumaPendientes)}`, null,
+        () => verPagosFiltrados({ estado: { excluir: ["ingresado"] } }), "Ver los pagos que faltan por gestionar"),
       L.lineas.length ? cifra("Créditos activos", formatoMiles.format(creditos), `en ${L.lineas.length} línea${L.lineas.length === 1 ? "" : "s"} de crédito`) : null,
       L.lineas.length ? cifra("Créditos en mora", formatoMiles.format(enMora), `${porcentaje(enMora, creditos)} de los activos`, enMora ? "tb-cifra-alerta" : null) : null);
 
@@ -2055,16 +2091,11 @@
   ponerFoto(zonaUsuario.querySelector(".avatar"));
 
   // ------------------------------------------------------------------ saludo
-  // Arriba del buscador, mientras no se ha buscado nada: «Buenos días, Brandon», la fecha y
-  // cómo va el día (pagos del último día, pagos por gestionar, créditos en mora). Cada cifra
-  // abre lo que cuenta: la tabla de pagos ya filtrada o el tablero.
+  // Arriba del buscador, mientras no se ha buscado nada: «Buenos días, Brandon» y la fecha.
+  // (Las cifras del día están en el tablero.)
   const portada = $(".portada");
   const saludo = el("div", { class: "saludo" });
-  const cifrasSaludo = el("div", { class: "saludo-cifras", "aria-live": "polite" });
   portada.prepend(saludo);
-  portada.append(cifrasSaludo);
-  let firmaSaludo = "";
-  let temporizadorSaludo = null;
 
   function pintarSaludo() {
     const hora = new Date().getHours();
@@ -2078,60 +2109,6 @@
       el("span", { text: hoy.charAt(0).toUpperCase() + hoy.slice(1) })));
   }
   pintarSaludo();
-
-  // Se piden al tablero cuando cambian los datos, un momento después de que cargan: así no
-  // le quitan tiempo a la primera búsqueda.
-  function cargarCifrasSaludo(est) {
-    if (!est.matriz || !est.matriz.filas || document.body.classList.contains("con-busqueda")) return;
-    const firma = `${est.matriz.hora}|${est.lineas.hora}|${est.parcial}|${est.cargando}`;
-    if (firma === firmaSaludo) return;
-    firmaSaludo = firma;
-    clearTimeout(temporizadorSaludo);
-    temporizadorSaludo = setTimeout(async () => {
-      try {
-        const { datos } = await apiJson("/api/tablero");
-        if (!document.body.classList.contains("con-busqueda")) pintarCifrasSaludo(datos);
-      } catch (_) { /* sin cifras: queda solo el saludo */ }
-    }, 1200);
-  }
-
-  // '2026-10-13' -> 'hoy', 'ayer' o 'el 18 sep'.
-  function diaRelativo(iso) {
-    const f = aFecha(iso);
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-    const dias = Math.round((hoy - f) / 86400000);
-    return dias === 0 ? "de hoy" : dias === 1 ? "de ayer" : `del ${f.getDate()} ${MESES_CORTOS[f.getMonth()]}`;
-  }
-
-  function pintarCifrasSaludo(d) {
-    const x = d.extractos;
-    const L = d.lineas || { lineas: [] };
-    const cifras = [];
-    const tarjeta = (etiqueta, n, detalle, accion, titulo, clase) => {
-      const valor = el("strong", { class: "saludo-valor" });
-      cifras.push([valor, n]);
-      return el("button", { type: "button", class: "saludo-cifra" + (clase ? " " + clase : ""), title: titulo, onclick: accion },
-        el("span", { class: "saludo-etiqueta", text: etiqueta }), valor, el("span", { class: "saludo-detalle", text: detalle }));
-    };
-    const partes = [];
-    if (x.ultimo_dia && x.col_fecha !== null && x.col_fecha !== undefined) {
-      const u = x.ultimo_dia;
-      partes.push(tarjeta(`Pagos ${diaRelativo(u.fecha)}`, u.n, pesosCortos(u.suma),
-        () => verPagosFiltrados({ [x.col_fecha]: { rango: { desde: u.fecha, hasta: u.fecha } } }), "Ver esos pagos en la tabla"));
-    }
-    const pendientes = x.estados.filter((e) => e.e !== "ingresado").reduce((s, e) => s + e.n, 0);
-    partes.push(tarjeta("Por gestionar", pendientes, `${porcentaje(pendientes, x.total)} de los pagos`,
-      () => verPagosFiltrados({ estado: { excluir: ["ingresado"] } }), "Ver los pagos que faltan por gestionar"));
-    if (L.lineas.length && !d.parcial) {
-      const activos = L.lineas.reduce((s, l) => s + l.n, 0);
-      const mora = L.lineas.reduce((s, l) => s + l.mora, 0);
-      partes.push(tarjeta("Créditos en mora", mora, `de ${formatoMiles.format(activos)} activos`, () => {
-        abrirTablero().then(() => ventanaTablero.scrollIntoView({ behavior: sinMovimiento() ? "auto" : "smooth", block: "start" }));
-      }, "Abrir el tablero de cartera", mora ? "saludo-alerta" : null));
-    }
-    cifrasSaludo.replaceChildren(...partes);
-    for (const [valor, n] of cifras) contarEntero(valor, n);
-  }
 
   // ------------------------------------------------------------------ sugerencias
   // Mientras se escribe un nombre o una cédula, debajo salen las personas que coinciden

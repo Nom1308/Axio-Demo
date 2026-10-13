@@ -1194,6 +1194,11 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   body.imprimir-ficha .asociado-mora { color: #B91C1C; }
   body.imprimir-ficha .credito-dia .tc-saldo strong { color: #047857; }
   body.imprimir-ficha #resultados > .ficha-historia { margin-top: 14px; }
+  body.imprimir-ficha .ficha-grafico { break-inside: avoid; }
+  body.imprimir-ficha .tl-item { break-inside: avoid; }
+  body.imprimir-ficha .tb-mes-menor, body.imprimir-ficha .tl-mas, body.imprimir-ficha .tl-filtro-quitar { display: none; }
+  body.imprimir-ficha .tb-columna-activa { background: none; }
+  body.imprimir-ficha .ficha-columnas.con-mes .tb-pila { opacity: 1 !important; }
   body.imprimir-ficha .ficha-pie { display: block; margin-top: 18px; font-size: 10px; color: var(--texto-3); text-align: center; }
   @page { margin: 14mm; }
 }
@@ -1256,22 +1261,13 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
 .saludo-texto strong { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
 .saludo-texto span { font-size: 12px; color: var(--texto-2); }
 
-.saludo-cifras { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 22px; }
-.saludo-cifras:empty { display: none; }
-.saludo-cifra {
-  display: grid; gap: 1px; min-width: 150px; padding: 10px 16px 11px; border-radius: 16px; text-align: left;
-  font: inherit; color: var(--texto); cursor: pointer;
-  background: var(--vidrio); border: 1px solid var(--borde); box-shadow: var(--brillo);
+/* Cifras del tablero que abren lo que cuentan (pagos del día, por gestionar). */
+.tb-cifra-boton {
+  font: inherit; color: var(--texto); text-align: left; cursor: pointer;
   transition: transform .2s cubic-bezier(.2, .8, .2, 1), border-color .2s ease, background .2s ease;
-  animation: aparecer .5s cubic-bezier(.2, .8, .2, 1) both;
 }
-.saludo-cifra:nth-child(2) { animation-delay: .07s; }
-.saludo-cifra:nth-child(3) { animation-delay: .14s; }
-.saludo-cifra:hover, .saludo-cifra:focus-visible { transform: translateY(-2px); border-color: rgba(79, 163, 255, .45); background: var(--vidrio-alto); }
-.saludo-etiqueta { font-size: 11.5px; color: var(--texto-2); }
-.saludo-valor { font-family: var(--fuente-titulo); font-size: 24px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.saludo-detalle { font-size: 11.5px; color: var(--texto-3); }
-.saludo-alerta .saludo-etiqueta::before { content: "● "; color: var(--g-pendiente); }
+.tb-cifra-boton:hover, .tb-cifra-boton:focus-visible { transform: translateY(-2px); border-color: rgba(79, 163, 255, .45); background: var(--campo-hover); }
+.tb-cifra-boton .tb-cifra-detalle::after { content: " ›"; }
 
 /* Después de la primera búsqueda la portada se retira y el buscador ocupa todo el ancho. */
 .con-busqueda .portada { display: none; }
@@ -1368,6 +1364,12 @@ kbd {
 .tl-filtro-quitar { border: 0; background: none; color: var(--texto-2); font: inherit; font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 99px; }
 .tl-filtro-quitar:hover { color: var(--texto); background: var(--campo-hover); }
 
+/* En papel (también con Ctrl+P): los gráficos quietos, completos y con sus colores. */
+@media print {
+  .tb-pila, .tb-barra-h, .tb-apilada span, .tl-item { animation: none !important; }
+  .tb-columnas-marco, .tb-pista, .tb-apilada, .tl-punto { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+
 /* El estado del pago cambió (se gestionó): un pulso. */
 .estado-pago.estado-cambio { animation: estado-cambio .9s cubic-bezier(.2, .8, .2, 1); }
 @keyframes estado-cambio {
@@ -1378,8 +1380,6 @@ kbd {
 
 /* ---------- pantallas chicas ---------- */
 @media (max-width: 720px) {
-  .saludo-cifra { min-width: 0; flex: 1 1 140px; }
-  .saludo-valor { font-size: 21px; }
   .sug-pie, .sug-tecla, .paleta-pie { display: none; }
   .paleta { margin-top: 8vh; }
   .usuario-nombre, .etiqueta-admin { display: none; }
