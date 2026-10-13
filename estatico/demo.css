@@ -293,79 +293,6 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .visor-barra .visor-copiar:hover { background: #e8f0fe; border-color: #aecbfa; color: #0b57d0; }
 .visor-barra .visor-copiar[hidden] { display: none; }
 
-/* ==========================================================================
-   Pantalla de la primera carga (estatico/espera.js): una franja discreta
-   ========================================================================== */
-.carga {
-  --avance: 0;
-  position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px;
-  max-width: 920px; margin: 14px auto 0; padding: 12px 16px 14px; border-radius: 16px;
-  background: var(--vidrio); border: 1px solid var(--borde); box-shadow: var(--brillo);
-  animation: aparecer .5s cubic-bezier(.2, .8, .2, 1) both;
-  transition: height .6s cubic-bezier(.5, 0, .3, 1), opacity .45s ease, margin .6s ease, padding .6s ease, border-color .6s ease;
-}
-.carga.carga-cerrando { height: 0 !important; opacity: 0; margin-top: 0; padding-top: 0; padding-bottom: 0; border-width: 0; }
-
-/* Anillo pequeño con el porcentaje. */
-.carga-orbe { position: relative; flex: none; width: 34px; height: 34px; display: grid; place-items: center; }
-.carga-anillo {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: conic-gradient(var(--celeste) calc(var(--avance) * 360deg), var(--borde-fuerte) 0);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
-  transition: background .6s ease;
-}
-.carga-porcentaje { font-size: 10.5px; font-weight: 700; color: var(--texto-2); font-variant-numeric: tabular-nums; }
-
-.carga-titulos { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.carga-mensaje { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; }
-.carga-titulo { flex: none; font-weight: 650; color: var(--texto); }
-.carga-detalle { min-width: 0; color: var(--texto-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.carga-nota { font-size: 12px; color: var(--verde); animation: aparecer .4s ease both; }
-
-/* Un punto por hoja. */
-.carga-fuentes { flex: none; list-style: none; margin: 0; padding: 0; display: flex; gap: 5px; }
-.carga-fuente {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--borde-fuerte);
-  transition: background .4s ease, box-shadow .4s ease, transform .4s ease;
-}
-.carga-fuente.bajando { background: rgba(156, 200, 255, .35); }
-.carga-fuente.leyendo { background: var(--celeste); animation: carga-punto 1.2s ease-in-out infinite; }
-@keyframes carga-punto { 50% { opacity: .35; } }
-.carga-fuente.lista { background: var(--verde); }
-.carga-fuente.error { background: var(--rojo); }
-
-/* Barra fina pegada abajo. */
-.carga-barra { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
-.carga-relleno {
-  display: block; height: 100%; width: calc(var(--avance) * 100%);
-  background: linear-gradient(90deg, transparent, var(--celeste)); transition: background .6s ease;
-}
-
-/* Terminó: todo pasa a verde (o ámbar si alguna hoja falló). */
-.carga-completa { border-color: rgba(52, 211, 153, .35); }
-.carga-completa .carga-anillo { background: var(--verde); }
-.carga-completa .carga-porcentaje { color: var(--verde); font-size: 13px; }
-.carga-completa .carga-relleno { background: linear-gradient(90deg, transparent, var(--verde)); }
-.carga-con-avisos { border-color: rgba(252, 180, 0, .4); }
-.carga-con-avisos .carga-anillo { background: var(--ambar); }
-.carga-con-avisos .carga-porcentaje { color: var(--ambar); }
-.carga-con-avisos .carga-detalle { color: var(--ambar); }
-
-@media (max-width: 560px) {
-  .carga { gap: 10px; padding: 10px 12px 12px; }
-  .carga-mensaje { flex-direction: column; gap: 0; }
-  .carga-fuentes { display: none; }
-}
-
-/* La onda del final: un anillo suave que sale del buscador hasta los bordes. */
-.onda-capa { position: fixed; inset: 0; z-index: 95; pointer-events: none; overflow: hidden; }
-.onda-anillo {
-  position: absolute; border-radius: 50%;
-  background: radial-gradient(circle, transparent 64%, rgba(156, 200, 255, .35) 69%, rgba(156, 200, 255, .12) 70.5%, transparent 72%);
-}
-.onda-capa.ambar .onda-anillo { background: radial-gradient(circle, transparent 64%, rgba(252, 180, 0, .3) 69%, transparent 72%); }
-
 /* El buscador queda listo: un destello azul. */
 .caja-busqueda.axio-listo { animation: axio-listo 1.5s ease; }
 @keyframes axio-listo {
@@ -395,4 +322,4 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .juego-portada p { margin: 0; color: var(--texto-2); font-size: 13.5px; }
 .juego-record { color: var(--ambar) !important; font-weight: 700; }
 .juego-botones { display: flex; justify-content: center; gap: 10px; margin-top: 6px; }
-@media (prefers-reduced-motion: reduce) { .carga, .carga *, .caja-busqueda.axio-listo { animation: none !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .caja-busqueda.axio-listo { animation: none !important; } }

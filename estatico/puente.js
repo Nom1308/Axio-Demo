@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-102109");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-111926");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -270,14 +270,16 @@
     // El logo viaja de la tarjeta a la barra mientras aparece la aplicación (View
     // Transitions; ver «logo-axio» en estilos.css). Sin soporte o sin movimiento, directo.
     if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      document.startViewTransition(entrar);
+      const t = document.startViewTransition(entrar);
+      t.ready.catch(() => {});
+      t.finished.catch(() => {});
     } else {
       entrar();
     }
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-13-102109";
+    script.src = "estatico/app.js?v=2026-10-13-111926";
     document.body.append(script);
   }
 
@@ -505,11 +507,15 @@
     if (motivo === "inactividad") {
       try { sessionStorage.setItem(MARCA_INACTIVIDAD, "1"); } catch (_) { /* sin almacenamiento */ }
     }
-    if (token && window.google && google.accounts && google.accounts.oauth2) {
-      google.accounts.oauth2.revoke(token, () => window.location.reload());
-    } else {
-      window.location.reload();
-    }
+    // Primero la despedida (los puntos del logo se dispersan; app.js), después se recarga.
+    const despedida = typeof window.axioDespedida === "function" ? window.axioDespedida() : Promise.resolve();
+    despedida.then(() => {
+      if (token && window.google && google.accounts && google.accounts.oauth2) {
+        google.accounts.oauth2.revoke(token, () => window.location.reload());
+      } else {
+        window.location.reload();
+      }
+    });
   }
   window.axioCerrarSesion = cerrarSesion;
   $("#btn-cambiar").addEventListener("click", () => cerrarSesion());

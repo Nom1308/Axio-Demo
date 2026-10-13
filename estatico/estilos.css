@@ -179,6 +179,24 @@ code { font-family: "Cascadia Code", Consolas, ui-monospace, monospace; font-siz
   background: url("icono.svg") center / cover;
   box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 6px 22px -4px rgba(47, 125, 246, .65);
 }
+/* Logo de la barra dibujado (con sus tres puntos aparte). Mientras se cargan las hojas
+   lleva .cargando y app.js / espera.js ponen --p1..--p3 (0 a 1): cada punto se enciende en
+   su tercio del avance. Al terminar, .destello: un brillo dorado y los puntos saltan. */
+.logo.logo-barra { background: none; position: relative; }
+.logo-barra svg { display: block; width: 100%; height: 100%; }
+.lb-punto { transform-box: fill-box; transform-origin: center; transition: opacity .5s ease, transform .5s cubic-bezier(.3, 1.6, .5, 1); }
+.logo-barra.cargando .lb-p1 { opacity: calc(.16 + .84 * var(--p1, 0)); transform: scale(calc(.55 + .45 * var(--p1, 0))); }
+.logo-barra.cargando .lb-p2 { opacity: calc(.16 + .84 * var(--p2, 0)); transform: scale(calc(.55 + .45 * var(--p2, 0))); }
+.logo-barra.cargando .lb-p3 { opacity: calc(.16 + .84 * var(--p3, 0)); transform: scale(calc(.55 + .45 * var(--p3, 0))); }
+.logo-barra.destello { animation: lb-destello 1.3s ease-out; }
+@keyframes lb-destello {
+  25% { box-shadow: 0 0 0 1px rgba(255, 255, 255, .14), 0 0 26px 6px rgba(252, 180, 0, .55); }
+  100% { box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 6px 22px -4px rgba(47, 125, 246, .65); }
+}
+.logo-barra.destello .lb-punto { animation: lb-salta .55s cubic-bezier(.3, 1.6, .5, 1); }
+.logo-barra.destello .lb-p2 { animation-delay: .08s; }
+.logo-barra.destello .lb-p3 { animation-delay: .16s; }
+@keyframes lb-salta { 45% { transform: scale(1.45); } }
 .logo-grande { width: 64px; height: 64px; border-radius: 18px; box-shadow: 0 0 0 1px rgba(255,255,255,.14), 0 18px 50px -10px rgba(47, 125, 246, .75); }
 /* La palabra destacada va en dorado, como el "tu" del logotipo. */
 .degradado {
@@ -1293,7 +1311,7 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
    misma página en la versión de navegador, de una página a otra en el servidor). */
 @view-transition { navigation: auto; }
 .logo-entrada, .barra .logo { view-transition-name: logo-axio; }
-::view-transition-group(logo-axio) { animation-duration: .8s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+::view-transition-group(logo-axio) { animation-duration: .6s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
 ::view-transition-old(logo-axio), ::view-transition-new(logo-axio) { height: 100%; }
 
 /* La foto de la cuenta (versión de navegador) encima de la inicial. */
@@ -1421,6 +1439,44 @@ kbd {
   .tb-pila, .tb-barra-h, .tb-apilada span, .tl-item { animation: none !important; }
   .tb-columnas-marco, .tb-pista, .tb-apilada, .tl-punto { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
+
+/* ---------- la fila se vuelve el detalle (app.js, abrirConTransicion) ---------- */
+.detalle { view-transition-name: detalle; }
+.detalle.por-transicion[open] { animation: none; }
+::view-transition-group(detalle) { animation-duration: .45s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+::view-transition-old(detalle), ::view-transition-new(detalle) { height: 100%; width: 100%; object-fit: cover; object-position: top; }
+
+/* ---------- copiar: el botón responde «✓ Copiado» ---------- */
+.boton.boton-copiado, .boton.boton-copiado:hover {
+  color: #fff; border-color: transparent; background: linear-gradient(135deg, #0F9F6E, #34D399);
+  box-shadow: 0 8px 22px -10px rgba(52, 211, 153, .9); animation: copiado .35s cubic-bezier(.3, 1.6, .5, 1);
+}
+@keyframes copiado { 40% { transform: scale(1.05); } }
+.palomita { width: 15px; height: 15px; flex: none; }
+.palomita path { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; animation: le-trazo .35s .05s ease-out both; }
+
+/* ---------- despedida al cerrar sesión (app.js) ---------- */
+.despedida { position: fixed; inset: 0; z-index: 120; width: 100%; height: 100%; pointer-events: none; }
+.logo-barra.suelto .lb-punto { opacity: 0; transform: scale(.4); transition: opacity .25s ease, transform .25s ease; }
+body.despidiendo .contenido, body.despidiendo .barra-derecha, body.despidiendo .tablero, body.despidiendo .tabla-completa {
+  opacity: 0; transform: scale(.985); transition: opacity .8s ease .1s, transform .8s ease .1s;
+}
+
+/* ---------- sin resultados: la lupa buscando ---------- */
+.sin-resultados { display: grid; justify-items: center; gap: 6px; margin: 34px auto 20px; max-width: 460px; text-align: center; animation: aparecer .5s cubic-bezier(.2, .8, .2, 1) both; }
+.sin-resultados strong { font-family: var(--fuente-titulo); font-size: 18px; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.sin-resultados p { margin: 0; color: var(--texto-2); font-size: 13.5px; }
+.sin-resultados .sugerencia { margin-top: 6px; font-size: 14px; }
+.sr-dibujo { width: 132px; height: 99px; margin-bottom: 4px; overflow: visible; }
+.sr-lupa { stroke: var(--texto-3); transform-box: view-box; transform-origin: 52px 46px; animation: sr-busca 3.6s ease-in-out infinite; }
+@keyframes sr-busca {
+  0%, 100% { transform: translate(-10px, 0) rotate(-8deg); }
+  50% { transform: translate(10px, 3px) rotate(8deg); }
+}
+.sr-punto { fill: var(--dorado); transform-box: fill-box; transform-origin: center; animation: sr-flota 4s ease-in-out infinite; filter: drop-shadow(0 0 6px rgba(252, 180, 0, .6)); }
+.sr-punto:nth-of-type(2) { animation-delay: -1.3s; animation-duration: 4.6s; }
+.sr-punto:nth-of-type(3) { animation-delay: -2.6s; animation-duration: 5.2s; }
+@keyframes sr-flota { 50% { transform: translate(4px, -7px); opacity: .55; } }
 
 /* El estado del pago cambió (se gestionó): un pulso. */
 .estado-pago.estado-cambio { animation: estado-cambio .9s cubic-bezier(.2, .8, .2, 1); }

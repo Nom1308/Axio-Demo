@@ -111,7 +111,8 @@
 
   // navigator.clipboard solo existe con HTTPS (o en localhost). En una red interna por
   // HTTP no está, así que se cae al método viejo, que funciona en cualquier navegador.
-  async function copiar(texto, mensaje) {
+  // boton: el que se tocó; por un instante se vuelve «✓ Copiado» (ver confirmarCopia).
+  async function copiar(texto, mensaje, boton) {
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(texto);
@@ -124,9 +125,40 @@
         area.remove();
       }
       toast(mensaje || "Copiado.");
+      if (boton) confirmarCopia(boton, /^Cédula/.test(mensaje || "") ? "Copiada" : "Copiado");
     } catch (_) {
       toast("No se pudo copiar.");
     }
+  }
+
+  // Una palomita que se dibuja (el aro y luego la marca).
+  function palomita(clase) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", clase);
+    svg.setAttribute("aria-hidden", "true");
+    const marca = document.createElementNS(ns, "path");
+    marca.setAttribute("d", "M5 12.5l4.2 4.2L19 7");
+    marca.setAttribute("pathLength", "1");
+    svg.append(marca);
+    return svg;
+  }
+
+  // El botón de copiar responde él mismo: «✓ Copiado» un momento y vuelve a lo de antes,
+  // sin cambiar de ancho. Los de solo ícono (📋) muestran solo la palomita.
+  function confirmarCopia(boton, texto) {
+    if (boton.classList.contains("boton-copiado")) return;
+    const antes = [...boton.childNodes].filter((n) => !(n.classList && n.classList.contains("onda-boton")));
+    const soloIcono = boton.textContent.trim().length <= 2;
+    boton.style.minWidth = boton.offsetWidth + "px";
+    boton.replaceChildren(palomita("palomita"), soloIcono ? "" : texto);
+    boton.classList.add("boton-copiado");
+    setTimeout(() => {
+      boton.replaceChildren(...antes);
+      boton.classList.remove("boton-copiado");
+      boton.style.minWidth = "";
+    }, 1600);
   }
 
   function normalizar(texto) {
@@ -167,6 +199,16 @@
       if (p < 1) requestAnimationFrame(paso);
     };
     requestAnimationFrame(paso);
+  }
+
+  // View Transitions (cambios de pantalla continuos). Si el navegador salta una (por ejemplo
+  // porque todavía corre la de la entrada), el cambio se hace igual, sin errores sueltos.
+  const conTransicion = () => Boolean(document.startViewTransition) && !sinMovimiento();
+  function transicion(cambio) {
+    const t = document.startViewTransition(cambio);
+    t.ready.catch(() => {});
+    t.finished.catch(() => {});
+    return t;
   }
 
   // Un entero (pagos, créditos) sube desde cero hasta su valor, con separador de miles.
@@ -230,6 +272,106 @@
     tarjeta.style.setProperty("--my", `${ev.clientY - r.top}px`);
   }, { passive: true });
 
+  // ------------------------------------------------------------------ logo de la barra
+  // Mientras se descargan las hojas, los tres puntos dorados del logo se encienden a medida
+  // que cada una queda lista, y al final el logo da un destello: la carga no se ve como
+  // carga. La versión de navegador lo hace con sus propios avisos (estatico/espera.js) y
+  // lo marca con data-carga-propia.
+  const logoBarra = document.querySelector(".barra .logo-barra");
+  let logoCargando = false;
+  let logoAvance = 0;
+  function encenderLogo(avance) {
+    logoAvance = avance;
+    for (let i = 0; i < 3; i++) logoBarra.style.setProperty(`--p${i + 1}`, Math.max(0, Math.min(1, avance * 3 - i)).toFixed(3));
+  }
+  // Al terminar, los puntos que faltan se encienden uno tras otro (~0,65 s); después, listo().
+  function completarLogo(listo) {
+    const desde = logoAvance, t0 = performance.now(), DURACION = sinMovimiento() ? 0 : 650;
+    const paso = (ahora) => {
+      const k = DURACION ? Math.min(1, (ahora - t0) / DURACION) : 1;
+      encenderLogo(desde + (1 - desde) * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) requestAnimationFrame(paso); else listo();
+    };
+    requestAnimationFrame(paso);
+  }
+  function logoSegunEstado(est) {
+    if (!logoBarra || "cargaPropia" in logoBarra.dataset || !est.fuentes || !est.fuentes.length) return;
+    if (est.cargando) {
+      const hechas = est.fuentes.filter((f) => f.estado !== "pendiente").length;
+      logoBarra.classList.add("cargando");
+      logoCargando = true;
+      encenderLogo(Math.min(0.97, hechas / est.fuentes.length));
+    } else if (logoCargando) {
+      logoCargando = false;
+      completarLogo(() => {
+        logoBarra.classList.remove("cargando");
+        logoBarra.classList.add("destello");
+        setTimeout(() => logoBarra.classList.remove("destello"), 1400);
+      });
+    }
+  }
+
+  // ------------------------------------------------------------------ despedida
+  // Al cerrar la sesión (o por inactividad), los tres puntos dorados del logo se sueltan y
+  // se dispersan como polvo de luz mientras la página se apaga: la entrada, al revés.
+  // Devuelve una promesa que se cumple al terminar (~1 s); sin movimiento, al instante.
+  function despedida() {
+    if (sinMovimiento() || !logoBarra || document.body.classList.contains("despidiendo")) return Promise.resolve();
+    const r = logoBarra.getBoundingClientRect();
+    const k = r.width / 64;
+    const origenes = [[41, 9, 10], [50, 13, 20], [55.5, 22, 10]];   // x, y del punto y cuántas chispas
+    const lienzo = el("canvas", { class: "despedida", "aria-hidden": "true" });
+    const escala = Math.min(2, window.devicePixelRatio || 1);
+    lienzo.width = Math.round(window.innerWidth * escala);
+    lienzo.height = Math.round(window.innerHeight * escala);
+    document.body.append(lienzo);
+    const ctx = lienzo.getContext("2d");
+    ctx.scale(escala, escala);
+    const chispas = origenes.flatMap(([x, y, n]) => Array.from({ length: n }, () => {
+      const angulo = Math.random() * Math.PI * 2;
+      const fuerza = 60 + Math.random() * 260;
+      return { x: r.left + x * k, y: r.top + y * k, vx: Math.cos(angulo) * fuerza, vy: Math.sin(angulo) * fuerza * .7 + 40, tam: 1 + Math.random() * 2.2 };
+    }));
+    logoBarra.classList.add("suelto");
+    document.body.classList.add("despidiendo");
+    const DURACION = 1000;
+    const inicio = performance.now();
+    let anterior = inicio;
+    return new Promise((listo) => {
+      function cuadro(ahora) {
+        const t = (ahora - inicio) / DURACION;
+        const dt = Math.min(.05, (ahora - anterior) / 1000);
+        anterior = ahora;
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        for (const c of chispas) {
+          c.x += c.vx * dt;
+          c.y += c.vy * dt;
+          c.vx *= .965;
+          c.vy = c.vy * .965 + 30 * dt;   // caen muy despacio, como polvo
+          const radio = c.tam * 4.5;
+          const brillo = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, radio);
+          brillo.addColorStop(0, `rgba(255, 220, 120, ${Math.max(0, 1 - t)})`);
+          brillo.addColorStop(1, "rgba(252, 180, 0, 0)");
+          ctx.fillStyle = brillo;
+          ctx.fillRect(c.x - radio, c.y - radio, radio * 2, radio * 2);
+        }
+        if (t < 1) requestAnimationFrame(cuadro);
+        else listo();
+      }
+      requestAnimationFrame(cuadro);
+    });
+  }
+  window.axioDespedida = despedida;
+
+  // «Salir» del servidor: primero la despedida, después el formulario de siempre.
+  const formularioSalir = document.querySelector('form[action$="logout"]');
+  if (formularioSalir) {
+    formularioSalir.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      despedida().then(() => formularioSalir.submit());
+    });
+  }
+
   let animarEntrada = false;   // la próxima pintada de resultados entra en cascada
   let temporizadorEntrada = null;
 
@@ -251,9 +393,8 @@
     zona.replaceChildren();
     const m = est.matriz, l = est.lineas;
 
-    if (est.cargando) {
-      zona.append(el("span", { text: "⏳ " + (est.mensaje_carga || "Cargando datos...") }));
-    }
+    // Mientras se cargan las hojas no hay aviso aquí: lo cuenta el logo de la barra (ver
+    // «logo de la barra») y el detalle está en el menú de la cuenta.
     if (!m.configurada) {
       zona.append(el("span", { class: "ambar", text: "⚠️ No hay URL de los Extractos (Matriz_Nube) en config_axio.json del servidor." }));
     } else if (m.error) {
@@ -309,6 +450,7 @@
       caja.style.flexBasis = "100%";
     }
 
+    logoSegunEstado(est);
     if (est.cargando) programarSondeo();
     if (alTerminarCarga && (!est.cargando || est.parcial)) {
       // Una búsqueda quedó esperando a que cargaran los datos: se lanza apenas se puede
@@ -374,8 +516,8 @@
     // La primera búsqueda: la portada se retira y el buscador sube a su lugar arriba, con
     // una transición continua (View Transitions) en vez de un salto.
     const empezar = () => { document.body.classList.add("con-busqueda"); pintarEsqueleto(termino); };
-    if (!document.body.classList.contains("con-busqueda") && document.startViewTransition && !sinMovimiento()) {
-      try { await document.startViewTransition(empezar).updateCallbackDone; } catch (_) { empezar(); }
+    if (!document.body.classList.contains("con-busqueda") && conTransicion()) {
+      try { await transicion(empezar).updateCallbackDone; } catch (_) { empezar(); }
     } else {
       empezar();
     }
@@ -428,14 +570,18 @@
     if (busqueda.asociado) zonaAsociado.append(pintarAsociado(busqueda.asociado));
 
     if (!busqueda.grupos.length) {
-      if (historiaAsociado) contenedor.append(historiaAsociado);
       barraResultados.hidden = true;
       estadoBusqueda.className = "estado-busqueda";
-      estadoBusqueda.replaceChildren(`Sin resultados para «${busqueda.termino}».`);
-      if (busqueda.sugerencia) {
-        estadoBusqueda.append(" ", el("span", { class: "sugerencia" }, "¿Quisiste decir ",
-          el("button", { type: "button", text: busqueda.sugerencia, onclick: () => { campo.value = busqueda.sugerencia; buscar(); } }), "?"));
+      const sugerencia = busqueda.sugerencia ? el("span", { class: "sugerencia" }, "¿Quisiste decir ",
+        el("button", { type: "button", text: busqueda.sugerencia, onclick: () => { campo.value = busqueda.sugerencia; buscar(); } }), "?") : null;
+      if (busqueda.asociado) {
+        // Se encontró a la persona (su ficha está arriba), solo que sin pagos: basta una línea.
+        estadoBusqueda.replaceChildren(`No hay pagos en los Extractos para «${busqueda.termino}».`);
+      } else {
+        estadoBusqueda.replaceChildren();
+        contenedor.append(sinResultados(busqueda.termino, sugerencia));
       }
+      if (historiaAsociado) contenedor.append(historiaAsociado);
       return;
     }
 
@@ -460,6 +606,29 @@
     }
     if (!historiaPuesta) contenedor.append(historiaAsociado);
     if (!visibles) estadoBusqueda.textContent = "Ningún resultado coincide con el filtro.";
+  }
+
+  // Nada encontrado: la lupa del logo buscando de un lado a otro, con sus tres puntos dorados
+  // sueltos flotando alrededor, y qué probar.
+  function sinResultados(termino, sugerencia) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = (etiqueta, atributos) => {
+      const n = document.createElementNS(ns, etiqueta);
+      for (const [k, v] of Object.entries(atributos)) n.setAttribute(k, v);
+      return n;
+    };
+    const dibujo = svg("svg", { viewBox: "0 0 120 90", class: "sr-dibujo", "aria-hidden": "true" });
+    const lupa = svg("g", { class: "sr-lupa" });
+    lupa.append(svg("circle", { cx: "52", cy: "40", r: "18", fill: "none", "stroke-width": "7" }),
+      svg("path", { d: "M65 53l15 15", fill: "none", "stroke-width": "8", "stroke-linecap": "round" }));
+    dibujo.append(lupa,
+      svg("circle", { class: "sr-punto", cx: "90", cy: "18", r: "5" }),
+      svg("circle", { class: "sr-punto", cx: "22", cy: "22", r: "3.2" }),
+      svg("circle", { class: "sr-punto", cx: "98", cy: "58", r: "3.2" }));
+    return el("div", { class: "sin-resultados" }, dibujo,
+      el("strong", { text: `Nada por aquí para «${termino}»` }),
+      el("p", { text: "Prueba con la cédula sin puntos, solo un apellido, el número de recibo o un monto." }),
+      sugerencia);
   }
 
   // Mientras se busca: siluetas suaves con la forma de lo que va a llegar (la ficha si es
@@ -528,7 +697,7 @@
     for (const f of filas) {
       const coinciden = new Set(f.m);
       // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
-      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n++}` : null, onclick: () => abrirDetalle(f.i), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i); } });
+      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n++}` : null, onclick: (ev) => abrirDetalle(f.i, ev.currentTarget), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i, ev.currentTarget); } });
       // data-label: en el celular cada fila se ve como una tarjeta, con el nombre de la
       // columna al lado de cada dato (ver «celular» en estilos.css).
       if (conEstado) {
@@ -580,13 +749,61 @@
   }
 
   // ------------------------------------------------------------------ detalle
-  function abrirDetalle(i) {
-    return abrirDetalleDe(`/api/detalle/${encodeURIComponent(busqueda.id)}/${i}`);
+  function abrirDetalle(i, origen) {
+    return abrirDetalleDe(`/api/detalle/${encodeURIComponent(busqueda.id)}/${i}`, origen);
   }
 
-  async function abrirDetalleDe(url) {
+  // ------------------------------------------------------------------ la fila se vuelve el detalle
+  // Al tocar una fila (o una tarjeta, o un pago de la línea de tiempo), ese mismo elemento
+  // se agranda y se transforma en la ventana del detalle; al cerrarla, vuelve a su lugar
+  // (View Transitions, con el nombre «detalle»: ver estilos.css). Sin soporte o sin
+  // movimiento, la ventana se abre y se cierra como siempre.
+  let origenDetalle = null;
+
+  function abrirConTransicion(origen, llenar) {
+    origenDetalle = origen;
+    origen.style.viewTransitionName = "detalle";
+    dialogo.classList.add("por-transicion");
+    const t = transicion(() => {
+      origen.style.viewTransitionName = "";
+      llenar();
+      dialogo.showModal();
+      dialogo.scrollTop = 0;
+    });
+    t.finished.finally(() => dialogo.classList.remove("por-transicion"));
+  }
+
+  function cerrarDetalle() {
+    if (!dialogo.open) return;
+    const origen = origenDetalle;
+    origenDetalle = null;
+    const visible = origen && origen.isConnected && (() => {
+      const r = origen.getBoundingClientRect();
+      return r.width > 0 && r.bottom > 0 && r.top < window.innerHeight;
+    })();
+    if (!visible || !conTransicion()) { dialogo.close(); return; }
+    dialogo.classList.add("por-transicion");
+    const limpiar = () => { origen.style.viewTransitionName = ""; dialogo.classList.remove("por-transicion"); };
+    const t = transicion(() => {
+      dialogo.close();
+      origen.style.viewTransitionName = "detalle";
+    });
+    t.finished.finally(limpiar);
+    setTimeout(limpiar, 1500);   // por si la transición nunca avisa
+  }
+
+  async function abrirDetalleDe(url, origen) {
+    if (origen && !dialogo.open && conTransicion()) {
+      // Primero los datos, después la transición: la ventana llega ya llena.
+      let datos = null, error = null;
+      try { ({ datos } = await apiJson(url)); } catch (e) { error = e; }
+      abrirConTransicion(origen, () => (error
+        ? cuerpoDetalle.replaceChildren(el("p", { class: "aviso aviso-error", text: error.message }))
+        : pintarDetalle(datos)));
+      return;
+    }
     cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
-    if (!dialogo.open) dialogo.showModal();
+    if (!dialogo.open) { origenDetalle = null; dialogo.showModal(); }
     try {
       const { datos } = await apiJson(url);
       pintarDetalle(datos);
@@ -614,7 +831,7 @@
         entrada,
         el("div", { class: "campo-acciones" },
           c.enlace ? enlaceHoja("↗", c.enlace, { title: "Abrir enlace" }) : null,
-          el("button", { class: "boton boton-chico", type: "button", title: "Copiar", text: "📋", onclick: () => copiar(c.valor, "Copiado.") }))));
+          el("button", { class: "boton boton-chico", type: "button", title: "Copiar", text: "📋", onclick: (ev) => copiar(c.valor, "Copiado.", ev.currentTarget) }))));
     }
     return campos;
   }
@@ -663,7 +880,7 @@
       if (d.encargado.extension) {
         cartera.append(el("div", { class: "fila-flex" },
           el("span", { class: "gris", text: `☎️ Extensión ${d.encargado.extension}` }),
-          el("button", { class: "boton boton-chico", type: "button", text: "Copiar", onclick: () => copiar(d.encargado.extension, "Extensión copiada.") })));
+          el("button", { class: "boton boton-chico", type: "button", text: "Copiar", onclick: (ev) => copiar(d.encargado.extension, "Extensión copiada.", ev.currentTarget) })));
       } else {
         cartera.append(el("p", { class: "gris", text: "☎️ Sin extensión registrada" }));
       }
@@ -677,7 +894,7 @@
         el("strong", { text: "🪪 Cédula:" }),
         el("span", { class: "cedula-valor", text: d.cedula }),
         el("button", { class: "boton boton-principal boton-chico", type: "button", text: "📋 Copiar cédula",
-          onclick: () => copiar(d.cedula_limpia || d.cedula, "Cédula copiada, lista para pegar en Siasoft.") }),
+          onclick: (ev) => copiar(d.cedula_limpia || d.cedula, "Cédula copiada, lista para pegar en Siasoft.", ev.currentTarget) }),
         d.whatsapp ? botonWhatsapp(d.whatsapp, mensajePago(d)) : null));
     }
 
@@ -697,8 +914,8 @@
 
     const textoCompleto = d.campos.map((c) => `${c.columna}: ${c.valor}`).join("\n");
     partes.push(el("div", { class: "pie-detalle" },
-      el("button", { class: "boton", type: "button", text: "📋 Copiar todo el detalle", onclick: () => copiar(textoCompleto, "Detalle copiado.") }),
-      el("button", { class: "boton boton-principal", type: "button", text: "Cerrar", onclick: () => dialogo.close() })));
+      el("button", { class: "boton", type: "button", text: "📋 Copiar todo el detalle", onclick: (ev) => copiar(textoCompleto, "Detalle copiado.", ev.currentTarget) }),
+      el("button", { class: "boton boton-principal", type: "button", text: "Cerrar", onclick: cerrarDetalle })));
 
     cuerpoDetalle.replaceChildren(...partes);
     dialogo.scrollTop = 0;
@@ -753,9 +970,18 @@
     return etiquetas;
   }
 
-  function abrirObligacion(nombreLinea, e) {
+  // origen: la tarjeta que se tocó, que se transforma en la ventana (ver abrirConTransicion).
+  function abrirObligacion(nombreLinea, e, origen) {
     const desdePago = dialogo.open && ultimoDetalle ? ultimoDetalle : null;
-    if (!dialogo.open) dialogo.showModal();
+    if (origen && !dialogo.open && conTransicion()) {
+      abrirConTransicion(origen, () => pintarObligacion(nombreLinea, e, null));
+      return;
+    }
+    if (!dialogo.open) { origenDetalle = null; dialogo.showModal(); }
+    pintarObligacion(nombreLinea, e, desdePago);
+  }
+
+  function pintarObligacion(nombreLinea, e, desdePago) {
     $("#detalle-titulo").textContent = "Detalle de la obligación";
 
     const partes = [el("p", { class: "fuente-detalle", text: "💳 " + nombreLinea })];
@@ -802,8 +1028,8 @@
     const textoCompleto = [`${nombreLinea}`, ...campos.map((c) => `${c.columna}: ${c.valor}`)].join("\n");
     partes.push(el("div", { class: "pie-detalle" },
       desdePago ? el("button", { class: "boton", type: "button", text: "← Volver al pago", onclick: () => pintarDetalle(desdePago) }) : null,
-      el("button", { class: "boton", type: "button", text: "📋 Copiar todo", onclick: () => copiar(textoCompleto, "Obligación copiada.") }),
-      el("button", { class: "boton boton-principal", type: "button", text: "Cerrar", onclick: () => dialogo.close() })));
+      el("button", { class: "boton", type: "button", text: "📋 Copiar todo", onclick: (ev) => copiar(textoCompleto, "Obligación copiada.", ev.currentTarget) }),
+      el("button", { class: "boton boton-principal", type: "button", text: "Cerrar", onclick: cerrarDetalle })));
 
     cuerpoDetalle.replaceChildren(...partes);
     dialogo.scrollTop = 0;
@@ -941,7 +1167,7 @@
         el("span", { class: "tl-punto", "aria-hidden": "true", style: `background:${colorEstado(p.e || "sin")}` }),
         el("time", { text: ev.fecha ? fechaCorta(ev.fecha) : "Sin fecha" }),
         el("button", { type: "button", class: "tl-cuerpo tl-pago", title: "Ver el detalle de este pago",
-          onclick: () => abrirDetalleDe(`/api/tabla/detalle/${p.p}`) },
+          onclick: (ev) => abrirDetalleDe(`/api/tabla/detalle/${p.p}`, ev.currentTarget) },
           el("span", { class: "tl-linea1" },
             el("strong", { text: p.valor !== null ? pesos(p.valor) : "Pago" }),
             el("span", { class: "tl-estado", text: NOMBRES_ESTADO[p.e || "sin"] })),
@@ -1008,7 +1234,7 @@
         el("div", { class: "asociado-chips" }, ...datosClave.map(([icono, texto]) => el("span", { class: "chip-dato" }, icono + " " + texto)))),
       el("div", { class: "asociado-acciones" },
         el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
-          onclick: () => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.") }),
+          onclick: (ev) => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.", ev.currentTarget) }),
         a.whatsapp ? botonWhatsapp(a.whatsapp, mensajeAsociado(a, todos)) : null,
         el("button", { class: "boton boton-chico", type: "button", text: "🖨️ Imprimir ficha",
           title: "Imprime solo esta ficha. En la ventana de impresión se puede elegir «Guardar como PDF».",
@@ -1086,8 +1312,8 @@
       class: "tarjeta-credito" + (estado.mora ? " credito-mora" : estado.mora === false ? " credito-dia" : "") + (conDetalle ? " credito-clic" : ""),
       role: conDetalle ? "button" : null, tabindex: conDetalle ? "0" : null,
       title: conDetalle ? "Ver la obligación completa" : null,
-      onclick: conDetalle ? () => abrirObligacion(nombreLinea, e) : null,
-      onkeydown: conDetalle ? (ev) => { if (ev.key === "Enter") abrirObligacion(nombreLinea, e); } : null,
+      onclick: conDetalle ? (ev) => abrirObligacion(nombreLinea, e, ev.currentTarget) : null,
+      onkeydown: conDetalle ? (ev) => { if (ev.key === "Enter") abrirObligacion(nombreLinea, e, ev.currentTarget); } : null,
     });
 
     // filter(Boolean): append() de DOM escribiría «null» por cada parte que falta.
@@ -1171,8 +1397,8 @@
       class: (comoTarjeta ? "credito credito-tarjeta" : "credito") + (estado.mora ? " credito-mora" : "") + (conDetalle ? " credito-clic" : ""),
       role: conDetalle ? "button" : null, tabindex: conDetalle ? "0" : null,
       title: conDetalle ? "Ver la obligación completa" : null,
-      onclick: conDetalle ? () => abrirObligacion(nombreLinea, e) : null,
-      onkeydown: conDetalle ? (ev) => { if (ev.key === "Enter") abrirObligacion(nombreLinea, e); } : null,
+      onclick: conDetalle ? (ev) => abrirObligacion(nombreLinea, e, ev.currentTarget) : null,
+      onkeydown: conDetalle ? (ev) => { if (ev.key === "Enter") abrirObligacion(nombreLinea, e, ev.currentTarget); } : null,
     }, fila);
 
     // Resumen de la obligación: lo que se mira primero en la hoja de la línea.
@@ -1612,11 +1838,11 @@
     const tabla = el("table", { class: "tc-tabla", style: `width:${ancho}px` }, cols, el("thead", null, fila), el("tbody"));
     tabla.addEventListener("click", (ev) => {
       const tr = ev.target.closest("tbody tr[data-p]");
-      if (tr) abrirDetalleDe(`/api/tabla/detalle/${tr.dataset.p}`);
+      if (tr) abrirDetalleDe(`/api/tabla/detalle/${tr.dataset.p}`, tr);
     });
     tabla.addEventListener("keydown", (ev) => {
       const tr = ev.target.closest("tbody tr[data-p]");
-      if (tr && ev.key === "Enter") abrirDetalleDe(`/api/tabla/detalle/${tr.dataset.p}`);
+      if (tr && ev.key === "Enter") abrirDetalleDe(`/api/tabla/detalle/${tr.dataset.p}`, tr);
     });
     ventanaTabla.querySelector(".tc-cuerpo").replaceChildren(tabla, el("p", { class: "tc-vacio", hidden: true }));
   }
@@ -2419,7 +2645,7 @@
       const salir = document.querySelector('form[action$="logout"]');
       if (!salir) { window.location.href = "/login"; return; }
       salir.append(el("input", { type: "hidden", name: "motivo", value: "inactividad" }));
-      salir.submit();
+      despedida().then(() => salir.submit());
     };
     const quitarAviso = () => { if (aviso) { aviso.remove(); aviso = null; } };
     const actividad = () => { ultimaActividad = Date.now(); quitarAviso(); };
@@ -2454,8 +2680,16 @@
   ocultarVacias.addEventListener("change", pintarResultados);
   $("#btn-exportar").addEventListener("click", exportar);
   dialogo.addEventListener("click", (ev) => {
-    if (ev.target === dialogo || ev.target.closest("[data-cerrar]")) dialogo.close();
+    if (ev.target === dialogo || ev.target.closest("[data-cerrar]")) cerrarDetalle();
   });
+  // Esc también vuelve a la fila de donde salió. Se atrapa la tecla antes que el navegador:
+  // si no, a veces cierra la ventana por su cuenta, sin la transición.
+  dialogo.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || ev.target.closest("dialog") !== dialogo) return;
+    ev.preventDefault();
+    cerrarDetalle();
+  });
+  dialogo.addEventListener("cancel", (ev) => { ev.preventDefault(); cerrarDetalle(); });
 
   pintarRecientes();
   cargarEstado();
