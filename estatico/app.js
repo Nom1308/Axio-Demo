@@ -201,16 +201,6 @@
     requestAnimationFrame(paso);
   }
 
-  // View Transitions (cambios de pantalla continuos). Si el navegador salta una (por ejemplo
-  // porque todavía corre la de la entrada), el cambio se hace igual, sin errores sueltos.
-  const conTransicion = () => Boolean(document.startViewTransition) && !sinMovimiento();
-  function transicion(cambio) {
-    const t = document.startViewTransition(cambio);
-    t.ready.catch(() => {});
-    t.finished.catch(() => {});
-    return t;
-  }
-
   // Un entero (pagos, créditos) sube desde cero hasta su valor, con separador de miles.
   function contarEntero(nodo, n, sufijo = "") {
     nodo.textContent = formatoMiles.format(n) + sufijo;
@@ -513,13 +503,20 @@
     estadoBusqueda.textContent = "Buscando…";
     const pedido = apiJson("/api/buscar?q=" + encodeURIComponent(termino));
     pedido.catch(() => {});   // el error se atiende abajo, después de la transición
-    // La primera búsqueda: la portada se retira y el buscador sube a su lugar arriba, con
-    // una transición continua (View Transitions) en vez de un salto.
-    const empezar = () => { document.body.classList.add("con-busqueda"); pintarEsqueleto(termino); };
-    if (!document.body.classList.contains("con-busqueda") && conTransicion()) {
-      try { await transicion(empezar).updateCallbackDone; } catch (_) { empezar(); }
-    } else {
-      empezar();
+    // La primera búsqueda: la portada se retira y el buscador sube a su lugar arriba,
+    // deslizándose desde donde estaba (el ancho lo cambia su propia transición en
+    // estilos.css). Se mueve el buscador de verdad, así su vidrio desenfocado no parpadea.
+    const panel = $(".panel-busqueda");
+    const primera = !document.body.classList.contains("con-busqueda");
+    const antes = primera ? panel.getBoundingClientRect().top : 0;
+    document.body.classList.add("con-busqueda");
+    pintarEsqueleto(termino);
+    if (primera && !sinMovimiento() && panel.animate) {
+      const salto = antes - panel.getBoundingClientRect().top;
+      if (Math.abs(salto) > 2) {
+        panel.animate([{ transform: `translateY(${salto}px)` }, { transform: "none" }],
+          { duration: 520, easing: "cubic-bezier(.2, .85, .25, 1)" });
+      }
     }
     try {
       const { status, datos } = await pedido;
@@ -754,62 +751,83 @@
   }
 
   // ------------------------------------------------------------------ la fila se vuelve el detalle
-  // Al tocar una fila (o una tarjeta, o un pago de la línea de tiempo), ese mismo elemento
-  // se agranda y se transforma en la ventana del detalle; al cerrarla, vuelve a su lugar
-  // (View Transitions, con el nombre «detalle»: ver estilos.css). Sin soporte o sin
-  // movimiento, la ventana se abre y se cierra como siempre.
+  // Al tocar una fila (o una tarjeta, o un pago de la línea de tiempo), la ventana del
+  // detalle crece desde ese elemento hasta su lugar, mientras el fondo se oscurece y se
+  // desenfoca poco a poco; el contenido aparece cuando la ventana ya está en su sitio. Al
+  // cerrarla hace el camino inverso. Se anima la ventana de verdad (no una foto de la
+  // página), así el fondo desenfocado y el contenido nunca parpadean.
   let origenDetalle = null;
+  const MS_ABRIR = 420, MS_CERRAR = 300;
 
-  function abrirConTransicion(origen, llenar) {
-    origenDetalle = origen;
-    origen.style.viewTransitionName = "detalle";
-    dialogo.classList.add("por-transicion");
-    const t = transicion(() => {
-      origen.style.viewTransitionName = "";
-      llenar();
-      dialogo.showModal();
-      dialogo.scrollTop = 0;
-    });
-    t.finished.finally(() => dialogo.classList.remove("por-transicion"));
+  function enPantalla(n) {
+    if (!n || !n.isConnected) return false;
+    const r = n.getBoundingClientRect();
+    return r.width > 0 && r.bottom > 0 && r.top < window.innerHeight;
+  }
+
+  // Lo que hay que mover para que la ventana quede encima del elemento de origen.
+  function haciaOrigen(origen) {
+    const o = origen.getBoundingClientRect(), f = dialogo.getBoundingClientRect();
+    return `translate(${o.left - f.left}px, ${o.top - f.top}px) scale(${Math.max(.05, o.width / f.width)}, ${Math.max(.05, o.height / f.height)})`;
+  }
+
+  function mostrarDialogo(origen) {
+    origenDetalle = origen || null;
+    dialogo.classList.remove("cerrando");
+    const desdeOrigen = enPantalla(origen) && !sinMovimiento() && Boolean(dialogo.animate);
+    dialogo.classList.toggle("desde-origen", desdeOrigen);
+    dialogo.showModal();
+    dialogo.scrollTop = 0;
+    if (!desdeOrigen) return;
+    dialogo.classList.add("creciendo");   // el contenido espera, invisible
+    dialogo.animate([
+      { transform: haciaOrigen(origen), borderRadius: "14px", opacity: .5 },
+      { transform: "none", borderRadius: "24px", opacity: 1 },
+    ], { duration: MS_ABRIR, easing: "cubic-bezier(.2, .85, .25, 1)" });
+    setTimeout(() => dialogo.classList.remove("creciendo"), MS_ABRIR * .55);
   }
 
   function cerrarDetalle() {
-    if (!dialogo.open) return;
+    if (!dialogo.open || dialogo.classList.contains("cerrando")) return;
     const origen = origenDetalle;
     origenDetalle = null;
-    const visible = origen && origen.isConnected && (() => {
-      const r = origen.getBoundingClientRect();
-      return r.width > 0 && r.bottom > 0 && r.top < window.innerHeight;
-    })();
-    if (!visible || !conTransicion()) { dialogo.close(); return; }
-    dialogo.classList.add("por-transicion");
-    const limpiar = () => { origen.style.viewTransitionName = ""; dialogo.classList.remove("por-transicion"); };
-    const t = transicion(() => {
+    if (sinMovimiento() || !dialogo.animate) { dialogo.close(); return; }
+    dialogo.classList.add("cerrando");   // el contenido se apaga y el fondo se aclara
+    const final = enPantalla(origen)
+      ? [{ transform: "none", opacity: 1 }, { transform: haciaOrigen(origen), borderRadius: "14px", opacity: 0 }]
+      : [{ transform: "none", opacity: 1 }, { transform: "translateY(10px) scale(.97)", opacity: 0 }];
+    const a = dialogo.animate(final, { duration: MS_CERRAR, easing: "cubic-bezier(.4, 0, .6, 1)", fill: "forwards" });
+    const terminar = () => {
+      if (!dialogo.classList.contains("cerrando")) return;
       dialogo.close();
-      origen.style.viewTransitionName = "detalle";
-    });
-    t.finished.finally(limpiar);
-    setTimeout(limpiar, 1500);   // por si la transición nunca avisa
+      dialogo.classList.remove("cerrando", "desde-origen");
+      a.cancel();
+    };
+    a.finished.then(terminar, terminar);
   }
 
+  // Primero los datos y después la ventana, que llega ya llena (sin «Cargando…» que se
+  // cambia por el contenido). Si tardan más de un cuarto de segundo, se abre con «Cargando…».
   async function abrirDetalleDe(url, origen) {
-    if (origen && !dialogo.open && conTransicion()) {
-      // Primero los datos, después la transición: la ventana llega ya llena.
-      let datos = null, error = null;
-      try { ({ datos } = await apiJson(url)); } catch (e) { error = e; }
-      abrirConTransicion(origen, () => (error
-        ? cuerpoDetalle.replaceChildren(el("p", { class: "aviso aviso-error", text: error.message }))
-        : pintarDetalle(datos)));
+    const pedido = apiJson(url).then((r) => ({ datos: r.datos }), (error) => ({ error }));
+    const pintar = (r) => (r.error
+      ? cuerpoDetalle.replaceChildren(el("p", { class: "aviso aviso-error", text: r.error.message }))
+      : pintarDetalle(r.datos));
+    if (dialogo.open && !dialogo.classList.contains("cerrando")) {
+      cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
+      pintar(await pedido);
       return;
     }
-    cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
-    if (!dialogo.open) { origenDetalle = null; dialogo.showModal(); }
-    try {
-      const { datos } = await apiJson(url);
-      pintarDetalle(datos);
-    } catch (e) {
-      cuerpoDetalle.replaceChildren(el("p", { class: "aviso aviso-error", text: e.message }));
+    const pronto = await Promise.race([pedido, new Promise((r) => setTimeout(() => r(null), 250))]);
+    if (pronto) {
+      pintar(pronto);
+      mostrarDialogo(origen);
+      return;
     }
+    $("#detalle-titulo").textContent = "Detalle del resultado";
+    cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
+    mostrarDialogo(origen);
+    pintar(await pedido);
   }
 
   // Enlace a una hoja o archivo de Google. La versión de navegador (con sesión de Google)
@@ -970,14 +988,14 @@
     return etiquetas;
   }
 
-  // origen: la tarjeta que se tocó, que se transforma en la ventana (ver abrirConTransicion).
+  // origen: la tarjeta que se tocó, desde donde crece la ventana (ver mostrarDialogo).
   function abrirObligacion(nombreLinea, e, origen) {
     const desdePago = dialogo.open && ultimoDetalle ? ultimoDetalle : null;
-    if (origen && !dialogo.open && conTransicion()) {
-      abrirConTransicion(origen, () => pintarObligacion(nombreLinea, e, null));
+    if (!dialogo.open) {
+      pintarObligacion(nombreLinea, e, null);
+      mostrarDialogo(origen);
       return;
     }
-    if (!dialogo.open) { origenDetalle = null; dialogo.showModal(); }
     pintarObligacion(nombreLinea, e, desdePago);
   }
 
@@ -2592,7 +2610,7 @@
   });
   paleta.addEventListener("keydown", (ev) => {
     const ctrlK = (ev.ctrlKey || ev.metaKey) && (ev.key === "k" || ev.key === "K");
-    if (ctrlK) { ev.preventDefault(); paleta.close(); return; }
+    if (ctrlK || ev.key === "Escape") { ev.preventDefault(); cerrarPaleta(); return; }
     if (!opcionesPaleta.length && ev.key !== "Enter") return;
     if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
       ev.preventDefault();
@@ -2606,7 +2624,17 @@
     }
   });
   // Un clic fuera de la ventana (en el fondo oscurecido) la cierra.
-  paleta.addEventListener("click", (ev) => { if (ev.target === paleta) paleta.close(); });
+  paleta.addEventListener("click", (ev) => { if (ev.target === paleta) cerrarPaleta(); });
+  paleta.addEventListener("cancel", (ev) => { ev.preventDefault(); cerrarPaleta(); });
+
+  // Esc, un clic afuera o Ctrl+K: la paleta se desvanece en vez de desaparecer de golpe. (Al
+  // elegir una opción se cierra al instante: la acción necesita la página libre.)
+  function cerrarPaleta() {
+    if (!paleta.open || paleta.classList.contains("cerrando")) return;
+    if (sinMovimiento()) { paleta.close(); return; }
+    paleta.classList.add("cerrando");
+    setTimeout(() => { paleta.close(); paleta.classList.remove("cerrando"); }, 180);
+  }
 
   // ------------------------------------------------------------------ atajos de teclado
   // «/»: al buscador, con el texto seleccionado para escribir encima. Ctrl+K (⌘K): la paleta

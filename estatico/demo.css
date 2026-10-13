@@ -117,7 +117,8 @@
 .visor-hoja[open] { display: flex; flex-direction: column; animation: visor-entra .22s cubic-bezier(.2, .8, .2, 1); }
 .visor-hoja.maximizada { inset: 0; width: 100vw; height: 100vh; margin: 0; border-radius: 0; resize: none; }
 @keyframes visor-entra { from { opacity: 0; transform: translateY(10px) scale(.985); } }
-.visor-hoja::backdrop { background: rgba(3, 10, 36, .45); backdrop-filter: blur(3px); }
+.visor-hoja::backdrop { background: rgba(3, 10, 36, .45); backdrop-filter: blur(3px); animation: fondo-entra .35s ease both; }
+.juego-secreto::backdrop { animation: fondo-entra .35s ease both; }
 .visor-cabecera {
   display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 16px; cursor: grab; user-select: none;
   border-bottom: 1px solid var(--borde); flex-wrap: wrap;

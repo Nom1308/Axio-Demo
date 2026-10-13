@@ -819,8 +819,9 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 .resultados-nuevos tbody tr { animation: fila-entra .4s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 22ms + 80ms); }
 @keyframes fila-entra { from { opacity: 0; transform: translateY(6px); } }
 
-/* El detalle se arma por partes al abrirse. */
-.detalle[open] .detalle-cuerpo > * { animation: aparecer .4s cubic-bezier(.2, .8, .2, 1) both; }
+/* El detalle se arma por partes al abrirse: un ascenso corto y suave. */
+.detalle[open] .detalle-cuerpo > * { animation: aparecer-suave .35s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes aparecer-suave { from { opacity: 0; transform: translateY(5px); } }
 .detalle[open] .detalle-cuerpo > :nth-child(2) { animation-delay: .04s; }
 .detalle[open] .detalle-cuerpo > :nth-child(3) { animation-delay: .08s; }
 .detalle[open] .detalle-cuerpo > :nth-child(4) { animation-delay: .12s; }
@@ -1343,10 +1344,9 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
 .con-busqueda .portada { display: none; }
 .con-busqueda .panel-busqueda { max-width: 100%; }
 
-/* La transición de la primera búsqueda (View Transitions): el buscador viaja a su sitio y
-   lo demás se funde. */
-.panel-busqueda { view-transition-name: buscador; }
-::view-transition-group(buscador) { animation-duration: .5s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+/* En las transiciones de pantalla completa (la lupa que viaja), el resto se funde rápido.
+   Ojo: un elemento con vidrio (backdrop-filter) no debe llevar view-transition-name: su
+   foto pierde el desenfoque durante la transición y lo recupera de golpe al final. */
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .3s; }
 
 /* ==========================================================================
@@ -1391,6 +1391,8 @@ kbd {
   border: 1px solid var(--borde-fuerte); box-shadow: 0 40px 100px -20px rgba(0, 0, 0, .75), var(--brillo);
 }
 .paleta[open] { display: flex; flex-direction: column; animation: aparecer-modal .24s cubic-bezier(.2, .9, .25, 1) both; }
+.paleta.cerrando[open] { animation: paleta-sale .18s ease both; pointer-events: none; }
+@keyframes paleta-sale { to { opacity: 0; transform: translateY(-6px) scale(.98); } }
 .paleta::backdrop { background: rgba(3, 10, 36, .5); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 .paleta-cabecera { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--borde); }
 .paleta-lupa {
@@ -1440,11 +1442,23 @@ kbd {
   .tb-columnas-marco, .tb-pista, .tb-apilada, .tl-punto { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
 
-/* ---------- la fila se vuelve el detalle (app.js, abrirConTransicion) ---------- */
-.detalle { view-transition-name: detalle; }
-.detalle.por-transicion[open] { animation: none; }
-::view-transition-group(detalle) { animation-duration: .45s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
-::view-transition-old(detalle), ::view-transition-new(detalle) { height: 100%; width: 100%; object-fit: cover; object-position: top; }
+/* ---------- la ventana del detalle crece desde la fila (app.js, mostrarDialogo) ---------- */
+/* La animación la hace app.js; aquí: sin la entrada de siempre, y el contenido invisible
+   mientras la ventana crece (aparece suave cuando ya está en su sitio) o se cierra. */
+.detalle.desde-origen[open] { animation: none; transform-origin: 0 0; }
+.detalle.cerrando { transform-origin: 0 0; pointer-events: none; }
+.detalle-cabecera, .detalle-cuerpo { transition: opacity .3s ease, transform .35s cubic-bezier(.2, .8, .2, 1); }
+.detalle.creciendo .detalle-cabecera, .detalle.creciendo .detalle-cuerpo { opacity: 0; transform: translateY(6px); transition: none; }
+/* Desde una fila, el contenido entra de una vez (sin la cascada de piezas). */
+.detalle.desde-origen .detalle-cuerpo > * { animation: none; }
+.detalle.cerrando .detalle-cabecera, .detalle.cerrando .detalle-cuerpo { opacity: 0; transition: opacity .12s ease; }
+
+/* El fondo detrás de una ventana se oscurece y se desenfoca poco a poco (y al cerrar,
+   al revés), en vez de aparecer de golpe. */
+.detalle::backdrop, .paleta::backdrop { animation: fondo-entra .38s ease both; }
+.detalle.cerrando::backdrop, .paleta.cerrando::backdrop { animation: fondo-sale .3s ease both; }
+@keyframes fondo-entra { from { background-color: rgba(3, 10, 36, 0); -webkit-backdrop-filter: blur(0) saturate(100%); backdrop-filter: blur(0) saturate(100%); } }
+@keyframes fondo-sale { to { background-color: rgba(3, 10, 36, 0); -webkit-backdrop-filter: blur(0) saturate(100%); backdrop-filter: blur(0) saturate(100%); } }
 
 /* ---------- copiar: el botón responde «✓ Copiado» ---------- */
 .boton.boton-copiado, .boton.boton-copiado:hover {
