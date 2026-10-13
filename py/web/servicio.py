@@ -17,6 +17,7 @@ import re
 import secrets
 import sys
 import threading
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -196,6 +197,8 @@ class MotorWeb:
         self._cache_tabla = None
         self._cache_sugerencias = {}       # vocabulario de palabras (ver corregir_palabras)
         self._cache_tablero_lineas = None  # (rosters, resumen): se rehace al cambiar las líneas
+        self._candado_personas = threading.Lock()
+        self._cache_personas = None        # (firma de los datos, personas): ver sugerencias()
 
     # ------------------------------------------------------------------ carga de datos
     def iniciar_carga(self, forzar=False):
@@ -557,6 +560,114 @@ class MotorWeb:
                 })
         pagos.sort(key=lambda x: (x['fecha'] or '', x['p']), reverse=True)
         return pagos[:self.MAX_PAGOS_FICHA]
+
+    # ------------------------------------------------------------------ sugerencias
+    # Mientras se escribe en el buscador: las personas cuyo nombre empieza por lo escrito
+    # ('pere gom' -> Pérez Gómez Aníbal) o cuya cédula empieza por esas cifras. Sale de un
+    # índice de personas (Extractos, líneas de crédito y WhatsApp) que se arma una vez por
+    # cada versión de los datos.
+    MAX_SUGERENCIAS = 6
+
+    def sugerencias(self, texto):
+        """Hasta MAX_SUGERENCIAS personas para lo escrito, o None si los datos todavía no
+        están. Cada una: nombre, cédula (con puntos y limpia), distrito y cuántos pagos y
+        créditos tiene."""
+        if not self.listo or self.df_global is None:
+            return None
+        texto = re.sub(r'\s+', ' ', str(texto or '')).strip()[:80]
+        personas = self._personas()
+        if re.fullmatch(r'[\d.\s]+', texto):
+            cifras = re.sub(r'\D', '', texto)
+            if len(cifras) < 3:
+                return []
+            candidatas = [(0 if p['cedula'].startswith(cifras) else 1, p) for p in personas if cifras in p['cedula']]
+        else:
+            buscadas = self._palabras(texto)
+            if not buscadas or sum(len(b) for b in buscadas) < 2:
+                return []
+            candidatas = []
+            for p in personas:
+                # Primero el filtro barato (está dentro del nombre); después, si cada palabra
+                # escrita es el comienzo de una palabra del nombre.
+                if not all(b in p['junto'] for b in buscadas):
+                    continue
+                if all(any(w.startswith(b) for w in p['palabras']) for b in buscadas):
+                    # Mejor si la primera palabra escrita es el comienzo del nombre.
+                    candidatas.append((0 if p['palabras'][0].startswith(buscadas[0]) else 1, p))
+                else:
+                    candidatas.append((2, p))
+        candidatas.sort(key=lambda c: (c[0], -(c[1]['creditos'] + c[1]['pagos']), c[1]['nombre']))
+        return [{'nombre': p['nombre'], 'cedula': _cedula_con_puntos(p['cedula']), 'cedula_limpia': p['cedula'],
+                 'distrito': p['distrito'], 'pagos': p['pagos'], 'creditos': p['creditos']}
+                for _, p in candidatas[:self.MAX_SUGERENCIAS]]
+
+    @staticmethod
+    def _palabras(texto):
+        """'Pérez Gómez, Aníbal' -> ['PEREZ', 'GOMEZ', 'ANIBAL']."""
+        t = unicodedata.normalize('NFD', str(texto).upper())
+        t = ''.join(c for c in t if unicodedata.category(c) != 'Mn')
+        return re.findall(r'[A-Z0-9Ñ]+', t)
+
+    def _personas(self):
+        df, rosters, whatsapp = self.df_global, self.rosters, self.whatsapp
+        firma = (id(df), id(rosters), id(whatsapp))
+        with self._candado_personas:
+            if self._cache_personas is not None and self._cache_personas[0] == firma:
+                return self._cache_personas[1]
+            personas = {}
+
+            def persona(cedula):
+                return personas.setdefault(cedula, {'cedula': cedula, 'nombre': '', 'origen': 9,
+                                                    'distrito': None, 'pagos': 0, 'creditos': 0})
+
+            def poner_nombre(p, nombre, origen):
+                nombre = str(nombre or '').strip()
+                if nombre and nombre.upper() not in ('#N/D', '#N/A', '#REF!', 'NAN') and origen < p['origen']:
+                    p['nombre'], p['origen'] = nombre, origen
+
+            # El nombre se toma primero de las líneas de crédito (vienen completos), luego de
+            # WhatsApp y por último de los Extractos.
+            for roster in (rosters or {}).values():
+                for cedula, entradas in roster.items():
+                    if len(str(cedula)) < 5:
+                        continue
+                    p = persona(str(cedula))
+                    p['creditos'] += len(entradas)
+                    for e in entradas:
+                        poner_nombre(p, e.get('nombre'), 0)
+                        if p['distrito'] is None and e.get('distrito') is not None:
+                            p['distrito'] = _formatear_valor_celda(e['distrito'])
+            for cedula, contacto in (whatsapp or {}).items():
+                if len(str(cedula)) >= 5:
+                    poner_nombre(persona(str(cedula)), contacto.get('nombre'), 1)
+            with self._candado_tabla:
+                t = self._datos_tabla()
+                col_cedula = self._indice_columna(t, COLUMNAS_CEDULA_POSIBLES)
+                if col_cedula is not None:
+                    c = self._columnas_ficha(t)
+                    nombres = self._texto_columna(t, c['nombre']).tolist() if c['nombre'] is not None else None
+                    distritos = self._texto_columna(t, c['distrito']).tolist() if c['distrito'] is not None else None
+                    for i, v in enumerate(t['dfu'].iloc[:, col_cedula].tolist()):
+                        if v is None or (isinstance(v, float) and np.isnan(v)):
+                            continue
+                        cedula = limpiar_cedula(v)
+                        if len(cedula) < 5 or not cedula.isdigit():
+                            continue
+                        p = persona(cedula)
+                        p['pagos'] += 1
+                        if nombres is not None:
+                            poner_nombre(p, nombres[i], 2)
+                        if p['distrito'] is None and distritos is not None and distritos[i]:
+                            p['distrito'] = distritos[i]
+            lista = []
+            for p in personas.values():
+                if not p['nombre']:
+                    continue
+                p['palabras'] = self._palabras(p['nombre'])
+                p['junto'] = ''.join(p['palabras'])
+                lista.append(p)
+            self._cache_personas = (firma, lista)
+            return lista
 
     def _guardar_busqueda(self, termino, resultados, usuario):
         id_busqueda = secrets.token_urlsafe(9)
@@ -1084,8 +1195,19 @@ class MotorWeb:
             g = g.sort_values(['pendientes', 'n'], ascending=False).head(self.DISTRITOS_TABLERO)
             distritos = [{'distrito': str(d), 'n': int(r.n), 'suma': float(r.suma), 'pendientes': int(r.pendientes)}
                          for d, r in g.iterrows()]
+        # El último día con pagos (sin contar fechas del futuro, que son errores de digitación):
+        # lo muestra el saludo de la portada.
+        ultimo_dia = None
+        if c['fecha'] is not None:
+            fechas = pd.DatetimeIndex(self._fechas_columna(t, c['fecha']))
+            validas = fechas[(~fechas.isna()) & (fechas <= pd.Timestamp.now().normalize())]
+            if len(validas):
+                dia = validas.max()
+                de_ese_dia = (fechas == dia)
+                ultimo_dia = {'fecha': dia.strftime('%Y-%m-%d'), 'n': int(de_ese_dia.sum()),
+                              'suma': float(datos['valor'].to_numpy()[de_ese_dia].sum())}
         return {'total': n, 'suma': float(datos['valor'].sum()), 'estados': estados,
-                'meses': meses, 'distritos': distritos,
+                'meses': meses, 'distritos': distritos, 'ultimo_dia': ultimo_dia,
                 'columna_valor': t['columnas'][c['valor']] if c['valor'] is not None else None,
                 # Posiciones en la tabla completa: la página abre la tabla ya filtrada al
                 # tocar un distrito o un mes del tablero.

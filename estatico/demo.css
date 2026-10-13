@@ -213,6 +213,24 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .gestion-estado.error { color: var(--rojo); }
 .gestion-estado.ambar { color: var(--ambar); }
 
+/* Guardado: la palomita se dibuja y las casillas guardadas destellan con su color. */
+.gestion-estado.ok { display: flex; align-items: center; gap: 8px; }
+.chulo { flex: none; width: 22px; height: 22px; overflow: visible; }
+.chulo-aro {
+  fill: rgba(52, 211, 153, .14); stroke: var(--verde); stroke-width: 2; stroke-dasharray: 1;
+  transform-box: fill-box; transform-origin: center; transform: rotate(-90deg); animation: le-trazo .5s cubic-bezier(.65, 0, .25, 1) both;
+}
+.chulo-marca { fill: none; stroke: var(--verde); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; animation: le-trazo .35s .42s ease-out both; }
+.gestion-casilla.gestion-guardada { --destello: rgba(156, 200, 255, .5); animation: casilla-guardada 1.8s cubic-bezier(.2, .8, .2, 1); }
+.gestion-verde.gestion-guardada { --destello: rgba(48, 209, 88, .55); }
+.gestion-naranja.gestion-guardada { --destello: rgba(255, 159, 10, .55); }
+.gestion-rojo.gestion-guardada { --destello: rgba(255, 59, 48, .55); }
+@keyframes casilla-guardada {
+  0% { box-shadow: 0 0 0 0 var(--destello); background: color-mix(in srgb, var(--destello) 45%, transparent); }
+  35% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--destello) 35%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 @keyframes celda-ok { 0% { box-shadow: inset 0 0 0 2px #34a853; background: #e6f4ea; } 100% { box-shadow: none; } }
 
 /* Rango seleccionado en el visor: velo azul encima del color de la celda, como en Sheets. */

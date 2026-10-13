@@ -515,6 +515,11 @@ def atender(url):
             return _json({'cargando': True, 'mensaje': "Cargando los datos..."}, 202)
         return _json(resultado)
 
+    # Personas que coinciden con lo que se va escribiendo (ver MotorWeb.sugerencias).
+    if ruta == ['api', 'sugerencias']:
+        personas = _motor.sugerencias(parse_qs(partes.query).get('q', [''])[0])
+        return _json({'personas': personas or [], 'cargando': personas is None})
+
     if len(ruta) == 4 and ruta[:2] == ['api', 'detalle'] and ruta[3].isdigit():
         detalle = _motor.detalle(ruta[2], int(ruta[3]), USUARIO)
         if detalle is None:

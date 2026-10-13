@@ -44,6 +44,21 @@
     return n;
   }
 
+  // Una palomita que se dibuja (aro y luego la marca): confirma que quedó guardado.
+  function chulo() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "chulo");
+    svg.setAttribute("aria-hidden", "true");
+    const aro = document.createElementNS(ns, "circle");
+    for (const [k, v] of [["cx", "12"], ["cy", "12"], ["r", "10"], ["pathLength", "1"], ["class", "chulo-aro"]]) aro.setAttribute(k, v);
+    const marca = document.createElementNS(ns, "path");
+    for (const [k, v] of [["d", "M7 12.5l3.2 3.2L17 9"], ["pathLength", "1"], ["class", "chulo-marca"]]) marca.setAttribute(k, v);
+    svg.append(aro, marca);
+    return svg;
+  }
+
   const letra = (i) => { let s = ""; for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
   const comillas = (titulo) => `'${titulo.replace(/'/g, "''")}'`;
   const mayus = (s) => String(s == null ? "" : s).trim().toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -320,7 +335,7 @@
       entrada.disabled = !editable;
       entrada.setAttribute("aria-label", m.nombres[col] || c.titulo);
       entradas[c.clave] = entrada;
-      grupos.push(nodo("label", { class: "gestion-casilla gestion-" + c.color },
+      grupos.push(nodo("label", { class: "gestion-casilla gestion-" + c.color, "data-clave": c.clave },
         nodo("span", { class: "gestion-titulo" },
           nodo("strong", { text: m.nombres[col] || c.titulo }),
           nodo("span", { class: "gestion-area", text: c.area })),
@@ -402,8 +417,13 @@
         const linea = cuerpo.querySelector(".gestion-estado");
         if (linea) {
           linea.className = "gestion-estado " + (avisoRegistro ? "ambar" : "ok");
-          linea.textContent = `✓ Guardado en la Matriz · ${hora()} · ${estado ? estado.icono + " " + estado.etiqueta : "sin gestionar"}. ` +
-            "La lista de resultados se actualiza con «Refrescar datos»." + avisoRegistro;
+          linea.replaceChildren(chulo(), nodo("span", { text: `Guardado en la Matriz · ${hora()} · ${estado ? estado.icono + " " + estado.etiqueta : "sin gestionar"}. ` +
+            "La lista de resultados se actualiza con «Refrescar datos»." + avisoRegistro }));
+        }
+        // Las casillas que se guardaron destellan con su color (verde, naranja o rojo).
+        for (const k of lista) {
+          const casilla = cuerpo.querySelector(`.gestion-casilla[data-clave="${k}"]`);
+          if (casilla) casilla.classList.add("gestion-guardada");
         }
       } catch (e) {
         estadoLinea.className = "gestion-estado error";

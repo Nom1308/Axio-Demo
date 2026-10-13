@@ -169,6 +169,37 @@
     requestAnimationFrame(paso);
   }
 
+  // Un entero (pagos, créditos) sube desde cero hasta su valor, con separador de miles.
+  function contarEntero(nodo, n, sufijo = "") {
+    nodo.textContent = formatoMiles.format(n) + sufijo;
+    if (sinMovimiento() || n < 2) return;
+    const inicio = performance.now(), duracion = 900;
+    const paso = (t) => {
+      const p = Math.min(1, (t - inicio) / duracion);
+      nodo.textContent = formatoMiles.format(Math.round(n * (1 - Math.pow(1 - p, 3)))) + sufijo;
+      if (p < 1) requestAnimationFrame(paso);
+    };
+    requestAnimationFrame(paso);
+  }
+
+  // Gráficos vivos: lo que crece o entra en cascada (columnas, barras, movimientos) espera a
+  // estar en pantalla para animarse. Hasta entonces lleva .por-ver, que deja sus animaciones
+  // en pausa en el primer cuadro (ver estilos.css). alVer se llama una vez, al aparecer.
+  const observadorVista = "IntersectionObserver" in window ? new IntersectionObserver((entradas) => {
+    for (const e of entradas) {
+      if (!e.isIntersecting) continue;
+      observadorVista.unobserve(e.target);
+      e.target.classList.remove("por-ver");
+      if (e.target.alVer) { e.target.alVer(); e.target.alVer = null; }
+    }
+  }, { threshold: 0.2 }) : null;
+  function animarAlVer(nodo, alVer) {
+    if (!observadorVista || sinMovimiento()) { if (alVer) alVer(); return; }
+    nodo.classList.add("por-ver");
+    nodo.alVer = alVer || null;
+    observadorVista.observe(nodo);
+  }
+
   // Onda al presionar un botón, desde donde se tocó.
   document.addEventListener("pointerdown", (ev) => {
     const boton = ev.target.closest && ev.target.closest(".boton");
@@ -269,6 +300,7 @@
       caja.style.flexBasis = "100%";
     }
 
+    cargarCifrasSaludo(est);
     if (est.cargando) programarSondeo();
     if (alTerminarCarga && (!est.cargando || est.parcial)) {
       // Una búsqueda quedó esperando a que cargaran los datos: se lanza apenas se puede
@@ -324,13 +356,23 @@
   async function buscar() {
     const termino = campo.value.trim();
     if (!termino) { campo.focus(); return; }
+    cerrarSugerencias();
     btnBuscar.disabled = true;
     btnBuscar.textContent = "Buscando…";
     estadoBusqueda.className = "estado-busqueda";
     estadoBusqueda.textContent = "Buscando…";
-    pintarEsqueleto(termino);
+    const pedido = apiJson("/api/buscar?q=" + encodeURIComponent(termino));
+    pedido.catch(() => {});   // el error se atiende abajo, después de la transición
+    // La primera búsqueda: la portada se retira y el buscador sube a su lugar arriba, con
+    // una transición continua (View Transitions) en vez de un salto.
+    const empezar = () => { document.body.classList.add("con-busqueda"); pintarEsqueleto(termino); };
+    if (!document.body.classList.contains("con-busqueda") && document.startViewTransition && !sinMovimiento()) {
+      try { await document.startViewTransition(empezar).updateCallbackDone; } catch (_) { empezar(); }
+    } else {
+      empezar();
+    }
     try {
-      const { status, datos } = await apiJson("/api/buscar?q=" + encodeURIComponent(termino));
+      const { status, datos } = await pedido;
       quitarEsqueleto();
       if (status === 202) {
         estadoBusqueda.textContent = "⏳ " + datos.mensaje + " La búsqueda se hará sola cuando terminen de cargar.";
@@ -578,9 +620,17 @@
 
     // El estado puede cambiar sin volver a buscar (al gestionar el pago, ver abajo).
     const estado = el("div", { class: "estado-pago" });
+    let estadoInicial = true;
     const mostrarEstado = (e) => {
       estado.style.display = e ? "" : "none";
       if (e) { estado.style.background = e.color; estado.textContent = `${e.icono} ${e.etiqueta}`; }
+      // Cuando cambia después de abrir (se gestionó el pago), un pulso para que se note.
+      if (!estadoInicial && e) {
+        estado.classList.remove("estado-cambio");
+        void estado.offsetWidth;   // reinicia la animación
+        estado.classList.add("estado-cambio");
+      }
+      estadoInicial = false;
     };
     mostrarEstado(d.estado_pago);
     partes.push(estado);
@@ -802,8 +852,10 @@
   }
   const fechaCorta = (f) => `${String(f.getDate()).padStart(2, "0")} ${MESES_CORTOS[f.getMonth()]} ${f.getFullYear()}`;
 
-  // Pagos de los últimos 12 meses (hasta el mes del último pago): una columna por mes.
-  function graficoPagos(pagos) {
+  // Pagos de los últimos 12 meses (hasta el mes del último pago): una columna por mes. Tocar
+  // un mes con pagos llama alElegir(clave 'aaaa-mm'); el nodo trae marcarMes(clave o null)
+  // para resaltar el elegido.
+  function graficoPagos(pagos, alElegir) {
     const conFecha = pagos.filter((p) => p.fecha && p.valor !== null);
     if (!conFecha.length) return null;
     const ultimo = aFecha(conFecha[0].fecha);
@@ -819,24 +871,40 @@
     }
     const tope = topeRedondo(Math.max(1, ...meses.map((m) => m.suma)));
     const total = meses.reduce((s, m) => s + m.suma, 0);
-    return el("div", { class: "ficha-grafico" },
+    const marco = el("div", { class: "tb-columnas-marco ficha-columnas" },
+      el("div", { class: "tb-eje", "aria-hidden": "true" },
+        ...[1, 0.5, 0].map((f) => el("span", { style: `bottom:${f * 100}%` }, el("em", { text: f ? pesosCortos(tope * f) : "0" })))),
+      el("div", { class: "tb-columnas", role: "list" }, ...meses.map((m, i) => {
+        const tip = `${nombreMes(m.clave, true)}\n${m.n ? `${m.n} pago${m.n === 1 ? "" : "s"} · ${pesos(m.suma)}\nToca para ver sus pagos` : "Sin pagos"}`;
+        const anioCambia = i === 0 || meses[i - 1].clave.slice(0, 4) !== m.clave.slice(0, 4);
+        const partes = [
+          el("span", { class: "tb-pila", style: `height:${(m.suma / tope) * 100}%` }, m.suma ? el("span", { style: "flex:1;background:var(--g-acento)" }) : null),
+          el("span", { class: "tb-mes" + ((meses.length - 1 - i) % 3 ? " tb-mes-menor" : ""), text: nombreMes(m.clave) + (anioCambia ? " " + m.clave.slice(2, 4) : "") })];
+        // --i: las columnas crecen una tras otra (ver «gráficos vivos» en estilos.css).
+        return m.n
+          ? el("button", { type: "button", class: "tb-columna", role: "listitem", "data-mes": m.clave, "data-tip": tip,
+              "aria-label": tip.replace(/\n/g, ". "), style: `--i:${i}`, onclick: () => alElegir && alElegir(m.clave) }, ...partes)
+          : el("span", { class: "tb-columna tb-columna-vacia", role: "listitem", tabindex: "0", "data-tip": tip, "aria-label": tip.replace("\n", ": "), style: `--i:${i}` }, ...partes);
+      })));
+    const nodo = el("div", { class: "ficha-grafico" },
       el("div", { class: "ficha-subtitulo" }, el("span", { text: "Pagos de los últimos 12 meses" }), el("strong", { text: pesos(total) })),
-      el("div", { class: "tb-columnas-marco ficha-columnas" },
-        el("div", { class: "tb-eje", "aria-hidden": "true" },
-          ...[1, 0.5, 0].map((f) => el("span", { style: `bottom:${f * 100}%` }, el("em", { text: f ? pesosCortos(tope * f) : "0" })))),
-        el("div", { class: "tb-columnas", role: "list" }, ...meses.map((m, i) => {
-          const tip = `${nombreMes(m.clave, true)}\n${m.n ? `${m.n} pago${m.n === 1 ? "" : "s"} · ${pesos(m.suma)}` : "Sin pagos"}`;
-          const anioCambia = i === 0 || meses[i - 1].clave.slice(0, 4) !== m.clave.slice(0, 4);
-          return el("span", { class: "tb-columna", role: "listitem", tabindex: "0", "data-tip": tip, "aria-label": tip.replace("\n", ": ") },
-            el("span", { class: "tb-pila", style: `height:${(m.suma / tope) * 100}%` }, m.suma ? el("span", { style: "flex:1;background:var(--g-acento)" }) : null),
-            el("span", { class: "tb-mes" + ((meses.length - 1 - i) % 3 ? " tb-mes-menor" : ""), text: nombreMes(m.clave) + (anioCambia ? " " + m.clave.slice(2, 4) : "") }));
-        }))));
+      marco);
+    nodo.marcarMes = (clave) => {
+      marco.classList.toggle("con-mes", Boolean(clave));
+      for (const c of marco.querySelectorAll("[data-mes]")) {
+        c.classList.toggle("tb-columna-activa", c.dataset.mes === clave);
+        c.setAttribute("aria-pressed", String(c.dataset.mes === clave));
+      }
+    };
+    return nodo;
   }
 
   // Línea de tiempo: cada pago (con su estado y las notas de la gestión) y el último pago
-  // registrado en cada crédito, del más reciente al más viejo.
+  // registrado en cada crédito, del más reciente al más viejo. El nodo trae filtrarMes(clave
+  // o null): con un mes, solo los movimientos de ese mes (lo pide el gráfico de pagos);
+  // alQuitarMes se llama cuando se quita el filtro desde aquí.
   const MOVIMIENTOS_VISIBLES = 6;
-  function lineaDeTiempo(pagos, creditos) {
+  function lineaDeTiempo(pagos, creditos, alQuitarMes) {
     const eventos = pagos.map((p) => ({ fecha: aFecha(p.fecha), pago: p }));
     for (const x of creditos) {
       const f = aFecha(x.e.fecha_ultimo_pago);
@@ -873,14 +941,36 @@
           ...notas.map(([etiqueta, texto]) => el("span", { class: "tl-nota" }, el("em", { text: etiqueta + ": " }), texto))));
     };
 
-    const lista = el("ol", { class: "tl-lista" }, ...eventos.slice(0, MOVIMIENTOS_VISIBLES).map(item));
-    const resto = eventos.length - MOVIMIENTOS_VISIBLES;
-    const mas = resto > 0 ? el("button", { type: "button", class: "boton boton-chico tl-mas", text: `Ver los ${eventos.length} movimientos`,
-      onclick: (ev) => { lista.replaceChildren(...eventos.map(item)); ev.currentTarget.remove(); } }) : null;
-    return el("div", { class: "ficha-tiempo" },
-      el("div", { class: "ficha-subtitulo" }, el("span", { text: "Línea de tiempo" }),
-        el("strong", { text: `${pagos.length} pago${pagos.length === 1 ? "" : "s"} en Extractos` })),
-      lista, mas);
+    // --i: los movimientos entran uno tras otro (ver «gráficos vivos» en estilos.css).
+    const items = (lista) => lista.map((ev, i) => { const li = item(ev); li.style.setProperty("--i", Math.min(i, 12)); return li; });
+    const claveMes = (f) => (f ? `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}` : "");
+    const lista = el("ol", { class: "tl-lista" });
+    const resumen = el("strong");
+    const pie = el("div");
+    const nodo = el("div", { class: "ficha-tiempo" },
+      el("div", { class: "ficha-subtitulo" }, el("span", { text: "Línea de tiempo" }), resumen), lista, pie);
+
+    nodo.filtrarMes = (clave) => {
+      const delMes = clave ? eventos.filter((ev) => claveMes(ev.fecha) === clave) : eventos;
+      if (clave) {
+        const n = delMes.filter((ev) => ev.pago).length;
+        resumen.replaceChildren(el("span", { class: "tl-filtro" },
+          `${nombreMes(clave, true)} · ${n} pago${n === 1 ? "" : "s"}`,
+          el("button", { type: "button", class: "tl-filtro-quitar", title: "Ver todos los movimientos", "aria-label": "Ver todos los movimientos", text: "✕",
+            onclick: () => { nodo.filtrarMes(null); if (alQuitarMes) alQuitarMes(); } })));
+        lista.replaceChildren(...items(delMes));
+        pie.replaceChildren();
+        return;
+      }
+      resumen.replaceChildren(`${pagos.length} pago${pagos.length === 1 ? "" : "s"} en Extractos`);
+      lista.replaceChildren(...items(eventos.slice(0, MOVIMIENTOS_VISIBLES)));
+      pie.replaceChildren(eventos.length > MOVIMIENTOS_VISIBLES
+        ? el("button", { type: "button", class: "boton boton-chico tl-mas", text: `Ver los ${eventos.length} movimientos`,
+            onclick: (ev) => { lista.replaceChildren(...items(eventos)); ev.currentTarget.remove(); } })
+        : "");
+    };
+    nodo.filtrarMes(null);
+    return nodo;
   }
 
   function pintarAsociado(a) {
@@ -935,9 +1025,17 @@
     const pie = el("p", { class: "ficha-pie", text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." });
     // Pagos por mes y línea de tiempo, lado a lado (uno debajo del otro en el celular). No van
     // en la ficha: pintarResultados los pone debajo de la tabla de los Extractos.
-    const grafico = graficoPagos(pagos);
-    const tiempo = lineaDeTiempo(pagos, todos);
+    // Tocar un mes del gráfico deja en la línea de tiempo solo los movimientos de ese mes.
+    let mesElegido = null;
+    const elegirMes = (clave) => {
+      mesElegido = mesElegido === clave ? null : clave;
+      if (tiempo) tiempo.filtrarMes(mesElegido);
+      grafico.marcarMes(mesElegido);
+    };
+    const grafico = graficoPagos(pagos, elegirMes);
+    const tiempo = lineaDeTiempo(pagos, todos, () => { mesElegido = null; if (grafico) grafico.marcarMes(null); });
     historiaAsociado = grafico || tiempo ? el("div", { class: "ficha-historia" }, grafico, tiempo) : null;
+    if (historiaAsociado) animarAlVer(historiaAsociado);
     return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera,
       el("div", { class: "asociado-resumen" },
         el("h3", { class: "asociado-titulo" }, titulo),
@@ -1271,7 +1369,7 @@
           ...ORDEN_ESTADOS.slice().reverse().filter((k) => m.n[k]).map((k) => `${NOMBRES_ESTADO[k]}: ${formatoMiles.format(m.n[k])}`)].join("\n");
         const anioCambia = i === 0 || meses[i - 1].mes.slice(0, 4) !== m.mes.slice(0, 4);
         return el("button", { type: "button", class: "tb-columna", role: "listitem", "data-tip": tip,
-          "aria-label": tip.replace(/\n/g, ". "),
+          "aria-label": tip.replace(/\n/g, ". "), style: `--i:${i}`,
           onclick: () => x.col_fecha !== null && x.col_fecha !== undefined && verPagosFiltrados({ [x.col_fecha]: { rango: { desde: `${m.mes}-01`, hasta: `${m.mes}-${ultimoDia}` } } }) },
           el("span", { class: "tb-pila", style: `height:${(total / maxMes) * 100}%` },
             ...ORDEN_ESTADOS.filter((k) => m.n[k]).map((k) => el("span", { style: `flex:${m.n[k]};background:${colorEstado(k)}` }))),
@@ -1324,6 +1422,14 @@
     }
 
     ventanaTablero.replaceChildren(cabeceraTablero(d.hora), cifras, el("div", { class: "tb-rejilla" }, ...tarjetas));
+    // Las cifras cuentan desde cero y los gráficos crecen al llegar a la pantalla.
+    animarAlVer(cifras, () => {
+      for (const v of cifras.querySelectorAll(".tb-cifra-valor")) {
+        const n = Number(v.textContent.replace(/\D/g, ""));
+        if (/^[\d.]+$/.test(v.textContent)) contarEntero(v, n);
+      }
+    });
+    tarjetas.forEach((t) => animarAlVer(t));
   }
 
   // Abre la tabla de pagos con esos filtros (desde el tablero) y la trae a la vista.
@@ -1881,9 +1987,11 @@
     }
     if (!fuentes.length && !est.cargando) lista.append(el("li", { class: "menu-nota", text: "No hay hojas configuradas." }));
 
+    const avatar = el("span", { class: "avatar", "aria-hidden": "true", text: (nombre || "?").trim().charAt(0).toUpperCase() });
+    ponerFoto(avatar);
     menu.replaceChildren(
       el("div", { class: "menu-cabecera" },
-        el("span", { class: "avatar", "aria-hidden": "true", text: (nombre || "?").trim().charAt(0).toUpperCase() }),
+        avatar,
         el("div", { class: "menu-quien" }, el("strong", { text: nombre }), correo ? el("span", { text: correo }) : null)),
       el("p", { class: "menu-titulo", text: fuentes.length
         ? `Hojas conectadas · ${conectadas} de ${fuentes.length}` : "Hojas conectadas" }),
@@ -1926,10 +2034,382 @@
     if (ev.key === "Escape" && !menu.hidden) { abrirMenu(false); zonaUsuario.focus(); }
   });
 
+  // ------------------------------------------------------------------ quién usa la página
+  // En la versión de navegador, puente.js deja en .usuario el nombre de pila y la foto de la
+  // cuenta de Google (data-nombre, data-foto). En el servidor está el nombre de usuario:
+  // 'brandon.lopez' -> 'Brandon'.
+  function nombrePila() {
+    if (zonaUsuario.dataset.nombre) return zonaUsuario.dataset.nombre;
+    const usuario = (($(".usuario-nombre") || {}).textContent || "").trim();
+    const primero = usuario.split(/[.\s_@-]/)[0] || usuario;
+    return primero ? primero.charAt(0).toUpperCase() + primero.slice(1).toLowerCase() : "";
+  }
+  // La foto encima de la inicial; si no carga, queda la inicial.
+  function ponerFoto(avatar) {
+    const foto = zonaUsuario.dataset.foto;
+    if (!foto || !avatar || avatar.querySelector("img")) return;
+    const img = el("img", { src: foto, alt: "", referrerpolicy: "no-referrer" });
+    img.addEventListener("error", () => img.remove());
+    avatar.append(img);
+  }
+  ponerFoto(zonaUsuario.querySelector(".avatar"));
+
+  // ------------------------------------------------------------------ saludo
+  // Arriba del buscador, mientras no se ha buscado nada: «Buenos días, Brandon», la fecha y
+  // cómo va el día (pagos del último día, pagos por gestionar, créditos en mora). Cada cifra
+  // abre lo que cuenta: la tabla de pagos ya filtrada o el tablero.
+  const portada = $(".portada");
+  const saludo = el("div", { class: "saludo" });
+  const cifrasSaludo = el("div", { class: "saludo-cifras", "aria-live": "polite" });
+  portada.prepend(saludo);
+  portada.append(cifrasSaludo);
+  let firmaSaludo = "";
+  let temporizadorSaludo = null;
+
+  function pintarSaludo() {
+    const hora = new Date().getHours();
+    const parte = hora < 12 ? "Buenos días" : hora < 19 ? "Buenas tardes" : "Buenas noches";
+    const nombre = nombrePila();
+    const avatar = el("span", { class: "avatar saludo-avatar", "aria-hidden": "true", text: (nombre || "?").charAt(0).toUpperCase() });
+    ponerFoto(avatar);
+    const hoy = new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" });
+    saludo.replaceChildren(avatar, el("div", { class: "saludo-texto" },
+      el("strong", { text: parte + (nombre ? ", " + nombre : "") }),
+      el("span", { text: hoy.charAt(0).toUpperCase() + hoy.slice(1) })));
+  }
+  pintarSaludo();
+
+  // Se piden al tablero cuando cambian los datos, un momento después de que cargan: así no
+  // le quitan tiempo a la primera búsqueda.
+  function cargarCifrasSaludo(est) {
+    if (!est.matriz || !est.matriz.filas || document.body.classList.contains("con-busqueda")) return;
+    const firma = `${est.matriz.hora}|${est.lineas.hora}|${est.parcial}|${est.cargando}`;
+    if (firma === firmaSaludo) return;
+    firmaSaludo = firma;
+    clearTimeout(temporizadorSaludo);
+    temporizadorSaludo = setTimeout(async () => {
+      try {
+        const { datos } = await apiJson("/api/tablero");
+        if (!document.body.classList.contains("con-busqueda")) pintarCifrasSaludo(datos);
+      } catch (_) { /* sin cifras: queda solo el saludo */ }
+    }, 1200);
+  }
+
+  // '2026-10-13' -> 'hoy', 'ayer' o 'el 18 sep'.
+  function diaRelativo(iso) {
+    const f = aFecha(iso);
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dias = Math.round((hoy - f) / 86400000);
+    return dias === 0 ? "de hoy" : dias === 1 ? "de ayer" : `del ${f.getDate()} ${MESES_CORTOS[f.getMonth()]}`;
+  }
+
+  function pintarCifrasSaludo(d) {
+    const x = d.extractos;
+    const L = d.lineas || { lineas: [] };
+    const cifras = [];
+    const tarjeta = (etiqueta, n, detalle, accion, titulo, clase) => {
+      const valor = el("strong", { class: "saludo-valor" });
+      cifras.push([valor, n]);
+      return el("button", { type: "button", class: "saludo-cifra" + (clase ? " " + clase : ""), title: titulo, onclick: accion },
+        el("span", { class: "saludo-etiqueta", text: etiqueta }), valor, el("span", { class: "saludo-detalle", text: detalle }));
+    };
+    const partes = [];
+    if (x.ultimo_dia && x.col_fecha !== null && x.col_fecha !== undefined) {
+      const u = x.ultimo_dia;
+      partes.push(tarjeta(`Pagos ${diaRelativo(u.fecha)}`, u.n, pesosCortos(u.suma),
+        () => verPagosFiltrados({ [x.col_fecha]: { rango: { desde: u.fecha, hasta: u.fecha } } }), "Ver esos pagos en la tabla"));
+    }
+    const pendientes = x.estados.filter((e) => e.e !== "ingresado").reduce((s, e) => s + e.n, 0);
+    partes.push(tarjeta("Por gestionar", pendientes, `${porcentaje(pendientes, x.total)} de los pagos`,
+      () => verPagosFiltrados({ estado: { excluir: ["ingresado"] } }), "Ver los pagos que faltan por gestionar"));
+    if (L.lineas.length && !d.parcial) {
+      const activos = L.lineas.reduce((s, l) => s + l.n, 0);
+      const mora = L.lineas.reduce((s, l) => s + l.mora, 0);
+      partes.push(tarjeta("Créditos en mora", mora, `de ${formatoMiles.format(activos)} activos`, () => {
+        abrirTablero().then(() => ventanaTablero.scrollIntoView({ behavior: sinMovimiento() ? "auto" : "smooth", block: "start" }));
+      }, "Abrir el tablero de cartera", mora ? "saludo-alerta" : null));
+    }
+    cifrasSaludo.replaceChildren(...partes);
+    for (const [valor, n] of cifras) contarEntero(valor, n);
+  }
+
+  // ------------------------------------------------------------------ sugerencias
+  // Mientras se escribe un nombre o una cédula, debajo salen las personas que coinciden
+  // (/api/sugerencias). Flechas para moverse, Enter para abrir su ficha, Esc para cerrar.
+  // Enter sin elegir ninguna busca lo escrito, como siempre.
+  const listaSugerencias = el("div", { class: "sugerencias", id: "sugerencias", role: "listbox", "aria-label": "Personas que coinciden", hidden: true });
+  form.append(listaSugerencias);   // justo debajo del campo, encima de los chips de fuentes
+  campo.setAttribute("role", "combobox");
+  campo.setAttribute("aria-autocomplete", "list");
+  campo.setAttribute("aria-controls", "sugerencias");
+  campo.setAttribute("aria-expanded", "false");
+  let sugeridas = [];
+  let indiceSugerencia = -1;
+  let temporizadorSugerencias = null;
+  let pedidoSugerencias = 0;
+
+  // Lo que no es un nombre ni una cédula (rangos, montos con signo, recibos) no sugiere nada.
+  const sinSugerencias = (texto) => texto.length < 2 || /[<>$=]|\d\s*-\s*\d/.test(texto);
+
+  async function personasPara(texto) {
+    const { datos } = await apiJson("/api/sugerencias?q=" + encodeURIComponent(texto));
+    return datos.personas || [];
+  }
+
+  async function pedirSugerencias() {
+    const texto = campo.value.trim();
+    const n = ++pedidoSugerencias;
+    if (sinSugerencias(texto)) { cerrarSugerencias(); return; }
+    try {
+      const personas = await personasPara(texto);
+      if (n !== pedidoSugerencias || campo.value.trim() !== texto || document.activeElement !== campo) return;
+      pintarSugerencias(personas, texto);
+    } catch (_) {
+      cerrarSugerencias();
+    }
+  }
+
+  // El nombre con lo escrito resaltado: el comienzo de cada palabra que coincide.
+  const sinMarcas = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+  function resaltar(nombre, texto) {
+    const buscadas = sinMarcas(texto).match(/[A-Z0-9Ñ]+/g) || [];
+    const nodo = el("span", { class: "sug-nombre" });
+    for (const trozo of String(nombre).split(/(\s+)/)) {
+      const largo = Math.max(0, ...buscadas.filter((b) => sinMarcas(trozo).startsWith(b)).map((b) => b.length));
+      if (largo) nodo.append(el("mark", { text: trozo.slice(0, largo) }), trozo.slice(largo));
+      else nodo.append(trozo);
+    }
+    return nodo;
+  }
+
+  function detallePersona(p) {
+    return [`CC ${p.cedula}`, p.distrito ? `Distrito ${p.distrito}` : null,
+      p.creditos ? `${p.creditos} crédito${p.creditos === 1 ? "" : "s"}` : null,
+      p.pagos ? `${p.pagos} pago${p.pagos === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+  }
+
+  function pintarSugerencias(personas, texto) {
+    sugeridas = personas;
+    indiceSugerencia = -1;
+    campo.removeAttribute("aria-activedescendant");
+    if (!personas.length) { cerrarSugerencias(); return; }
+    listaSugerencias.replaceChildren(...personas.map((p, i) => el("div", {
+      class: "sug-item", role: "option", id: "sug-" + i, "aria-selected": "false", style: `--i:${i}`,
+      // pointerdown sin quitarle el foco al buscador; el clic elige.
+      onpointerdown: (ev) => ev.preventDefault(),
+      onpointermove: () => marcarSugerencia(i),
+      onclick: () => elegirSugerencia(p),
+    },
+    el("span", { class: "sug-avatar", "aria-hidden": "true", text: iniciales(nombrePropio(p.nombre)) }),
+    el("span", { class: "sug-textos" }, resaltar(nombrePropio(p.nombre), texto), el("span", { class: "sug-detalle", text: detallePersona(p) })),
+    el("kbd", { class: "sug-tecla", text: "Enter" }))),
+    el("div", { class: "sug-pie", "aria-hidden": "true" }, "↑ ↓ para moverte · Enter para abrir la ficha · Esc para cerrar"));
+    listaSugerencias.hidden = false;
+    campo.setAttribute("aria-expanded", "true");
+  }
+
+  function marcarSugerencia(i) {
+    indiceSugerencia = i;
+    listaSugerencias.querySelectorAll(".sug-item").forEach((n, j) => {
+      n.classList.toggle("activa", j === i);
+      n.setAttribute("aria-selected", String(j === i));
+    });
+    if (i >= 0) campo.setAttribute("aria-activedescendant", "sug-" + i);
+    else campo.removeAttribute("aria-activedescendant");
+  }
+
+  function cerrarSugerencias() {
+    pedidoSugerencias++;
+    clearTimeout(temporizadorSugerencias);
+    sugeridas = [];
+    indiceSugerencia = -1;
+    listaSugerencias.hidden = true;
+    listaSugerencias.replaceChildren();
+    campo.setAttribute("aria-expanded", "false");
+    campo.removeAttribute("aria-activedescendant");
+  }
+
+  function elegirSugerencia(p) {
+    campo.value = p.cedula_limpia;
+    buscar();
+  }
+
+  campo.addEventListener("input", () => {
+    clearTimeout(temporizadorSugerencias);
+    temporizadorSugerencias = setTimeout(pedirSugerencias, 130);
+  });
+  campo.addEventListener("keydown", (ev) => {
+    if (listaSugerencias.hidden) return;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      const n = sugeridas.length;
+      marcarSugerencia(ev.key === "ArrowDown" ? (indiceSugerencia + 1) % n : (indiceSugerencia - 1 + n) % n);
+    } else if (ev.key === "Enter" && indiceSugerencia >= 0) {
+      ev.preventDefault();
+      elegirSugerencia(sugeridas[indiceSugerencia]);
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      cerrarSugerencias();
+    }
+  });
+  campo.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== campo) cerrarSugerencias(); }, 150));
+
+  // ------------------------------------------------------------------ paleta de comandos
+  // Ctrl+K (⌘K en Mac) abre una ventana flotante para hacer todo sin el mouse: buscar una
+  // persona o una cédula, repetir una búsqueda reciente, abrir el tablero o la tabla de
+  // pagos, cambiar el tema, imprimir la ficha… Flechas para moverse, Enter para elegir.
+  const campoPaleta = el("input", { type: "search", class: "paleta-campo", autocomplete: "off", spellcheck: "false",
+    placeholder: "Busca una persona, una cédula o una acción…", "aria-label": "Buscar en la paleta de comandos",
+    role: "combobox", "aria-controls": "paleta-lista", "aria-expanded": "true", "aria-autocomplete": "list" });
+  const listaPaleta = el("div", { class: "paleta-lista", id: "paleta-lista", role: "listbox" });
+  const paleta = el("dialog", { class: "paleta", "aria-label": "Paleta de comandos" },
+    el("div", { class: "paleta-cabecera" }, el("span", { class: "paleta-lupa", "aria-hidden": "true" }), campoPaleta, el("kbd", { text: "Esc" })),
+    listaPaleta,
+    el("div", { class: "paleta-pie", "aria-hidden": "true" },
+      el("span", null, el("kbd", { text: "↑" }), el("kbd", { text: "↓" }), " moverse"),
+      el("span", null, el("kbd", { text: "Enter" }), " elegir"),
+      el("span", null, el("kbd", { text: "Ctrl" }), el("kbd", { text: "K" }), " abrir o cerrar")));
+  document.body.append(paleta);
+  let opcionesPaleta = [];
+  let indicePaleta = 0;
+  let personasPaleta = [];
+  let pedidoPaleta = 0;
+  let temporizadorPaleta = null;
+
+  function accionesPaleta() {
+    const conExtractos = Boolean(ultimoEstado && ultimoEstado.matriz && ultimoEstado.matriz.filas);
+    const tema = leerTema();
+    const a = busqueda && busqueda.asociado;
+    return [
+      { icono: "⌕", titulo: "Ir al buscador", accion: () => { campo.focus(); campo.select(); } },
+      conExtractos ? (ventanaTablero.hidden
+        ? { icono: "▦", titulo: "Abrir el tablero de cartera", detalle: "Pagos por estado, por mes y por distrito", accion: () => abrirTablero().then(() => ventanaTablero.scrollIntoView({ behavior: "smooth", block: "start" })) }
+        : { icono: "▦", titulo: "Ocultar el tablero de cartera", accion: cerrarTablero }) : null,
+      conExtractos ? (ventanaTabla.hidden
+        ? { icono: "☰", titulo: "Ver todos los pagos", detalle: "Los Extractos completos, con filtros", accion: () => abrirTabla().then(() => ventanaTabla.scrollIntoView({ behavior: "smooth", block: "start" })) }
+        : { icono: "☰", titulo: "Ocultar todos los pagos", accion: cerrarTabla }) : null,
+      conExtractos ? { icono: "●", titulo: "Ver los pagos por gestionar", detalle: "La tabla, sin los ingresados", accion: () => verPagosFiltrados({ estado: { excluir: ["ingresado"] } }) } : null,
+      // claves: con qué palabras se encuentra (el nombre de la persona no cuenta).
+      a ? { icono: "🖨", titulo: `Imprimir la ficha de ${nombrePropio(a.nombre) || "la persona"}`, claves: "Imprimir ficha PDF", accion: imprimirFicha } : null,
+      busqueda && busqueda.grupos && busqueda.grupos.length ? { icono: "⤓", titulo: `Exportar a Excel los resultados de «${busqueda.termino}»`, claves: "Exportar Excel resultados descargar", accion: exportar } : null,
+      tema !== "claro" ? { icono: "☀", titulo: "Tema claro", accion: () => elegirTema("claro") } : null,
+      tema !== "oscuro" ? { icono: "☾", titulo: "Tema oscuro", accion: () => elegirTema("oscuro") } : null,
+      tema !== "sistema" ? { icono: "◐", titulo: "Tema del sistema", detalle: "Claro u oscuro, como el equipo", accion: () => elegirTema("sistema") } : null,
+      ES_ADMIN ? { icono: "↻", titulo: "Refrescar datos", detalle: "Vuelve a descargar todas las hojas", accion: refrescar } : null,
+    ].filter(Boolean);
+  }
+
+  function armarOpcionesPaleta() {
+    const texto = campoPaleta.value.trim();
+    const normal = normalizar(texto);
+    const grupos = [];
+    if (texto) grupos.push(["", [{ icono: "⌕", titulo: `Buscar «${texto}»`, detalle: "En los Extractos y las líneas de crédito", accion: () => { campo.value = texto; buscar(); } }]]);
+    if (personasPaleta.length) {
+      grupos.push(["Personas", personasPaleta.map((p) => ({ persona: p, titulo: nombrePropio(p.nombre), detalle: detallePersona(p),
+        accion: () => { campo.value = p.cedula_limpia; buscar(); } }))]);
+    }
+    const recientes = leerRecientes().filter((t) => !normal || normalizar(t).includes(normal) && t !== texto).slice(0, texto ? 3 : 5);
+    if (recientes.length) grupos.push(["Recientes", recientes.map((t) => ({ icono: "↺", titulo: t, accion: () => { campo.value = t; buscar(); } }))]);
+    const acciones = accionesPaleta().filter((x) => !normal || normalizar((x.claves || x.titulo) + (x.detalle || "")).includes(normal));
+    // Si lo escrito es el comienzo de una palabra de una acción («tabl», «tema»), las
+    // acciones van primero: Enter abre el tablero en vez de buscar la palabra.
+    const palabra = sinMarcas(texto);
+    const fuerte = palabra && acciones.some((x) => sinMarcas(x.claves || x.titulo).split(/\s+/).some((w) => w.startsWith(palabra)));
+    if (acciones.length) fuerte ? grupos.unshift(["Acciones", acciones]) : grupos.push(["Acciones", acciones]);
+    return grupos;
+  }
+
+  function pintarPaleta() {
+    const grupos = armarOpcionesPaleta();
+    opcionesPaleta = grupos.flatMap(([, lista]) => lista);
+    indicePaleta = Math.min(indicePaleta, Math.max(0, opcionesPaleta.length - 1));
+    let i = 0;
+    const texto = campoPaleta.value.trim();
+    listaPaleta.replaceChildren(...grupos.flatMap(([titulo, lista]) => [
+      titulo ? el("div", { class: "paleta-grupo", role: "presentation", text: titulo }) : null,
+      ...lista.map((o) => {
+        const j = i++;
+        return el("div", { class: "paleta-item" + (j === indicePaleta ? " activa" : ""), role: "option", id: "paleta-" + j,
+          "aria-selected": String(j === indicePaleta),
+          onpointermove: () => { if (indicePaleta !== j) { indicePaleta = j; marcarPaleta(); } },
+          onclick: () => ejecutarPaleta(j) },
+        o.persona ? el("span", { class: "sug-avatar", "aria-hidden": "true", text: iniciales(o.titulo) })
+          : el("span", { class: "paleta-icono", "aria-hidden": "true", text: o.icono }),
+        el("span", { class: "sug-textos" }, o.persona ? resaltar(o.titulo, texto) : el("span", { class: "sug-nombre", text: o.titulo }),
+          o.detalle ? el("span", { class: "sug-detalle", text: o.detalle }) : null));
+      })]).filter(Boolean));
+    if (!opcionesPaleta.length) listaPaleta.append(el("p", { class: "paleta-vacia", text: "Nada coincide. Enter busca lo escrito." }));
+    marcarPaleta();
+  }
+
+  function marcarPaleta() {
+    listaPaleta.querySelectorAll(".paleta-item").forEach((n, j) => {
+      n.classList.toggle("activa", j === indicePaleta);
+      n.setAttribute("aria-selected", String(j === indicePaleta));
+    });
+    const activa = listaPaleta.querySelector(".paleta-item.activa");
+    if (activa) { campoPaleta.setAttribute("aria-activedescendant", activa.id); activa.scrollIntoView({ block: "nearest" }); }
+  }
+
+  function ejecutarPaleta(j) {
+    const opcion = opcionesPaleta[j];
+    if (!opcion) return;
+    paleta.close();
+    opcion.accion();
+  }
+
+  async function buscarPersonasPaleta() {
+    const texto = campoPaleta.value.trim();
+    const n = ++pedidoPaleta;
+    if (sinSugerencias(texto)) { personasPaleta = []; pintarPaleta(); return; }
+    try {
+      const personas = await personasPara(texto);
+      if (n !== pedidoPaleta || !paleta.open) return;
+      personasPaleta = personas;
+      pintarPaleta();
+    } catch (_) { /* los datos aún cargan: quedan las acciones */ }
+  }
+
+  function abrirPaleta() {
+    if (paleta.open) return;
+    cerrarSugerencias();
+    campoPaleta.value = "";
+    personasPaleta = [];
+    indicePaleta = 0;
+    pintarPaleta();
+    paleta.showModal();
+    campoPaleta.focus();
+  }
+
+  campoPaleta.addEventListener("input", () => {
+    indicePaleta = 0;
+    pintarPaleta();
+    clearTimeout(temporizadorPaleta);
+    temporizadorPaleta = setTimeout(buscarPersonasPaleta, 130);
+  });
+  paleta.addEventListener("keydown", (ev) => {
+    const ctrlK = (ev.ctrlKey || ev.metaKey) && (ev.key === "k" || ev.key === "K");
+    if (ctrlK) { ev.preventDefault(); paleta.close(); return; }
+    if (!opcionesPaleta.length && ev.key !== "Enter") return;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      const n = opcionesPaleta.length;
+      indicePaleta = ev.key === "ArrowDown" ? (indicePaleta + 1) % n : (indicePaleta - 1 + n) % n;
+      marcarPaleta();
+    } else if (ev.key === "Enter") {
+      ev.preventDefault();
+      if (opcionesPaleta.length) ejecutarPaleta(indicePaleta);
+      else if (campoPaleta.value.trim()) { paleta.close(); campo.value = campoPaleta.value.trim(); buscar(); }
+    }
+  });
+  // Un clic fuera de la ventana (en el fondo oscurecido) la cierra.
+  paleta.addEventListener("click", (ev) => { if (ev.target === paleta) paleta.close(); });
+
   // ------------------------------------------------------------------ atajos de teclado
-  // «/» o Ctrl+K: al buscador, con el texto seleccionado para escribir encima. No se activan
-  // mientras se escribe en otro campo ni con una ventana abierta (detalle, visor de hojas),
-  // que tienen su propio teclado. Esc ya cierra las ventanas (lo hace el navegador).
+  // «/»: al buscador, con el texto seleccionado para escribir encima. Ctrl+K (⌘K): la paleta
+  // de comandos. No se activan mientras se escribe en otro campo ni con una ventana abierta
+  // (detalle, visor de hojas), que tienen su propio teclado. Esc cierra las ventanas (lo
+  // hace el navegador).
   const escribiendo = (n) => n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName));
   document.addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented || document.querySelector("dialog[open]")) return;
@@ -1937,10 +2417,11 @@
     const barra = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target);
     if (!ctrlK && !barra) return;
     ev.preventDefault();
+    if (ctrlK) { abrirPaleta(); return; }
     campo.focus();
     campo.select();
   });
-  campo.title = "Atajo: / o Ctrl+K";
+  campo.title = "Atajos: / para escribir aquí · Ctrl+K para la paleta de comandos";
 
   // ------------------------------------------------------------------ cierre por inactividad
   // Un equipo que queda abierto con una cédula en pantalla deja datos personales a la vista

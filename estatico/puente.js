@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-081205");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-085048");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -239,7 +239,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-13-081205";
+    script.src = "estatico/app.js?v=2026-10-13-085048";
     document.body.append(script);
   }
 
@@ -437,6 +437,14 @@
     $("#avatar-usuario").textContent = inicial;
     $("#nombre-usuario").textContent = nombre;
     $(".usuario").dataset.correo = usuario.email || "";   // lo muestra el menú del usuario
+    // El saludo de la portada y las fotos de la barra y el menú (app.js).
+    $(".usuario").dataset.nombre = usuario.given_name || nombre;
+    if (/^https:\/\//.test(usuario.picture || "")) {
+      $(".usuario").dataset.foto = usuario.picture;
+      const foto = Object.assign(document.createElement("img"), { src: usuario.picture, alt: "", referrerPolicy: "no-referrer" });
+      foto.addEventListener("error", () => foto.remove());
+      $("#sesion-avatar").append(foto);
+    }
     $("#btn-cambiar").textContent = "Cerrar sesión";
     $("#btn-cambiar").title = "Cierra la sesión de Google en Axio y borra los datos de la memoria";
   }
