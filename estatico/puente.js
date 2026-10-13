@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-085048");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-091353");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -55,6 +55,29 @@
   olvidarRecientes();
   window.addEventListener("pagehide", olvidarRecientes);
 
+  // ------------------------------------------------------------------ espera del motor
+  // La animación de entrada dura lo que tarda el motor de Python: el botón para entrar sale
+  // cuando ya está listo, así al iniciar sesión no hay que esperarlo (ver «espera del motor»
+  // en demo.css). Nunca antes de que el aro termine de dibujarse (~1,1 s), para que la
+  // animación se vea completa aunque el motor llegue al instante. Si tarda demasiado, el
+  // botón sale igual: se puede entrar y la carga espera al motor sola.
+  const MS_ARO_DIBUJADO = 1100;
+  const MS_MAXIMO_ESPERA = 30000;
+  let esperandoMotor = document.body.classList.contains("esperando-motor");
+  function terminarEsperaMotor(despues) {
+    if (!esperandoMotor) { if (despues) despues(); return; }
+    esperandoMotor = false;
+    setTimeout(() => {
+      document.body.classList.replace("esperando-motor", "motor-listo");
+      if (despues) despues();
+    }, Math.max(0, MS_ARO_DIBUJADO - performance.now()));
+  }
+  setTimeout(() => {
+    if (!esperandoMotor) return;
+    terminarEsperaMotor();
+    $("#estado-motor").textContent = "⏳ El motor sigue preparándose. Puedes entrar: la carga empezará apenas esté listo.";
+  }, MS_MAXIMO_ESPERA);
+
   // ------------------------------------------------------------------ trabajador
   trabajador.onmessage = (ev) => {
     const m = ev.data;
@@ -64,16 +87,19 @@
       if (!motorListo) $("#estado-motor").textContent = "⏳ " + mensaje;
     } else if (m.tipo === "motor-listo") {
       motorListo = true;
-      $("#estado-motor").textContent = CON_GOOGLE && !usuario
-        ? "✓ Motor listo. Inicia sesión para empezar."
-        : "✓ Motor listo. Carga tu archivo para empezar.";
-      $("#estado-motor").classList.add("listo");
+      terminarEsperaMotor(() => {
+        $("#estado-motor").textContent = CON_GOOGLE && !usuario
+          ? "✓ Todo listo. Inicia sesión para empezar."
+          : "✓ Todo listo. Carga tu archivo para empezar.";
+        $("#estado-motor").classList.add("listo");
+      });
     } else if (m.tipo === "paso") {
       window.dispatchEvent(new CustomEvent("axio-paso", { detail: { clave: m.clave } }));
     } else if (m.tipo === "parcial") {
       parcial = true;
       window.dispatchEvent(new CustomEvent("axio-carga-parcial"));
     } else if (m.tipo === "error-motor") {
+      terminarEsperaMotor();
       mostrarErrorPortada("No se pudo preparar el motor: " + m.error + ". Revisa tu conexión a internet y recarga la página.");
       $("#estado-motor").textContent = "";
     } else if (m.tipo === "respuesta") {
@@ -239,7 +265,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-13-085048";
+    script.src = "estatico/app.js?v=2026-10-13-091353";
     document.body.append(script);
   }
 
