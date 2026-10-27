@@ -319,7 +319,7 @@
     if (botonEncabezado) botonEncabezado.hidden = !v.fijasF;
     seleccionar(v, 0, 0, false);
     enfocarCuerpo();
-    avisar(v.editable ? "Doble clic o Enter en una celda para escribir"
+    avisar(v.editable ? "Doble clic o Enter en una celda para escribir · Ctrl+C y Ctrl+V para copiar y pegar"
       : v.excel ? "Es un archivo de Excel guardado en Drive: para editarlo, ábrelo en Google Sheets" : "", "gris");
     if (v.destino) irADestino(v, v.destino);
     v.destino = null;
@@ -669,7 +669,8 @@
           if (ctrl && (ev.key === "+" || ev.key === "=")) pasoZoom(1);
           else if (ctrl && ev.key === "-") pasoZoom(-1);
           else if (ctrl && ev.key === "0") ponerZoom(100);
-          else if (ctrl && (ev.key === "c" || ev.key === "C")) copiarRango(v, rangoSeleccionado(v));
+          // Ctrl+C y Ctrl+V: se dejan pasar para que el navegador lance copy y paste (abajo).
+          else if (ctrl && (ev.key === "c" || ev.key === "C" || ev.key === "v" || ev.key === "V")) hecho = false;
           else if (ctrl && (ev.key === "a" || ev.key === "A")) seleccionarRango(v, 0, 0, v.visF.length - 1, v.visC.length - 1);
           else if (ctrl && (ev.key === "g" || ev.key === "G" || ev.key === "j" || ev.key === "J")) ventana.querySelector(".visor-nombre").focus();
           // Escribir sobre una celda empieza a editarla, como en Sheets.
@@ -688,7 +689,7 @@
   const escaparHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const celdaTsv = (s) => (/[\t\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
 
-  async function copiarRango(v, r) {
+  function contenidoRango(v, r) {
     const lineas = [], filasHtml = [];
     for (let i = r.i0; i <= r.i1; i++) {
       const valores = [], celdasHtml = [];
@@ -713,6 +714,11 @@
     const html = `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:10pt">${filasHtml.join("")}</table>`;
     const filas = r.i1 - r.i0 + 1, cols = r.j1 - r.j0 + 1;
     const que = filas * cols === 1 ? refRango(v, r) : `${refRango(v, r)} (${filas} fila${filas === 1 ? "" : "s"} × ${cols} columna${cols === 1 ? "" : "s"})`;
+    return { tsv, html, que };
+  }
+
+  async function copiarRango(v, r) {
+    const { tsv, html, que } = contenidoRango(v, r);
     try {
       if (window.ClipboardItem && navigator.clipboard.write) {
         await navigator.clipboard.write([new ClipboardItem({
@@ -744,6 +750,133 @@
     seleccionarRango(v, 0, 0, v.fijasF - 1, v.visC.length - 1);
     copiarRango(v, rangoSeleccionado(v));
     enfocarCuerpo();
+  }
+
+  // Ctrl+C y Ctrl+V con la celda solo seleccionada (sin doble clic), como en Sheets. Van por
+  // los eventos copy y paste del navegador: no piden permiso del portapapeles. Se atienden
+  // solo con el foco en la hoja; escribiendo en una celda, copiar y pegar son los de siempre.
+  const cuerpoConFoco = () => visor && visor.sel && ventana.open && document.activeElement === ventana.querySelector(".visor-cuerpo");
+  document.addEventListener("copy", (ev) => {
+    if (!cuerpoConFoco()) return;
+    const { tsv, html, que } = contenidoRango(visor, rangoSeleccionado(visor));
+    ev.clipboardData.setData("text/plain", tsv);
+    ev.clipboardData.setData("text/html", html);
+    ev.preventDefault();
+    visor.ultimaCopia = { tsv, html };
+    avisar("📋 Copiado " + que + " · pégalo con Ctrl+V aquí, en Excel, Sheets, un correo o WhatsApp", "ok");
+  });
+  document.addEventListener("paste", (ev) => {
+    if (!cuerpoConFoco()) return;
+    ev.preventDefault();
+    pegar(visor, ev.clipboardData.getData("text/plain"));
+  });
+
+  // Texto separado por tabulaciones (lo que copian Sheets, Excel y este visor) → filas de valores.
+  function leerTsv(texto) {
+    const filas = [[]];
+    let celda = "", i = 0;
+    texto = texto.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+    while (i < texto.length) {
+      const ch = texto[i];
+      if (ch === '"' && celda === "") {   // celda entre comillas: puede traer saltos o tabulaciones
+        let fin = i + 1;
+        for (; fin < texto.length; fin++) {
+          if (texto[fin] === '"') { if (texto[fin + 1] === '"') fin++; else break; }
+        }
+        const sigue = texto[fin + 1];
+        if (fin < texto.length && (sigue === undefined || sigue === "\t" || sigue === "\n")) {
+          celda = texto.slice(i + 1, fin).replace(/""/g, '"');
+          i = fin + 1;
+          continue;
+        }
+      }
+      if (ch === "\t") { filas[filas.length - 1].push(celda); celda = ""; }
+      else if (ch === "\n") { filas[filas.length - 1].push(celda); celda = ""; filas.push([]); }
+      else celda += ch;
+      i++;
+    }
+    filas[filas.length - 1].push(celda);
+    return filas;
+  }
+
+  const MAXIMO_PEGADO = 2000;   // celdas: más que eso es un error de selección, no una gestión
+
+  // Pega desde la esquina de arriba a la izquierda de la selección hacia la derecha y abajo
+  // (solo filas y columnas visibles), como Sheets. Un solo valor con un rango seleccionado
+  // llena todo el rango.
+  async function pegar(v, texto) {
+    if (!v.editable) {
+      avisar(v.excel ? "Es un archivo de Excel guardado en Drive: para pegar, ábrelo en Google Sheets" : "👁️ Esta hoja es de solo lectura: no se puede pegar", "ambar");
+      return;
+    }
+    if (!texto) { avisar("El portapapeles no tiene texto para pegar", "ambar"); return; }
+    const valores = leerTsv(texto);
+    const r = rangoSeleccionado(v);
+    const uno = valores.length === 1 && valores[0].length === 1;
+    const alto = uno ? r.i1 - r.i0 + 1 : valores.length;
+    const ancho = uno ? r.j1 - r.j0 + 1 : Math.max(...valores.map((f) => f.length));
+    const cambios = [];
+    for (let a = 0; a < alto; a++) {
+      for (let b = 0; b < ancho; b++) {
+        const i = r.i0 + a, j = r.j0 + b;
+        const td = v.mapa.get(i + ":" + j);
+        // Fuera de la hoja, o tapada por una combinada que empieza en otra celda: se salta.
+        if (!td || Number(td.dataset.i) !== i || Number(td.dataset.j) !== j) continue;
+        const nuevo = uno ? valores[0][0] : (valores[a][b] === undefined ? "" : valores[a][b]);
+        if (nuevo === textoEditable(td._celda)) continue;
+        cambios.push({ td, texto: nuevo });
+      }
+    }
+    if (cambios.length > MAXIMO_PEGADO) {
+      avisar(`❌ Son ${cambios.length} celdas: pega a lo sumo ${MAXIMO_PEGADO} de una vez`, "error");
+      return;
+    }
+    // Queda seleccionado lo que se pegó, como en Sheets.
+    seleccionarRango(v, Math.min(v.visF.length - 1, r.i0 + alto - 1), Math.min(v.visC.length - 1, r.j0 + ancho - 1), r.i0, r.j0);
+    if (!cambios.length) { avisar("Ya tenía esos mismos valores: no hubo nada que cambiar", "gris"); return; }
+    if (cambios.length === 1) { guardar(v, cambios[0].td, cambios[0].td._celda, cambios[0].texto); return; }
+    await guardarVarias(v, cambios);
+  }
+
+  // Varias celdas de una vez (un pegado): una sola petición a Sheets y una línea por celda en
+  // el registro de gestiones.
+  async function guardarVarias(v, cambios) {
+    const antes = cambios.map(({ td }) => td._celda.formattedValue || "");
+    for (const { td, texto } of cambios) {
+      td.classList.add("celda-guardando");
+      td.replaceChildren(nodo("div", { class: "visor-c" }, texto));
+    }
+    avisar(`⏳ Pegando ${cambios.length} celdas…`, "gris");
+    const data = cambios.map(({ td, texto }) => ({ range: rango(v.hoja.title, Number(td.dataset.f), Number(td.dataset.c)), values: [[texto]] }));
+    try {
+      const resp = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}/values:batchUpdate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ valueInputOption: "USER_ENTERED", includeValuesInResponse: true, responseValueRenderOption: "FORMATTED_VALUE", data }),
+      });
+      const respuestas = resp.responses || [];
+      cambios.forEach(({ td, texto }, k) => {
+        const nuevo = ((((respuestas[k] || {}).updatedData || {}).values || [[]])[0] || [])[0];
+        td._celda.formattedValue = nuevo === undefined ? (respuestas[k] ? "" : texto) : String(nuevo);
+        td._celda.userEnteredValue = texto.startsWith("=") ? { formulaValue: texto } : { stringValue: texto };
+        escribirContenido(td, td._celda);
+        td.classList.remove("celda-guardando");
+        td.classList.add("celda-guardada");
+        setTimeout(() => td.classList.remove("celda-guardada"), 1600);
+      });
+      seleccionar(v, v.sel.i, v.sel.j, false, true);
+      const guardado = `✓ Pegadas ${cambios.length} celdas en Google Sheets · ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`;
+      avisar(guardado, "ok");
+      try {
+        if (google().registrar) await google().registrar(cambios.map(({ td, texto }, k) => ({ hoja: `${v.archivo.name} · ${v.hoja.title}`,
+          ubicacion: `${letra(Number(td.dataset.c))}${Number(td.dataset.f) + 1}`, columna: "", antes: antes[k], despues: texto })));
+      } catch (e) {
+        avisar(guardado + " · ⚠️ No quedó en el registro de gestiones: " + e.message, "ambar");
+      }
+    } catch (e) {
+      for (const { td } of cambios) { td.classList.remove("celda-guardando"); escribirContenido(td, td._celda); }
+      avisar("❌ No se pegó: " + e.message, "error");
+    }
   }
 
   // ------------------------------------------------------------------ edición
