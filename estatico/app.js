@@ -2659,43 +2659,88 @@
   // (Ley 1581). Tras data-inactividad minutos sin tocar la página (0 = nunca), se avisa un
   // minuto antes y luego se cierra la sesión: en el servidor, el mismo «Salir»; en la
   // versión de navegador, window.axioCerrarSesion (devuelve el token y borra la memoria).
+  // Dentro de la jornada (data-jornada, «08:00-16:30», hora del equipo) no se cierra por
+  // inactividad: la sesión sigue abierta toda la jornada y se cierra sola al terminar.
+  // Fuera de la jornada vale la regla de los minutos sin uso.
   // Se mide con la hora y no con un temporizador largo: con la pestaña en segundo plano el
   // navegador frena los temporizadores, y al volver se cierra en el acto si ya venció.
   const MINUTOS_INACTIVIDAD = Number(document.body.dataset.inactividad || 0);
-  if (MINUTOS_INACTIVIDAD > 0) {
+  const JORNADA = (() => {
+    const m = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec((document.body.dataset.jornada || "").trim());
+    if (!m) return null;
+    const desde = Number(m[1]) * 60 + Number(m[2]);
+    const hasta = Number(m[3]) * 60 + Number(m[4]);
+    return desde < hasta && hasta <= 24 * 60 ? { desde, hasta, texto: horaLegible(hasta) } : null;
+  })();
+  function horaLegible(minutos) {
+    const h = Math.floor(minutos / 60), mm = String(minutos % 60).padStart(2, "0");
+    return `${h % 12 || 12}:${mm} ${h < 12 ? "a.m." : "p.m."}`;
+  }
+  // Milisegundos que faltan para que termine la jornada, o null si ahora no es jornada.
+  function quedaJornada() {
+    if (!JORNADA) return null;
+    const ahora = new Date();
+    const minutos = ahora.getHours() * 60 + ahora.getMinutes() + ahora.getSeconds() / 60 + ahora.getMilliseconds() / 60000;
+    if (minutos < JORNADA.desde || minutos >= JORNADA.hasta) return null;
+    return (JORNADA.hasta - minutos) * 60000;
+  }
+
+  if (MINUTOS_INACTIVIDAD > 0 || JORNADA) {
     const LIMITE = MINUTOS_INACTIVIDAD * 60000;
-    const AVISO = Math.min(60000, LIMITE / 2);
     let ultimaActividad = Date.now();
     let aviso = null;
+    let enJornada = quedaJornada() !== null;
 
-    const cerrarSesion = () => {
-      if (typeof window.axioCerrarSesion === "function") return window.axioCerrarSesion("inactividad");
+    const cerrarSesion = (motivo) => {
+      if (typeof window.axioCerrarSesion === "function") return window.axioCerrarSesion(motivo);
       const salir = document.querySelector('form[action$="logout"]');
       if (!salir) { window.location.href = "/login"; return; }
-      salir.append(el("input", { type: "hidden", name: "motivo", value: "inactividad" }));
+      salir.append(el("input", { type: "hidden", name: "motivo", value: motivo }));
       despedida().then(() => salir.submit());
     };
     const quitarAviso = () => { if (aviso) { aviso.remove(); aviso = null; } };
-    const actividad = () => { ultimaActividad = Date.now(); quitarAviso(); };
+    const actividad = () => { ultimaActividad = Date.now(); if (quedaJornada() === null) quitarAviso(); };
     for (const evento of ["pointerdown", "keydown", "wheel", "touchstart"]) {
       document.addEventListener(evento, actividad, { capture: true, passive: true });
     }
 
-    const revisar = () => {
-      const quedan = LIMITE - (Date.now() - ultimaActividad);
-      if (quedan <= 0) { clearInterval(reloj); quitarAviso(); cerrarSesion(); return; }
-      if (quedan > AVISO) return;
-      const segundos = Math.ceil(quedan / 1000);
+    const avisar = (titulo, texto, conBoton) => {
       if (aviso && !aviso.isConnected) aviso = null;   // se fue con la ventana que lo tenía
+      if (aviso && aviso.dataset.tipo !== titulo) quitarAviso();
       if (!aviso) {
-        aviso = el("div", { class: "aviso-inactividad", role: "alertdialog", "aria-live": "assertive" },
-          el("strong", { text: "¿Sigues ahí?" }),
+        aviso = el("div", { class: "aviso-inactividad", role: "alertdialog", "aria-live": "assertive", "data-tipo": titulo },
+          el("strong", { text: titulo }),
           el("span", { class: "aviso-inactividad-texto" }),
-          el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Seguir aquí", onclick: actividad }));
+          conBoton
+            ? el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Seguir aquí", onclick: actividad })
+            : el("button", { class: "boton boton-chico", type: "button", text: "Entendido", onclick: quitarAviso }));
         (document.querySelector("dialog[open]") || document.body).append(aviso);
       }
-      aviso.querySelector(".aviso-inactividad-texto").textContent =
-        `Por seguridad, la sesión se cerrará en ${segundos} s por inactividad.`;
+      aviso.querySelector(".aviso-inactividad-texto").textContent = texto;
+    };
+
+    let avisoJornadaVisto = false;
+    const revisar = () => {
+      const jornada = quedaJornada();
+      if (jornada !== null) {
+        enJornada = true;
+        ultimaActividad = Date.now();   // dentro de la jornada no cuenta la inactividad
+        if (jornada > 60000) { avisoJornadaVisto = false; if (aviso && aviso.dataset.tipo !== "Fin de la jornada") quitarAviso(); return; }
+        if (!avisoJornadaVisto || aviso) {
+          avisoJornadaVisto = true;
+          avisar("Fin de la jornada",
+            `La jornada termina a las ${JORNADA.texto}: la sesión se cerrará en ${Math.ceil(jornada / 1000)} s.`, false);
+        }
+        return;
+      }
+      if (enJornada) {   // la jornada acaba de terminar (o terminó con la pestaña dormida)
+        clearInterval(reloj); quitarAviso(); cerrarSesion("jornada"); return;
+      }
+      if (MINUTOS_INACTIVIDAD <= 0) return;
+      const quedan = LIMITE - (Date.now() - ultimaActividad);
+      if (quedan <= 0) { clearInterval(reloj); quitarAviso(); cerrarSesion("inactividad"); return; }
+      if (quedan > Math.min(60000, LIMITE / 2)) return;
+      avisar("¿Sigues ahí?", `Por seguridad, la sesión se cerrará en ${Math.ceil(quedan / 1000)} s por inactividad.`, true);
     };
     const reloj = setInterval(revisar, 1000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) revisar(); });

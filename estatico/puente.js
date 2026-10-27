@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-13-115315");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-27-143428");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -279,7 +279,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-13-115315";
+    script.src = "estatico/app.js?v=2026-10-27-143428";
     document.body.append(script);
   }
 
@@ -501,11 +501,15 @@
 
   // "Cambiar archivo" / "Cerrar sesión": recargar la página borra todo lo que había en
   // memoria. Con sesión, además se le devuelve el token a Google para que deje de valer.
-  // app.js llama lo mismo cuando cierra la sesión por inactividad.
+  // app.js llama lo mismo cuando cierra la sesión por inactividad o al terminar la jornada.
   const MARCA_INACTIVIDAD = "axio_cierre_inactividad";   // solo una marca, sin datos
+  const AVISOS_CIERRE = {
+    inactividad: "Se cerró la sesión por inactividad y se borraron los datos de la pestaña. Vuelve a entrar para seguir.",
+    jornada: "Terminó la jornada y se cerró la sesión; se borraron los datos de la pestaña. Si necesitas seguir, vuelve a entrar.",
+  };
   function cerrarSesion(motivo) {
-    if (motivo === "inactividad") {
-      try { sessionStorage.setItem(MARCA_INACTIVIDAD, "1"); } catch (_) { /* sin almacenamiento */ }
+    if (AVISOS_CIERRE[motivo]) {
+      try { sessionStorage.setItem(MARCA_INACTIVIDAD, motivo); } catch (_) { /* sin almacenamiento */ }
     }
     // Primero la despedida (los puntos del logo se dispersan; app.js), después se recarga.
     const despedida = typeof window.axioDespedida === "function" ? window.axioDespedida() : Promise.resolve();
@@ -521,10 +525,11 @@
   $("#btn-cambiar").addEventListener("click", () => cerrarSesion());
 
   try {
-    if (sessionStorage.getItem(MARCA_INACTIVIDAD)) {
+    const motivo = sessionStorage.getItem(MARCA_INACTIVIDAD);
+    if (motivo) {
       sessionStorage.removeItem(MARCA_INACTIVIDAD);
       const nota = $("#error-portada");
-      nota.textContent = "Se cerró la sesión por inactividad y se borraron los datos de la pestaña. Vuelve a entrar para seguir.";
+      nota.textContent = AVISOS_CIERRE[motivo] || AVISOS_CIERRE.inactividad;
       nota.classList.replace("aviso-error", "aviso-ambar");
       nota.hidden = false;
     }
