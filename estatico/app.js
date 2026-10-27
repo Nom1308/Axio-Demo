@@ -2517,6 +2517,7 @@
       tema !== "oscuro" ? { icono: "☾", titulo: "Tema oscuro", accion: () => elegirTema("oscuro") } : null,
       tema !== "sistema" ? { icono: "◐", titulo: "Tema del sistema", detalle: "Claro u oscuro, como el equipo", accion: () => elegirTema("sistema") } : null,
       ES_ADMIN ? { icono: "↻", titulo: "Refrescar datos", detalle: "Vuelve a descargar todas las hojas", accion: refrescar } : null,
+      { icono: "◌", titulo: "Ocultar la pantalla", detalle: "Ctrl+Shift+H · la sesión sigue abierta", claves: "privacidad tapar esconder bloquear", accion: mostrarVelo },
     ].filter(Boolean);
   }
 
@@ -2744,6 +2745,78 @@
     };
     const reloj = setInterval(revisar, 1000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) revisar(); });
+  }
+
+  // ------------------------------------------------------------------ ocultar la pantalla
+  // La sesión puede quedar abierta toda la jornada: si alguien se acerca al puesto, los saldos
+  // y las cédulas no deberían quedar a la vista (Ley 1581). Ctrl+Shift+H, el botón del ojo o
+  // la paleta los tapan con un velo desenfocado, sin cerrar la sesión ni perder nada. También
+  // sale solo tras data-velo minutos sin tocar la página (5 por defecto; 0 = nunca). Cualquier
+  // tecla o clic lo quita. Es un <dialog> modal: queda encima de todo, también de las ventanas
+  // ya abiertas (el detalle, el visor de hojas), y bloquea la página mientras está puesto.
+  const MINUTOS_VELO = Number(document.body.dataset.velo ?? 5);
+  const logoVelo = document.querySelector(".logo-barra svg");
+  const velo = el("dialog", { class: "velo-privacidad", "aria-label": "Pantalla oculta" },
+    el("div", { class: "velo-tarjeta" },
+      logoVelo ? el("span", { class: "velo-logo", "aria-hidden": "true" }, logoVelo.cloneNode(true)) : null,
+      el("strong", { class: "velo-titulo", text: "Pantalla oculta" }),
+      el("span", { class: "velo-texto", text: "Tu sesión sigue abierta y nada se perdió. Toca cualquier tecla o haz clic para volver." }),
+      el("span", { class: "velo-atajo" }, "Para ocultarla otra vez: ", el("kbd", { text: "Ctrl" }), " + ", el("kbd", { text: "Shift" }), " + ", el("kbd", { text: "H" }))));
+  document.body.append(velo);
+  let ultimoMovimiento = Date.now();
+
+  function mostrarVelo() {
+    if (velo.open) return;
+    // Lo que flota en la capa superior (sugerencias, tarjeta de una hoja) se cierra antes.
+    document.querySelectorAll(":popover-open").forEach((p) => { try { p.hidePopover(); } catch (_) { /* ya cerrado */ } });
+    velo.showModal();
+  }
+  function quitarVelo() {
+    if (!velo.open) return;
+    velo.classList.add("saliendo");
+    setTimeout(() => { velo.classList.remove("saliendo"); velo.close(); }, 220);
+    ultimoMovimiento = Date.now();
+  }
+  // Con el velo puesto, la primera tecla o el primer clic solo lo quitan: no llegan a la
+  // página (una letra no se escribe en el buscador, un clic no abre una fila).
+  window.addEventListener("keydown", (ev) => {
+    if (velo.open) {
+      if (["Shift", "Control", "Alt", "Meta"].includes(ev.key)) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      quitarVelo();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.code === "KeyH") {
+      ev.preventDefault();
+      mostrarVelo();
+    }
+  }, true);
+  velo.addEventListener("click", quitarVelo);
+  velo.addEventListener("cancel", (ev) => { ev.preventDefault(); quitarVelo(); });
+
+  for (const evento of ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"]) {
+    document.addEventListener(evento, () => { if (!velo.open) ultimoMovimiento = Date.now(); }, { capture: true, passive: true });
+  }
+  if (MINUTOS_VELO > 0) {
+    const revisarVelo = () => { if (Date.now() - ultimoMovimiento >= MINUTOS_VELO * 60000) mostrarVelo(); };
+    setInterval(revisarVelo, 5000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) revisarVelo(); });
+  }
+
+  // El botón del ojo, en la barra de arriba, junto al nombre de la persona.
+  const ojoTachado = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  ojoTachado.setAttribute("viewBox", "0 0 24 24");
+  ojoTachado.setAttribute("aria-hidden", "true");
+  for (const d of ["M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94", "M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19",
+    "M14.12 14.12a3 3 0 1 1-4.24-4.24", "M1 1l22 22"]) {
+    const trazo = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    trazo.setAttribute("d", d);
+    ojoTachado.append(trazo);
+  }
+  if (zonaUsuario) {
+    zonaUsuario.before(el("button", { class: "boton boton-texto boton-velo", type: "button", title: "Ocultar la pantalla (Ctrl+Shift+H)",
+      "aria-label": "Ocultar la pantalla", onclick: mostrarVelo }, ojoTachado, el("span", { class: "boton-velo-texto", text: "Ocultar" })));
   }
 
   // ------------------------------------------------------------------ eventos
