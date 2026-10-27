@@ -1560,3 +1560,218 @@ body.despidiendo .contenido, body.despidiendo .barra-derecha, body.despidiendo .
   *, *::before, *::after { animation: none !important; transition: none !important; }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
+
+/* ==========================================================================
+   UTILIDADES: modo llamada, tu día, WhatsApp con plantillas, portapapeles,
+   tamaño de la letra, atajos y búsqueda por lista
+   ========================================================================== */
+
+/* Tamaño de la letra (A− / A+ del menú): agranda el contenido, no la ventana. */
+.contenido, .detalle-cuerpo, .dialogo-axio-cuerpo, .panel-llamada { zoom: var(--letra, 1); }
+
+/* Ventanas propias (tu día, atajos, búsqueda por lista): como el detalle de un pago. */
+.dialogo-axio {
+  width: min(720px, calc(100vw - 28px)); max-height: calc(100vh - 40px); padding: 0; overflow: hidden;
+  border-radius: 24px; color: var(--texto); background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo);
+  border: 1px solid var(--borde-fuerte); box-shadow: 0 40px 100px -20px rgba(0, 0, 0, .75), var(--brillo);
+}
+.dialogo-axio[open] { display: flex; flex-direction: column; animation: aparecer-modal .3s cubic-bezier(.2, .9, .25, 1) both; }
+.dialogo-axio::backdrop { background: rgba(3, 10, 36, .55); -webkit-backdrop-filter: blur(8px) saturate(120%); backdrop-filter: blur(8px) saturate(120%); }
+.dialogo-axio-cabecera { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px 14px; border-bottom: 1px solid var(--borde); }
+.dialogo-axio-cabecera h2 { margin: 0; font-family: var(--fuente-titulo); font-size: 20px; font-weight: 750; letter-spacing: -.02em; }
+.dialogo-axio-sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--texto-2); }
+.dialogo-axio-cuerpo { padding: 18px 22px; overflow-y: auto; display: grid; gap: 16px; align-content: start; }
+.dialogo-axio-pie { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 22px 16px; border-top: 1px solid var(--borde); font-size: 12px; color: var(--texto-3); }
+
+/* ---------- tu día ---------- */
+.dialogo-dia { width: min(780px, calc(100vw - 28px)); }
+.dia-aviso { margin: 0; padding: 10px 14px; border-radius: 14px; font-size: 13px; font-weight: 600; color: var(--ambar); background: rgba(252, 180, 0, .1); border: 1px solid rgba(252, 180, 0, .3); }
+.dia-cifras { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.dia-cifra { display: grid; gap: 2px; padding: 12px 12px 10px; border-radius: 16px; background: var(--campo); border: 1px solid var(--borde); }
+.dia-cifra strong { font-family: var(--fuente-titulo); font-size: 26px; font-weight: 750; line-height: 1.05; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dia-cifra span { font-size: 12px; color: var(--texto-2); line-height: 1.3; }
+.dia-cifra em { font-style: normal; font-size: 11.5px; font-weight: 650; color: var(--dorado); }
+.dia-cifra.cero strong { color: var(--texto-3); }
+.dia-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dia-fila { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 10px; align-items: center; padding: 8px; border-radius: 16px; border: 1px solid var(--borde); background: var(--campo); }
+.dia-persona { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 6px; border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dia-persona:hover { background: var(--campo-hover); }
+.dia-avatar, .ll-avatar {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  font-size: 13px; font-weight: 750; color: #fff; background: var(--degradado); box-shadow: 0 0 0 2px var(--dorado);
+}
+.dia-quien { display: grid; min-width: 0; }
+.dia-quien strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dia-quien span { font-size: 11.5px; color: var(--texto-2); font-variant-numeric: tabular-nums; }
+.dia-acciones { display: flex; flex-wrap: wrap; gap: 5px; }
+.dia-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; background: var(--vidrio-alto); border: 1px solid var(--borde); }
+.dia-chip small { font-size: 10.5px; font-weight: 500; color: var(--texto-3); font-variant-numeric: tabular-nums; }
+.dia-chip.dia-contesto { border-color: rgba(52, 211, 153, .4); }
+.dia-chip.dia-promesa { border-color: rgba(252, 180, 0, .5); color: var(--dorado); }
+.dia-chip.dia-no_contesto, .dia-chip.dia-equivocado { border-color: rgba(255, 107, 107, .35); }
+.dia-chip.dia-solo { color: var(--texto-3); font-weight: 500; }
+.dia-otras { display: grid; gap: 8px; font-size: 13px; }
+.dia-vacio { margin: 8px 0; text-align: center; color: var(--texto-2); font-size: 14px; }
+@media (max-width: 720px) {
+  .dia-cifras { grid-template-columns: repeat(2, 1fr); }
+  .dia-cifra:first-child { grid-column: 1 / -1; }
+  .dia-fila { grid-template-columns: 1fr; }
+}
+
+/* ---------- WhatsApp con plantillas ---------- */
+.whatsapp-grupo { display: inline-flex; }
+.whatsapp-grupo .boton-whatsapp:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.whatsapp-grupo .whatsapp-mas { padding-inline: 9px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid rgba(255, 255, 255, .35); }
+.menu-whatsapp {
+  position: fixed; inset: auto; margin: 0; width: min(320px, calc(100vw - 16px)); padding: 6px; display: grid; gap: 2px;
+  color: var(--texto); background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo);
+  border: 1px solid var(--borde-fuerte); border-radius: 16px; box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .7), var(--brillo);
+}
+.menu-whatsapp:popover-open { animation: aparecer-modal .18s ease both; }
+.menu-whatsapp-titulo, .menu-whatsapp-pie { margin: 0; padding: 6px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-3); }
+.menu-whatsapp-pie { padding: 6px 10px 2px; font-weight: 500; letter-spacing: 0; text-transform: none; border-top: 1px solid var(--borde); margin-top: 2px; }
+.menu-whatsapp-item { display: grid; gap: 1px; padding: 8px 10px; border-radius: 10px; color: inherit; text-decoration: none; }
+.menu-whatsapp-item:hover, .menu-whatsapp-item:focus-visible { background: rgba(37, 211, 102, .12); outline: none; }
+.menu-whatsapp-item strong { font-size: 13.5px; }
+.menu-whatsapp-item span { font-size: 12px; color: var(--texto-2); }
+
+/* ---------- modo llamada ---------- */
+.boton-llamar { border-color: rgba(52, 211, 153, .4); }
+.panel-llamada {
+  position: fixed; right: 18px; bottom: 18px; z-index: 40; width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - 100px);
+  display: flex; flex-direction: column; overflow: hidden; color: var(--texto);
+  background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo);
+  border: 1px solid var(--borde-fuerte); border-radius: 22px; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .75), var(--brillo);
+  animation: llamada-entra .32s cubic-bezier(.2, .9, .25, 1) both;
+}
+.panel-llamada:focus { outline: none; }
+.panel-llamada.saliendo { animation: llamada-sale .2s ease both; }
+@keyframes llamada-entra { from { opacity: 0; transform: translateY(22px) scale(.97); } }
+@keyframes llamada-sale { to { opacity: 0; transform: translateY(14px) scale(.98); } }
+.ll-cabecera { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--borde); }
+.ll-titulo { flex: 1; font-size: 12px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--verde); }
+.ll-pulso { width: 9px; height: 9px; border-radius: 50%; background: var(--verde); box-shadow: 0 0 0 0 rgba(52, 211, 153, .6); animation: ll-pulso 1.8s ease-out infinite; }
+@keyframes ll-pulso { to { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); } }
+.ll-reloj { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--texto-2); }
+.ll-cuerpo { padding: 14px 16px 12px; overflow-y: auto; display: grid; gap: 10px; }
+.ll-persona { display: flex; align-items: center; gap: 12px; }
+.ll-avatar { width: 44px; height: 44px; font-size: 15px; }
+.ll-nombre { display: block; font-family: var(--fuente-titulo); font-size: 19px; font-weight: 750; letter-spacing: -.015em; line-height: 1.2; }
+.ll-cc { font-size: 12px; color: var(--texto-2); font-variant-numeric: tabular-nums; }
+.ll-datos { display: grid; gap: 6px; }
+.ll-dato { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 8px; padding: 8px 10px 8px 12px; border-radius: 14px; background: var(--campo); border: 1px solid var(--borde); }
+.ll-dato .ll-etiqueta { grid-column: 1; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--texto-3); }
+.ll-dato strong { grid-column: 1; font-size: 16px; font-variant-numeric: tabular-nums; }
+.ll-datos > .ll-dato:first-child strong { font-size: 22px; letter-spacing: .02em; }
+.ll-par { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ll-par .ll-dato strong { font-size: 13.5px; }
+.ll-dato.ll-falta { grid-template-columns: 1fr; }
+.ll-dato.ll-falta span:last-child { font-size: 13px; color: var(--texto-2); }
+.ll-copiar { grid-column: 2; grid-row: 1 / 3; padding: 6px 8px; font-size: 15px; }
+.ll-subtitulo { margin: 4px 0 0; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-2); }
+.ll-mora { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ll-mora li { display: grid; gap: 1px; padding: 8px 12px; border-radius: 12px; border-left: 3px solid var(--rojo); background: rgba(255, 107, 107, .08); }
+.ll-mora strong { font-size: 13.5px; }
+.ll-mora span { font-size: 12px; color: var(--texto-2); font-variant-numeric: tabular-nums; }
+.ll-al-dia { margin: 0; font-size: 13.5px; font-weight: 600; }
+.ll-resultado { display: grid; gap: 8px; }
+.ll-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ll-boton {
+  position: relative; display: flex; align-items: center; gap: 8px; padding: 11px 12px; border-radius: 14px; cursor: pointer;
+  font: 650 13px var(--fuente); color: var(--texto); text-align: left; background: var(--campo); border: 1px solid var(--borde-fuerte);
+  transition: transform .12s ease, background .15s ease, border-color .15s ease;
+}
+.ll-boton:hover { background: var(--campo-hover); transform: translateY(-1px); }
+.ll-boton:active { transform: scale(.98); }
+.ll-boton > span:nth-child(2) { flex: 1; line-height: 1.25; }
+.ll-boton kbd { flex: none; }
+.ll-contesto:hover { border-color: rgba(52, 211, 153, .6); }
+.ll-promesa:hover { border-color: rgba(252, 180, 0, .7); }
+.ll-no_contesto:hover, .ll-equivocado:hover { border-color: rgba(255, 107, 107, .55); }
+.ll-icono { font-size: 16px; }
+.ll-pregunta { margin: 0; font-weight: 700; font-size: 14px; }
+.ll-promesa { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ll-promesa label { display: grid; gap: 4px; font-size: 11.5px; font-weight: 650; color: var(--texto-2); }
+.ll-promesa input { width: 100%; }
+.ll-monto { font-variant-numeric: tabular-nums; }
+.ll-nota { width: 100%; font-size: 13px; }
+.ll-acciones { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.ll-anotado { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: rgba(52, 211, 153, .1); border: 1px solid rgba(52, 211, 153, .35); }
+.ll-anotado .palomita { width: 30px; height: 30px; color: var(--verde); }
+.ll-anotado div { display: grid; gap: 2px; }
+.ll-anotado strong { font-size: 14px; }
+.ll-anotado span { font-size: 12px; color: var(--texto-2); }
+.ll-pie { margin: 2px 0 0; font-size: 11px; color: var(--texto-3); text-align: center; }
+@media (max-width: 640px) {
+  .panel-llamada { right: 8px; left: 8px; bottom: 8px; width: auto; max-height: calc(100vh - 70px); border-radius: 20px; }
+  .ll-boton kbd { display: none; }
+}
+
+/* ---------- portapapeles inteligente ---------- */
+.oferta-portapapeles {
+  position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 45; max-width: calc(100vw - 24px);
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: 99px; font-size: 13.5px;
+  color: var(--texto); background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo);
+  border: 1px solid var(--borde-fuerte); box-shadow: 0 20px 50px -16px rgba(0, 0, 0, .7), var(--brillo);
+  animation: oferta-entra .35s cubic-bezier(.2, .9, .25, 1.2) both;
+}
+.oferta-portapapeles[hidden] { display: none; }
+@keyframes oferta-entra { from { opacity: 0; transform: translate(-50%, -12px) scale(.96); } }
+.oferta-texto strong { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.oferta-portapapeles .boton-principal kbd { margin-left: 4px; color: inherit; background: rgba(255, 255, 255, .15); border-color: rgba(255, 255, 255, .3); box-shadow: none; }
+.oferta-cerrar { width: 28px; height: 28px; padding: 0; border-radius: 50%; }
+@media (max-width: 640px) { .oferta-portapapeles { top: auto; bottom: 18px; border-radius: 18px; flex-wrap: wrap; } }
+
+/* ---------- menú: letra, portapapeles, tu día ---------- */
+.letra-control { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 2px; padding: 3px; border-radius: 12px; background: var(--campo); border: 1px solid var(--borde); }
+.letra-control button { padding: 6px 4px; border: 0; border-radius: 9px; background: none; color: var(--texto-2); font: 650 12.5px var(--fuente); cursor: pointer; }
+.letra-control button:hover { color: var(--texto); background: var(--campo-hover); }
+.letra-control .letra-grande { font-size: 15px; }
+.letra-control .letra-valor { font-variant-numeric: tabular-nums; font-weight: 600; }
+.menu-interruptor { display: flex; align-items: center; gap: 8px; padding: 10px 4px 0; font-size: 12.5px; color: var(--texto-2); cursor: pointer; }
+.menu-atajos { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------- atajos ---------- */
+.dialogo-atajos { width: min(560px, calc(100vw - 28px)); }
+.atajos-grupo h3 { margin: 0 0 8px; font-size: 11.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--texto-3); }
+.atajos-grupo ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.atajos-grupo li { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 10px; font-size: 13.5px; }
+.atajos-grupo li:hover { background: var(--campo); }
+.atajo-teclas { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; }
+.atajo-mas { font-size: 11px; color: var(--texto-3); }
+
+/* ---------- buscar varias cédulas ---------- */
+.dialogo-lista { width: min(900px, calc(100vw - 28px)); }
+.lista-entrada {
+  width: 100%; min-height: 96px; resize: vertical; padding: 12px 14px; border-radius: 14px; outline: none;
+  font: 13.5px/1.5 var(--fuente); font-variant-numeric: tabular-nums; color: var(--texto);
+  background: var(--campo); border: 1px solid var(--borde-fuerte);
+}
+.lista-entrada:focus { border-color: rgba(47, 125, 246, .6); box-shadow: 0 0 0 3px rgba(47, 125, 246, .18); }
+.lista-entrada::placeholder { color: var(--texto-3); }
+.lista-barra { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.lista-contador { font-size: 12.5px; color: var(--texto-2); }
+.lista-zona { display: grid; gap: 10px; }
+.lista-zona:empty { display: none; }
+.lista-avance { height: 4px; border-radius: 99px; background: var(--campo); overflow: hidden; transition: opacity .6s ease .4s; }
+.lista-avance span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--degradado-dorado); transition: width .3s ease; }
+.lista-avance.listo { opacity: 0; }
+.lista-resumen { margin: 0; font-size: 13px; font-weight: 600; color: var(--texto-2); }
+.lista-tabla-envoltura { max-height: 46vh; overflow: auto; border-radius: 14px; border: 1px solid var(--borde); }
+.lista-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lista-tabla th { position: sticky; top: 0; z-index: 1; padding: 8px 10px; text-align: left; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--texto-2); background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo); border-bottom: 1px solid var(--borde); }
+.lista-tabla td { padding: 7px 10px; border-bottom: 1px solid var(--borde); white-space: nowrap; }
+.lista-tabla td.num { font-variant-numeric: tabular-nums; }
+.lista-tabla tr[tabindex] { cursor: pointer; }
+.lista-tabla tr[tabindex]:hover, .lista-tabla tr[tabindex]:focus-visible { background: var(--campo-hover); outline: none; }
+.lista-tabla tr.lista-cargando td { color: var(--texto-3); }
+.lista-tabla tr.lista-mora .lista-estado { color: var(--rojo); font-weight: 650; }
+.lista-tabla tr.lista-dia .lista-estado { color: var(--verde); font-weight: 650; }
+.lista-tabla tr.lista-neutro .lista-estado { color: var(--texto-2); }
+.lista-tabla tr.lista-nada td, .lista-tabla tr.lista-error td { color: var(--texto-3); }
+.lista-filtro { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--texto-2); cursor: pointer; }
+.recientes .recientes-varias { margin-left: auto; color: var(--azul); background: none; border-style: dashed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-llamada, .panel-llamada.saliendo, .ll-pulso, .oferta-portapapeles, .dialogo-axio[open], .menu-whatsapp:popover-open { animation: none; }
+}

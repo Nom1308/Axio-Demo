@@ -982,6 +982,9 @@
       grupo.push({ hoja: k.hoja, sheetId: k.sheetId, f: k.f, c: k.c, texto: k.antes, antes: k.texto, antesVisto: visto });
     });
     if (modo !== "deshacer") pilaDeshacer.push({ id: v.id, cambios: grupo });
+    // A «Tu día» (app.js): queda con la persona que está en pantalla.
+    window.dispatchEvent(new CustomEvent("axio-actividad", { detail: { tipo: "hoja",
+      texto: `${modo === "deshacer" ? "Deshecho: " : ""}${donde} en «${partesTitulo(v.archivo.name).principal}»` } }));
     if (visor === v && v.sel) seleccionar(v, v.sel.i, v.sel.j, false, true);
     actualizarHistorial(v);
     const listo = modo === "deshacer" ? `↶ Deshecho: ${donde} ${cambios.length > 1 ? "volvieron a como estaban" : "volvió a como estaba"} · ${horaCorta(ahora)}`

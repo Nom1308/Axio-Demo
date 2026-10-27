@@ -413,6 +413,9 @@
         m.filas[fila - 1] = await leerFila(m, fila);
         const estado = estadoDe(m, fila);
         mostrarEstado(estado);
+        // A «Tu día» (app.js).
+        window.dispatchEvent(new CustomEvent("axio-actividad", { detail: { tipo: "matriz", cedula: h.cedula || "",
+          texto: "Gestión en la Matriz" + (estado ? ": " + estado.etiqueta : "") } }));
         await formulario(d, cuerpo, mostrarEstado, m, fila, h);
         const linea = cuerpo.querySelector(".gestion-estado");
         if (linea) {

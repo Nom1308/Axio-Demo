@@ -119,7 +119,7 @@
       } else {
         const area = el("textarea", { readonly: true, style: "position:fixed;opacity:0" });
         area.value = texto;
-        (dialogo.open ? dialogo : document.body).append(area);
+        ([...document.querySelectorAll("dialog[open]")].pop() || document.body).append(area);
         area.select();
         document.execCommand("copy");
         area.remove();
@@ -484,12 +484,13 @@
     const zona = $("#recientes");
     const lista = leerRecientes();
     zona.replaceChildren();
-    zona.hidden = !lista.length;
-    if (!lista.length) return;
-    zona.append(el("span", { text: "Recientes:" }));
+    zona.hidden = false;
+    if (lista.length) zona.append(el("span", { text: "Recientes:" }));
     for (const t of lista) {
       zona.append(el("button", { type: "button", text: t, onclick: () => { campo.value = t; buscar(); } }));
     }
+    zona.append(el("button", { type: "button", class: "recientes-varias", text: "🔎 Buscar varias cédulas…",
+      title: "Pega una lista de cédulas y mira el estado de todas a la vez", onclick: () => abrirBuscarVarias() }));
   }
 
   // ------------------------------------------------------------------ búsqueda
@@ -531,6 +532,7 @@
       busqueda = datos;
       if (!repetida) filtro.value = "";
       guardarReciente(termino);
+      if (datos.asociado) anotarPersona(datos.asociado);
       animarEntrada = !repetida;
       pintarResultados();
       if (datos.parcial) {
@@ -913,7 +915,7 @@
         el("span", { class: "cedula-valor", text: d.cedula }),
         el("button", { class: "boton boton-principal boton-chico", type: "button", text: "📋 Copiar cédula",
           onclick: (ev) => copiar(d.cedula_limpia || d.cedula, "Cédula copiada, lista para pegar en Siasoft.", ev.currentTarget) }),
-        d.whatsapp ? botonWhatsapp(d.whatsapp, mensajePago(d)) : null));
+        d.whatsapp ? anotarAlTocar(botonWhatsapp(d.whatsapp, mensajePago(d)), { tipo: "whatsapp", plantilla: "Sobre un pago" }, d.cedula_limpia) : null));
     }
 
     const creditos = el("div", { class: "tarjeta" }, el("h3", { text: "💳 Líneas de crédito" }));
@@ -1060,6 +1062,8 @@
     return el("a", { class: "boton boton-whatsapp boton-chico", href, target: "_blank", rel: "noopener noreferrer",
       title: mensaje ? "Abre el chat con un mensaje listo para revisar y enviar" : "Abrir el chat de WhatsApp de esta persona", text: "💬 WhatsApp" });
   }
+
+  const anotarAlTocar = (nodo, accion, cedula) => { nodo.addEventListener("click", () => anotarAccion(accion, cedula)); return nodo; };
 
   // "PÉREZ GÓMEZ ANÍBAL" -> "Pérez Gómez Aníbal".
   const nombrePropio = (texto) => String(texto || "").toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()).trim();
@@ -1236,9 +1240,7 @@
     const pagos = a.pagos || [];
     // Primero los créditos en mora (lo que hay que gestionar), después los demás; dentro de
     // cada grupo, en el orden de las líneas.
-    const todos = a.lineas.flatMap((l) => l.entradas.map((e) => ({ linea: l.linea, e, estado: estadoCredito(e) })));
-    const peso = (x) => (x.estado.mora ? 0 : x.estado.mora === null ? 1 : 2);
-    todos.sort((x, y) => peso(x) - peso(y));
+    const todos = creditosDe(a);
 
     const datosClave = [
       ["🪪", "CC " + a.cedula],
@@ -1253,7 +1255,9 @@
       el("div", { class: "asociado-acciones" },
         el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
           onclick: (ev) => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.", ev.currentTarget) }),
-        a.whatsapp ? botonWhatsapp(a.whatsapp, mensajeAsociado(a, todos)) : null,
+        el("button", { class: "boton boton-chico boton-llamar", type: "button", text: "📞 Modo llamada",
+          title: "Nombre, celular y mora a la vista mientras llamas, y el resultado en un toque (tecla L)", onclick: () => abrirLlamada(a) }),
+        a.whatsapp ? whatsappConPlantillas(a, todos) : null,
         el("button", { class: "boton boton-chico", type: "button", text: "🖨️ Imprimir ficha",
           title: "Imprime solo esta ficha. En la ventana de impresión se puede elegir «Guardar como PDF».",
           onclick: imprimirFicha })));
@@ -1310,6 +1314,7 @@
     soltarPorVer();
     const tiempo = document.querySelector(".ficha-tiempo");
     if (tiempo && tiempo.mostrarTodo) tiempo.mostrarTodo();
+    anotarAccion({ tipo: "ficha" });
     document.body.classList.add("imprimir-ficha");
     window.addEventListener("afterprint", () => document.body.classList.remove("imprimir-ficha"), { once: true });
     window.print();
@@ -2277,9 +2282,13 @@
         ? `Hojas conectadas · ${conectadas} de ${fuentes.length}` : "Hojas conectadas" }),
       lista,
       selectorTema(),
-      ES_ADMIN ? el("div", { class: "menu-pie" },
-        el("button", { class: "boton boton-chico", type: "button", text: "↻ Refrescar datos", disabled: Boolean(est.cargando),
-          onclick: refrescar })) : null);
+      selectorLetra(),
+      opcionPortapapeles(),
+      el("div", { class: "menu-pie menu-atajos" },
+        el("button", { class: "boton boton-chico", type: "button", text: "🗓 Tu día", onclick: () => { abrirMenu(false); mostrarTuDia(); } }),
+        el("button", { class: "boton boton-chico", type: "button", text: "⌨ Atajos", onclick: () => { abrirMenu(false); mostrarAtajos(); } }),
+        ES_ADMIN ? el("button", { class: "boton boton-chico", type: "button", text: "↻ Refrescar datos", disabled: Boolean(est.cargando),
+          onclick: refrescar }) : null));
   }
 
   function selectorTema() {
@@ -2517,6 +2526,12 @@
       tema !== "oscuro" ? { icono: "☾", titulo: "Tema oscuro", accion: () => elegirTema("oscuro") } : null,
       tema !== "sistema" ? { icono: "◐", titulo: "Tema del sistema", detalle: "Claro u oscuro, como el equipo", accion: () => elegirTema("sistema") } : null,
       ES_ADMIN ? { icono: "↻", titulo: "Refrescar datos", detalle: "Vuelve a descargar todas las hojas", accion: refrescar } : null,
+      { icono: "🗓", titulo: "Tu día", detalle: "A quién buscaste hoy y qué hiciste", claves: "resumen dia hoy actividad", accion: () => mostrarTuDia() },
+      a ? { icono: "📞", titulo: `Modo llamada con ${nombrePropio(a.nombre) || "la persona"}`, claves: "llamar llamada telefono", accion: () => abrirLlamada(a) } : null,
+      { icono: "🔎", titulo: "Buscar varias cédulas", detalle: "Pega una lista y mira el estado de todas", claves: "lista masiva varias cedulas", accion: () => abrirBuscarVarias() },
+      { icono: "⌨", titulo: "Atajos de teclado", detalle: "Tecla ?", claves: "teclas ayuda", accion: mostrarAtajos },
+      { icono: "A", titulo: "Letra más grande", claves: "tamaño zoom aumentar", accion: () => toast(`Tamaño de la letra: ${cambiarLetra(1)} %`) },
+      { icono: "a", titulo: "Letra más pequeña", claves: "tamaño zoom reducir", accion: () => toast(`Tamaño de la letra: ${cambiarLetra(-1)} %`) },
       { icono: "◌", titulo: "Ocultar la pantalla", detalle: "Ctrl+Shift+H · la sesión sigue abierta", claves: "privacidad tapar esconder bloquear", accion: mostrarVelo },
     ].filter(Boolean);
   }
@@ -2645,6 +2660,12 @@
   const escribiendo = (n) => n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName));
   document.addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented || document.querySelector("dialog[open]")) return;
+    // «?»: los atajos; «D»: tu día; «L»: modo llamada con la persona en pantalla.
+    if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target) && !ev.target.closest(".panel-llamada")) {
+      const a = busqueda && busqueda.asociado;
+      const accion = ev.key === "?" ? mostrarAtajos : ev.key === "d" ? () => mostrarTuDia() : ev.key === "l" && a ? () => abrirLlamada(a) : null;
+      if (accion) { ev.preventDefault(); accion(); return; }
+    }
     const ctrlK = (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K");
     const barra = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target);
     if (!ctrlK && !barra) return;
@@ -2653,7 +2674,7 @@
     campo.focus();
     campo.select();
   });
-  campo.title = "Atajos: / para escribir aquí · Ctrl+K para la paleta de comandos";
+  campo.title = "Atajos: / para escribir aquí · Ctrl+K para la paleta de comandos · ? para ver todos";
 
   // ------------------------------------------------------------------ cierre por inactividad
   // Un equipo que queda abierto con una cédula en pantalla deja datos personales a la vista
@@ -2693,6 +2714,7 @@
     let enJornada = quedaJornada() !== null;
 
     const cerrarSesion = (motivo) => {
+      olvidarDia();
       if (typeof window.axioCerrarSesion === "function") return window.axioCerrarSesion(motivo);
       const salir = document.querySelector('form[action$="logout"]');
       if (!salir) { window.location.href = "/login"; return; }
@@ -2721,11 +2743,21 @@
     };
 
     let avisoJornadaVisto = false;
+    let diaAlCierre = false;
     const revisar = () => {
       const jornada = quedaJornada();
       if (jornada !== null) {
         enJornada = true;
         ultimaActividad = Date.now();   // dentro de la jornada no cuenta la inactividad
+        // Diez minutos antes del cierre, «Tu día»: para copiarlo antes de que se borre. Con la
+        // pantalla oculta se espera (no se muestran nombres encima del velo).
+        if (jornada <= 10 * 60000 && !diaAlCierre && !velo.open) {
+          diaAlCierre = true;
+          const d = leerDia();
+          if (d.personas.length || d.otras.length) {
+            mostrarTuDia(`La jornada termina a las ${JORNADA.texto} y la sesión se cerrará sola. Copia el resumen si lo necesitas: al cerrar se borra.`);
+          }
+        }
         if (jornada > 60000) { avisoJornadaVisto = false; if (aviso && aviso.dataset.tipo !== "Fin de la jornada") quitarAviso(); return; }
         if (!avisoJornadaVisto || aviso) {
           avisoJornadaVisto = true;
@@ -2746,6 +2778,689 @@
     const reloj = setInterval(revisar, 1000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) revisar(); });
   }
+
+  // ------------------------------------------------------------------ tu día
+  // Lo que esta persona hizo hoy en Axio: a quién buscó y qué hizo con cada una (llamadas y
+  // su resultado, WhatsApp, cambios en las hojas, gestiones en la Matriz). Se guarda solo en
+  // esta pestaña (sessionStorage): no sale del equipo, aguanta un F5 y se borra al cerrar la
+  // pestaña o la sesión.
+  const CLAVE_DIA = "axio_dia";
+  const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const horaDe = (iso) => new Date(iso).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" });
+  const soloDigitos = (t) => String(t || "").replace(/\D/g, "");
+
+  function leerDia() {
+    try {
+      const d = JSON.parse(sessionStorage.getItem(CLAVE_DIA));
+      if (d && d.fecha === hoyISO() && Array.isArray(d.personas)) return d;
+    } catch (_) { /* sin almacenamiento */ }
+    return { fecha: hoyISO(), personas: [], otras: [] };
+  }
+  function guardarDia(d) {
+    try { sessionStorage.setItem(CLAVE_DIA, JSON.stringify(d)); } catch (_) { /* sin almacenamiento */ }
+  }
+  function olvidarDia() {
+    try { sessionStorage.removeItem(CLAVE_DIA); } catch (_) { /* sin almacenamiento */ }
+  }
+
+  function anotarPersona(a) {
+    if (!a || !a.cedula_limpia) return;
+    const d = leerDia();
+    const ahora = new Date().toISOString();
+    let p = d.personas.find((x) => x.cedula_limpia === a.cedula_limpia);
+    if (!p) {
+      p = { cedula_limpia: a.cedula_limpia, cedula: a.cedula, nombre: a.nombre || "", primera: ahora, veces: 0, acciones: [] };
+      d.personas.push(p);
+    }
+    p.ultima = ahora;
+    p.veces += 1;
+    if (a.nombre) p.nombre = a.nombre;
+    guardarDia(d);
+  }
+
+  // accion: { tipo: "llamada" | "whatsapp" | "hoja" | "matriz" | "ficha" | "lista", ... }. Sin
+  // cédula, va a la persona que está en pantalla; con cédula null, a «otras acciones».
+  function anotarAccion(accion, cedula) {
+    const d = leerDia();
+    const limpia = cedula === null ? "" : soloDigitos(cedula) || (busqueda && busqueda.asociado && busqueda.asociado.cedula_limpia) || "";
+    const p = limpia && d.personas.find((x) => x.cedula_limpia === limpia);
+    const registro = { ...accion, hora: new Date().toISOString() };
+    delete registro.cedula;
+    (p ? p.acciones : d.otras).push(registro);
+    guardarDia(d);
+    if (dialogoDia.open) mostrarTuDia();
+  }
+  // El visor de hojas y «Gestionar en la Matriz» (versión de navegador) avisan por aquí.
+  window.addEventListener("axio-actividad", (ev) => { if (ev.detail && ev.detail.tipo) anotarAccion(ev.detail, ev.detail.cedula); });
+
+  const RESULTADOS_LLAMADA = {
+    contesto: { icono: "✅", texto: "Contestó", tecla: "1" },
+    no_contesto: { icono: "📵", texto: "No contestó", tecla: "2" },
+    promesa: { icono: "🤝", texto: "Promesa de pago", tecla: "3" },
+    equivocado: { icono: "❌", texto: "Número equivocado", tecla: "4" },
+  };
+  const fechaPromesa = (iso) => { const f = aFecha(iso); return f ? `${f.getDate()} de ${MESES_LARGOS[f.getMonth()]}` : iso; };
+
+  function textoAccion(x) {
+    if (x.tipo === "llamada") {
+      const r = RESULTADOS_LLAMADA[x.resultado] || { icono: "📞", texto: "Llamada" };
+      const promesa = x.resultado === "promesa" ? [x.monto ? pesos(x.monto) : null, x.fecha ? "el " + fechaPromesa(x.fecha) : null].filter(Boolean).join(" ") : "";
+      return `${r.icono} ${r.texto}${promesa ? ": " + promesa : ""}${x.nota ? " · «" + x.nota + "»" : ""}`;
+    }
+    if (x.tipo === "whatsapp") return "💬 WhatsApp" + (x.plantilla ? " · " + x.plantilla : "");
+    if (x.tipo === "hoja") return "✏️ " + (x.texto || "Cambio en una hoja");
+    if (x.tipo === "matriz") return "📝 " + (x.texto || "Gestión en la Matriz");
+    if (x.tipo === "ficha") return "🖨️ Ficha impresa";
+    if (x.tipo === "lista") return "🔎 " + (x.texto || "Búsqueda por lista");
+    return x.texto || x.tipo;
+  }
+
+  function cuentasDia(d) {
+    const acciones = d.personas.flatMap((p) => p.acciones).concat(d.otras);
+    const llamadas = acciones.filter((x) => x.tipo === "llamada");
+    const promesas = llamadas.filter((x) => x.resultado === "promesa");
+    return {
+      personas: d.personas.length,
+      llamadas: llamadas.length,
+      contestaron: llamadas.filter((x) => x.resultado === "contesto" || x.resultado === "promesa").length,
+      promesas: promesas.length,
+      sumaPromesas: promesas.reduce((s, x) => s + (Number(x.monto) || 0), 0),
+      whatsapp: acciones.filter((x) => x.tipo === "whatsapp").length,
+      cambios: acciones.filter((x) => x.tipo === "hoja" || x.tipo === "matriz").length,
+    };
+  }
+  const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+  const contestaron = (n) => plural(n, "contestó", "contestaron");
+
+  function textoTuDia(d) {
+    const c = cuentasDia(d);
+    const lineas = [`Tu día en Axio · ${new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}`,
+      [plural(c.personas, "persona consultada", "personas consultadas"),
+        plural(c.llamadas, "llamada", "llamadas") + (c.llamadas ? ` (${contestaron(c.contestaron)})` : ""),
+        plural(c.promesas, "promesa de pago", "promesas de pago") + (c.sumaPromesas ? ` (${pesos(c.sumaPromesas)})` : ""),
+        plural(c.whatsapp, "WhatsApp", "WhatsApp"), plural(c.cambios, "cambio en hojas", "cambios en hojas")].join(" · "), ""];
+    for (const p of [...d.personas].sort((x, y) => x.primera.localeCompare(y.primera))) {
+      const hecho = p.acciones.length ? p.acciones.map((x) => `${textoAccion(x)} (${horaDe(x.hora)})`).join("; ") : "solo consulta";
+      lineas.push(`• ${nombrePropio(p.nombre) || "Sin nombre"} (CC ${p.cedula}), ${horaDe(p.primera)}: ${hecho}`);
+    }
+    for (const x of d.otras) lineas.push(`• ${textoAccion(x)} (${horaDe(x.hora)})`);
+    return lineas.join("\n");
+  }
+
+  const dialogoDia = el("dialog", { class: "dialogo-axio dialogo-dia", "aria-labelledby": "dia-titulo" });
+  document.body.append(dialogoDia);
+  dialogoDia.addEventListener("click", (ev) => { if (ev.target === dialogoDia || ev.target.closest("[data-cerrar]")) dialogoDia.close(); });
+
+  // aviso: una línea arriba (p. ej. «la jornada termina a las 4:30»).
+  function mostrarTuDia(aviso) {
+    const d = leerDia();
+    const c = cuentasDia(d);
+    const personas = [...d.personas].sort((x, y) => (y.ultima || "").localeCompare(x.ultima || ""));
+    const desde = d.personas.length ? d.personas.map((p) => p.primera).sort()[0] : null;
+    const fecha = new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" });
+    const cifraDia = (n, etiqueta, detalle) => el("div", { class: "dia-cifra" + (n ? "" : " cero") },
+      el("strong", { text: String(n) }), el("span", { text: etiqueta }), detalle ? el("em", { text: detalle }) : null);
+    const chip = (x) => el("span", { class: "dia-chip dia-" + (x.resultado || x.tipo) }, textoAccion(x), el("small", { text: horaDe(x.hora) }));
+    const lista = personas.length
+      ? el("ol", { class: "dia-lista" }, ...personas.map((p) => el("li", { class: "dia-fila" },
+        el("button", { type: "button", class: "dia-persona", title: "Volver a buscar a esta persona",
+          onclick: () => { dialogoDia.close(); campo.value = p.cedula_limpia; buscar(); } },
+          el("span", { class: "dia-avatar", "aria-hidden": "true", text: iniciales(nombrePropio(p.nombre)) }),
+          el("span", { class: "dia-quien" },
+            el("strong", { text: nombrePropio(p.nombre) || "CC " + p.cedula }),
+            el("span", { text: `CC ${p.cedula} · ${horaDe(p.primera)}${p.veces > 1 ? ` · ${p.veces} búsquedas` : ""}` }))),
+        el("div", { class: "dia-acciones" }, ...(p.acciones.length ? p.acciones.map(chip) : [el("span", { class: "dia-chip dia-solo", text: "🔍 Solo consulta" })])))))
+      : el("p", { class: "dia-vacio", text: "Todavía no has buscado a nadie hoy. Lo que hagas aparecerá aquí." });
+    dialogoDia.replaceChildren(
+      el("div", { class: "dialogo-axio-cabecera" },
+        el("div", null,
+          el("h2", { id: "dia-titulo", text: "Tu día" }),
+          el("span", { class: "dialogo-axio-sub", text: fecha.charAt(0).toUpperCase() + fecha.slice(1) + (desde ? " · desde las " + horaDe(desde) : "") })),
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
+      el("div", { class: "dialogo-axio-cuerpo" },
+        aviso ? el("p", { class: "dia-aviso", text: aviso }) : null,
+        el("div", { class: "dia-cifras" },
+          cifraDia(c.personas, c.personas === 1 ? "persona consultada" : "personas consultadas"),
+          cifraDia(c.llamadas, c.llamadas === 1 ? "llamada" : "llamadas", c.llamadas ? contestaron(c.contestaron) : null),
+          cifraDia(c.promesas, c.promesas === 1 ? "promesa de pago" : "promesas de pago", c.sumaPromesas ? pesos(c.sumaPromesas) : null),
+          cifraDia(c.whatsapp, "WhatsApp"),
+          cifraDia(c.cambios, c.cambios === 1 ? "cambio en hojas" : "cambios en hojas")),
+        lista,
+        d.otras.length ? el("div", { class: "dia-otras" }, el("strong", { text: "Otras acciones" }), el("div", { class: "dia-acciones" }, ...d.otras.map(chip))) : null),
+      el("div", { class: "dialogo-axio-pie" },
+        el("span", { text: "Solo en esta pestaña: se borra al cerrar la sesión." }),
+        el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar resumen", disabled: !d.personas.length && !d.otras.length,
+          onclick: (ev) => copiar(textoTuDia(leerDia()), "Resumen copiado: pégalo en un correo o un chat.", ev.currentTarget) })));
+    if (!dialogoDia.open) dialogoDia.showModal();
+  }
+
+  // ------------------------------------------------------------------ plantillas de WhatsApp
+  // Mensajes listos para revisar y enviar en WhatsApp (nada sale solo), con el nombre, los
+  // créditos en mora, el último pago o la promesa ya escritos.
+  const lineaDe = (x) => (x.e.tipo_credito && x.e.tipo_credito !== x.linea ? x.e.tipo_credito : x.linea);
+  const enumerar = (lista) => (lista.length < 2 ? lista.join("") : lista.slice(0, -1).join(", ") + " y " + lista[lista.length - 1]);
+
+  function plantillasWhatsapp(a, todos, promesa) {
+    const nombre = nombrePropio(a.nombre);
+    const saludo = `Hola${nombre ? ", " + nombre : ""}. Le saludamos del área de Cartera.`;
+    const enMora = todos.filter((x) => x.estado.mora);
+    const lineas = enumerar([...new Set(enMora.map(lineaDe))]);
+    const ultimo = (a.pagos || []).find((p) => p.fecha);
+    return [
+      promesa ? { titulo: "Confirmar la promesa", detalle: "El acuerdo de esta llamada",
+        texto: `${saludo}\nConfirmamos el acuerdo de la llamada de hoy: ${promesa.monto ? "un pago de " + pesos(promesa.monto) : "un pago"}${promesa.fecha ? " el " + fechaPromesa(promesa.fecha) : ""}. Le agradecemos enviarnos el comprobante cuando lo realice.\n¡Muchas gracias!` } : null,
+      { titulo: "Estado de cuenta", detalle: enMora.length ? "Sus créditos en mora, con saldo" : "Saludo y quedamos atentos", texto: mensajeAsociado(a, todos) },
+      enMora.length ? { titulo: "Recordatorio de cuota", detalle: "Si ya pagó, pide el comprobante",
+        texto: `${saludo}\nLe recordamos que tiene pendiente el pago de ${enMora.length === 1 ? "su cuota de " : "sus cuotas de "}${lineas}. Si ya realizó el pago, por favor envíenos el comprobante para registrarlo.\n¡Muchas gracias!` } : null,
+      enMora.length ? { titulo: "Propuesta de acuerdo", detalle: "Invita a acordar fecha y valor",
+        texto: `${saludo}\nQueremos ayudarle a ponerse al día con ${lineas}. ¿Podemos acordar una fecha y un valor de pago que se ajusten a sus posibilidades?\nQuedamos atentos a su respuesta.` } : null,
+      ultimo ? { titulo: "Confirmación de pago", detalle: `Su pago del ${fechaCorta(aFecha(ultimo.fecha))}`,
+        texto: `${saludo}\nConfirmamos que recibimos su pago del ${fechaCorta(aFecha(ultimo.fecha))}${ultimo.valor ? " por " + pesos(ultimo.valor) : ""}. ¡Muchas gracias!` } : null,
+      { titulo: "No logramos comunicarnos", detalle: "Después de una llamada sin respuesta",
+        texto: `${saludo}\nIntentamos comunicarnos con usted por teléfono, sin éxito. Por favor escríbanos o llámenos cuando le sea posible.\n¡Muchas gracias!` },
+    ].filter(Boolean);
+  }
+
+  const enlaceWhatsapp = (enlace, texto) => `${enlace}?text=${encodeURIComponent(texto)}`;
+
+  // El botón de WhatsApp de la ficha con su ▾ para elegir el mensaje.
+  function whatsappConPlantillas(a, todos) {
+    const plantillas = plantillasWhatsapp(a, todos);
+    const principal = botonWhatsapp(a.whatsapp, plantillas[0].texto);
+    principal.addEventListener("click", () => anotarAccion({ tipo: "whatsapp", plantilla: plantillas[0].titulo }, a.cedula_limpia));
+    const mas = el("button", { class: "boton boton-whatsapp boton-chico whatsapp-mas", type: "button", "aria-haspopup": "menu",
+      "aria-label": "Elegir el mensaje de WhatsApp", title: "Elegir otro mensaje", text: "▾" });
+    mas.addEventListener("click", (ev) => { ev.stopPropagation(); abrirMenuWhatsapp(mas, a, plantillasWhatsapp(a, todos)); });
+    return el("span", { class: "whatsapp-grupo" }, principal, mas);
+  }
+
+  function abrirMenuWhatsapp(boton, a, plantillas) {
+    document.querySelectorAll(".menu-whatsapp").forEach((m) => m.remove());
+    const menuW = el("div", { class: "menu-whatsapp", popover: "auto", role: "menu", "aria-label": "Mensajes de WhatsApp" },
+      el("p", { class: "menu-whatsapp-titulo", text: "Elige el mensaje" }),
+      ...plantillas.map((p) => el("a", { class: "menu-whatsapp-item", role: "menuitem", href: enlaceWhatsapp(a.whatsapp, p.texto),
+        target: "_blank", rel: "noopener noreferrer", title: p.texto,
+        onclick: () => { anotarAccion({ tipo: "whatsapp", plantilla: p.titulo }, a.cedula_limpia); menuW.hidePopover(); } },
+        el("strong", { text: p.titulo }), el("span", { text: p.detalle }))),
+      el("p", { class: "menu-whatsapp-pie", text: "Se abre en WhatsApp para revisarlo antes de enviar." }));
+    (boton.closest("dialog, .panel-llamada") || document.body).append(menuW);
+    menuW.addEventListener("toggle", (e) => { if (e.newState === "closed") menuW.remove(); });
+    menuW.addEventListener("keydown", (e) => {
+      const items = [...menuW.querySelectorAll(".menu-whatsapp-item")];
+      const k = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(k + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus(); }
+    });
+    menuW.showPopover();
+    const r = boton.getBoundingClientRect(), m = menuW.getBoundingClientRect();
+    const izquierda = Math.max(8, Math.min(window.innerWidth - m.width - 8, r.right - m.width));
+    const arriba = r.bottom + 6 + m.height > window.innerHeight - 8 ? Math.max(8, r.top - 6 - m.height) : r.bottom + 6;
+    menuW.style.left = izquierda + "px";
+    menuW.style.top = arriba + "px";
+    menuW.querySelector(".menu-whatsapp-item").focus();
+  }
+
+  // ------------------------------------------------------------------ modo llamada
+  // Un panel al costado con lo que hace falta mientras se habla con la persona: nombre,
+  // celular, lo que está en mora y el último pago. Abajo, el resultado en un toque (o con 1,
+  // 2, 3, 4). Solo se anota en «Tu día»: no escribe en la Matriz ni en ninguna hoja.
+  let panelLlamada = null;
+  const celularDe = (enlace) => { const m = /wa\.me\/(\d+)/.exec(enlace || ""); return m ? m[1] : ""; };
+  function celularLegible(n) {
+    const local = n.length === 12 && n.startsWith("57") ? n.slice(2) : n;
+    return local.length === 10 ? `${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6)}` : n;
+  }
+  const minutosSegundos = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  // Los créditos de la persona, primero los que están en mora (como en su ficha).
+  function creditosDe(a) {
+    const todos = (a.lineas || []).flatMap((l) => l.entradas.map((e) => ({ linea: l.linea, e, estado: estadoCredito(e) })));
+    const peso = (x) => (x.estado.mora ? 0 : x.estado.mora === null ? 1 : 2);
+    return todos.sort((x, y) => peso(x) - peso(y));
+  }
+
+  function cerrarLlamada() {
+    if (!panelLlamada) return;
+    clearInterval(panelLlamada.reloj);
+    const p = panelLlamada;
+    panelLlamada = null;
+    p.classList.add("saliendo");
+    setTimeout(() => p.remove(), 200);
+  }
+
+  function abrirLlamada(a) {
+    cerrarLlamada();
+    const todos = creditosDe(a);
+    const celular = celularDe(a.whatsapp);
+    const enMora = todos.filter((x) => x.estado.mora);
+    const ultimo = (a.pagos || []).find((p) => p.fecha);
+    const inicio = Date.now();
+    const reloj = el("span", { class: "ll-reloj", title: "Tiempo desde que abriste el modo llamada", text: "0:00" });
+    const dato = (etiqueta, valor, copiable, mensaje) => el("div", { class: "ll-dato" },
+      el("span", { class: "ll-etiqueta", text: etiqueta }),
+      el("strong", { text: valor }),
+      copiable ? el("button", { class: "boton boton-texto ll-copiar", type: "button", title: "Copiar", "aria-label": "Copiar " + etiqueta.toLowerCase(),
+        text: "📋", onclick: (ev) => copiar(copiable, mensaje, ev.currentTarget) }) : null);
+    const situacion = enMora.length
+      ? el("ul", { class: "ll-mora" }, ...enMora.map((x) => {
+        const saldo = x.e.saldo_actual || x.e.saldo;
+        return el("li", null,
+          el("strong", { text: lineaDe(x) }),
+          el("span", { text: [saldo ? "Saldo " + conPesos(saldo) : null,
+            x.e.meses_mora ? `${x.e.meses_mora} ${x.e.meses_mora === "1" ? "mes" : "meses"} en mora` : null,
+            x.e.fecha_ultimo_pago ? "último pago " + x.e.fecha_ultimo_pago : null].filter(Boolean).join(" · ") }));
+      }))
+      : el("p", { class: "ll-al-dia", text: todos.length ? "🟢 Al día en todos sus créditos" : "Sin créditos activos en las líneas" });
+
+    const nota = el("input", { class: "ll-nota", type: "text", maxlength: "140", placeholder: "Nota (opcional): «llamar después de las 3»…", "aria-label": "Nota de la llamada" });
+    const zonaResultado = el("div", { class: "ll-resultado" });
+    const botonesResultado = el("div", { class: "ll-botones", role: "group", "aria-label": "Resultado de la llamada" },
+      ...Object.entries(RESULTADOS_LLAMADA).map(([clave, r]) => el("button", { class: "ll-boton ll-" + clave, type: "button", "data-resultado": clave,
+        onclick: () => (clave === "promesa" ? pedirPromesa() : anotar(clave)) },
+        el("span", { class: "ll-icono", "aria-hidden": "true", text: r.icono }), el("span", { text: r.texto }), el("kbd", { text: r.tecla }))));
+    zonaResultado.append(botonesResultado, nota);
+
+    function pedirPromesa() {
+      const manana = new Date(Date.now() + 86400000);
+      const fecha = el("input", { type: "date", class: "ll-fecha", "aria-label": "Fecha de la promesa",
+        value: `${manana.getFullYear()}-${String(manana.getMonth() + 1).padStart(2, "0")}-${String(manana.getDate()).padStart(2, "0")}` });
+      const monto = el("input", { type: "text", inputmode: "numeric", class: "ll-monto", placeholder: "Valor, p. ej. 500.000", "aria-label": "Valor prometido" });
+      monto.addEventListener("input", () => {
+        const n = soloDigitos(monto.value);
+        monto.value = n ? formatoMiles.format(Number(n)) : "";
+      });
+      const guardar = () => anotar("promesa", { fecha: fecha.value, monto: Number(soloDigitos(monto.value)) || null });
+      monto.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); guardar(); } });
+      zonaResultado.replaceChildren(
+        el("p", { class: "ll-pregunta", text: "🤝 ¿Cuánto y cuándo va a pagar?" }),
+        el("div", { class: "ll-promesa" },
+          el("label", null, el("span", { text: "Valor" }), monto),
+          el("label", null, el("span", { text: "Fecha" }), fecha)),
+        nota,
+        el("div", { class: "ll-acciones" },
+          el("button", { class: "boton boton-chico", type: "button", text: "← Volver", onclick: () => zonaResultado.replaceChildren(botonesResultado, nota) }),
+          el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Anotar la promesa", onclick: guardar })));
+      monto.focus();
+    }
+
+    function anotar(clave, extra = {}) {
+      clearInterval(panel.reloj);
+      const segundos = Math.round((Date.now() - inicio) / 1000);
+      anotarAccion({ tipo: "llamada", resultado: clave, nota: nota.value.trim() || null, duracion: segundos, ...extra }, a.cedula_limpia);
+      const r = RESULTADOS_LLAMADA[clave];
+      const plantillas = a.whatsapp ? plantillasWhatsapp(a, todos, clave === "promesa" ? extra : null) : [];
+      const sugerida = clave === "no_contesto" ? plantillas.find((p) => p.titulo === "No logramos comunicarnos")
+        : clave === "promesa" ? plantillas[0] : null;
+      const enviar = sugerida ? el("a", { class: "boton boton-whatsapp boton-chico", href: enlaceWhatsapp(a.whatsapp, sugerida.texto), target: "_blank", rel: "noopener noreferrer",
+        text: clave === "promesa" ? "💬 Confirmar por WhatsApp" : "💬 Avisar por WhatsApp",
+        onclick: () => anotarAccion({ tipo: "whatsapp", plantilla: sugerida.titulo }, a.cedula_limpia) }) : null;
+      zonaResultado.replaceChildren(
+        el("div", { class: "ll-anotado" }, palomita("palomita ll-palomita"),
+          el("div", null,
+            el("strong", { text: `${r.icono} ${r.texto}` + (clave === "promesa" ? ": " + [extra.monto ? pesos(extra.monto) : null, extra.fecha ? "el " + fechaPromesa(extra.fecha) : null].filter(Boolean).join(" ") : "") }),
+            el("span", { text: `Anotado en «Tu día» · ${minutosSegundos(segundos)} de llamada` }))),
+        el("div", { class: "ll-acciones" },
+          enviar,
+          el("button", { class: "boton boton-chico", type: "button", text: "🗓 Ver tu día", onclick: () => mostrarTuDia() }),
+          el("button", { class: "boton boton-chico", type: "button", text: "Cerrar", onclick: cerrarLlamada })));
+      panel.focus({ preventScroll: true });
+    }
+
+    const nombre = nombrePropio(a.nombre) || "CC " + a.cedula;
+    const panel = el("aside", { class: "panel-llamada", role: "dialog", "aria-label": "Modo llamada con " + nombre, tabindex: "-1" },
+      el("div", { class: "ll-cabecera" },
+        el("span", { class: "ll-pulso", "aria-hidden": "true" }),
+        el("span", { class: "ll-titulo", text: "Modo llamada" }),
+        reloj,
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar el modo llamada", text: "✕", onclick: cerrarLlamada })),
+      el("div", { class: "ll-cuerpo" },
+        el("div", { class: "ll-persona" },
+          el("span", { class: "asociado-avatar ll-avatar", "aria-hidden": "true", text: iniciales(nombrePropio(a.nombre)) }),
+          el("div", null, el("strong", { class: "ll-nombre", text: nombre }), el("span", { class: "ll-cc", text: "CC " + a.cedula }))),
+        el("div", { class: "ll-datos" },
+          celular ? dato("Celular", celularLegible(celular), celularLegible(celular).replace(/\s/g, ""), "Celular copiado.")
+            : el("div", { class: "ll-dato ll-falta" }, el("span", { class: "ll-etiqueta", text: "Celular" }), el("span", { text: "No está en el directorio de WhatsApp" })),
+          el("div", { class: "ll-par" },
+            dato("Cédula", a.cedula, a.cedula_limpia, "Cédula copiada."),
+            dato("Último pago", ultimo ? `${fechaCorta(aFecha(ultimo.fecha))}${ultimo.valor ? " · " + pesos(ultimo.valor) : ""}` : "Sin pagos en Extractos"))),
+        el("p", { class: "ll-subtitulo", text: enMora.length ? `🔴 ${plural(enMora.length, "crédito en mora", "créditos en mora")}` : "Créditos" }),
+        situacion,
+        el("p", { class: "ll-subtitulo", text: "¿Cómo terminó la llamada?" }),
+        zonaResultado,
+        el("p", { class: "ll-pie", text: "Solo se anota en «Tu día»: no cambia la Matriz ni ninguna hoja." })));
+    panel.reloj = setInterval(() => { reloj.textContent = minutosSegundos(Math.round((Date.now() - inicio) / 1000)); }, 1000);
+    panel.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); cerrarLlamada(); return; }
+      if (escribiendo(ev.target) || ev.ctrlKey || ev.metaKey || ev.altKey || !botonesResultado.isConnected) return;
+      const clave = Object.keys(RESULTADOS_LLAMADA).find((k) => RESULTADOS_LLAMADA[k].tecla === ev.key);
+      if (clave) { ev.preventDefault(); botonesResultado.querySelector(`[data-resultado="${clave}"]`).click(); }
+    });
+    panelLlamada = panel;
+    document.body.append(panel);
+    panel.focus({ preventScroll: true });
+  }
+
+  // Esc cierra el panel aunque el foco ya no esté en él (si no hay una ventana encima).
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && panelLlamada && !ev.defaultPrevented && !document.querySelector("dialog[open], .menu-whatsapp:popover-open")) cerrarLlamada();
+  });
+
+  // ------------------------------------------------------------------ portapapeles inteligente
+  // Al volver a Axio con una cédula copiada en otro programa (Siasoft, un correo, Excel), se
+  // ofrece buscarla: Enter la busca. Se activa una vez (el navegador pide permiso para leer
+  // lo copiado) y se apaga desde el menú. Solo mira cifras que parecen una cédula.
+  const CLAVE_PORTAPAPELES = "axio.portapapeles";   // "si" | "no" | sin decidir
+  let ultimaOfrecida = "";
+  let temporizadorOferta = null;
+  const oferta = el("div", { class: "oferta-portapapeles", role: "status", hidden: true });
+  document.body.append(oferta);
+
+  function preferenciaPortapapeles() {
+    try { return sessionStorage.getItem(CLAVE_PORTAPAPELES) || ""; } catch (_) { return ""; }
+  }
+  function elegirPortapapeles(valor) {
+    try { sessionStorage.setItem(CLAVE_PORTAPAPELES, valor); } catch (_) { /* sin almacenamiento */ }
+  }
+  function cedulaDe(texto) {
+    const t = String(texto || "").trim();
+    if (!t || t.length > 24 || !/^[\d.,\s-]+$/.test(t)) return "";
+    const d = soloDigitos(t);
+    return d.length >= 6 && d.length <= 10 ? d : "";
+  }
+  function quitarOferta() {
+    clearTimeout(temporizadorOferta);
+    oferta.hidden = true;
+    oferta.replaceChildren();
+  }
+  function mostrarOferta(...hijos) {
+    oferta.replaceChildren(...hijos, el("button", { class: "boton boton-texto oferta-cerrar", type: "button", "aria-label": "Cerrar", text: "✕", onclick: quitarOferta }));
+    oferta.hidden = false;
+    clearTimeout(temporizadorOferta);
+    temporizadorOferta = setTimeout(quitarOferta, 14000);
+  }
+  async function permisoPortapapeles() {
+    try { return (await navigator.permissions.query({ name: "clipboard-read" })).state; } catch (_) { return ""; }
+  }
+  async function mirarPortapapeles() {
+    if (!navigator.clipboard || !navigator.clipboard.readText || document.hidden || velo.open || document.querySelector("dialog[open]")) return;
+    let pref = preferenciaPortapapeles();
+    if (pref === "no") return;
+    if (pref !== "si") {
+      // Si el navegador ya dio el permiso (otra sesión), se usa; si no, se invita una vez.
+      if (await permisoPortapapeles() === "granted") { pref = "si"; elegirPortapapeles("si"); }
+      else { invitarPortapapeles(); return; }
+    }
+    let texto;
+    try { texto = await navigator.clipboard.readText(); } catch (_) { return; }
+    const cedula = cedulaDe(texto);
+    const enPantalla = busqueda && busqueda.asociado ? busqueda.asociado.cedula_limpia : "";
+    if (!cedula || cedula === ultimaOfrecida || cedula === soloDigitos(campo.value) || cedula === enPantalla) return;
+    ultimaOfrecida = cedula;
+    mostrarOferta(
+      el("span", { class: "oferta-icono", "aria-hidden": "true", text: "📋" }),
+      el("span", { class: "oferta-texto" }, "Copiaste ", el("strong", { text: formatoMiles.format(Number(cedula)) })),
+      el("button", { class: "boton boton-principal boton-chico", type: "button", onclick: () => buscarOfrecida(cedula) }, "Buscar ", el("kbd", { text: "Enter" })));
+    oferta.dataset.cedula = cedula;
+  }
+  let invitado = false;
+  function invitarPortapapeles() {
+    if (invitado) return;
+    invitado = true;
+    mostrarOferta(
+      el("span", { class: "oferta-icono", "aria-hidden": "true", text: "📋" }),
+      el("span", { class: "oferta-texto", text: "¿Te ofrezco buscar las cédulas que copies en otros programas?" }),
+      el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Activar", onclick: async () => {
+        quitarOferta();
+        try {
+          const texto = await navigator.clipboard.readText();   // aquí el navegador pide el permiso
+          elegirPortapapeles("si");
+          toast("Listo: cuando vuelvas con una cédula copiada, te ofrezco buscarla.");
+          ultimaOfrecida = cedulaDe(texto);
+        } catch (_) {
+          toast("El navegador no dio el permiso. Puedes activarlo después desde tu menú.");
+        }
+      } }),
+      el("button", { class: "boton boton-texto boton-chico", type: "button", text: "No, gracias", onclick: () => { elegirPortapapeles("no"); quitarOferta(); } }));
+  }
+  function buscarOfrecida(cedula) {
+    quitarOferta();
+    campo.value = cedula;
+    buscar();
+  }
+  // Volver a la ventana de Axio (desde otro programa) es la señal para mirar lo copiado.
+  let salioDeAxio = false;
+  window.addEventListener("blur", () => { salioDeAxio = true; });
+  window.addEventListener("focus", () => { if (salioDeAxio) { salioDeAxio = false; setTimeout(mirarPortapapeles, 120); } });
+  document.addEventListener("keydown", (ev) => {
+    if (oferta.hidden || !oferta.dataset.cedula) return;
+    if (ev.key === "Escape") { quitarOferta(); return; }
+    if (ev.key !== "Enter" || document.querySelector("dialog[open]") || (escribiendo(ev.target) && ev.target.value && ev.target !== campo)) return;
+    if (ev.target === campo && campo.value.trim() && soloDigitos(campo.value) !== oferta.dataset.cedula) return;
+    ev.preventDefault();
+    buscarOfrecida(oferta.dataset.cedula);
+  }, true);
+
+  // ------------------------------------------------------------------ tamaño de la letra
+  // A− / A+ en el menú de la persona: agranda el contenido (fichas, tablas, detalle), no la
+  // ventana. Se recuerda en este navegador.
+  const CLAVE_LETRA = "axio.letra";
+  const NIVELES_LETRA = [90, 100, 110, 120, 135];
+  function leerLetra() {
+    try { const n = Number(sessionStorage.getItem(CLAVE_LETRA)); return NIVELES_LETRA.includes(n) ? n : 100; } catch (_) { return 100; }
+  }
+  function aplicarLetra(n) {
+    if (n === 100) document.documentElement.style.removeProperty("--letra");
+    else document.documentElement.style.setProperty("--letra", String(n / 100));
+  }
+  function cambiarLetra(paso) {
+    const i = NIVELES_LETRA.indexOf(leerLetra());
+    const n = paso === 0 ? 100 : NIVELES_LETRA[Math.max(0, Math.min(NIVELES_LETRA.length - 1, i + paso))];
+    try { n === 100 ? sessionStorage.removeItem(CLAVE_LETRA) : sessionStorage.setItem(CLAVE_LETRA, String(n)); } catch (_) { /* sin almacenamiento */ }
+    aplicarLetra(n);
+    return n;
+  }
+  aplicarLetra(leerLetra());
+
+  function selectorLetra() {
+    const valor = el("button", { type: "button", class: "letra-valor", title: "Volver al tamaño normal", text: leerLetra() + " %" });
+    const cambiar = (paso) => (ev) => { ev.stopPropagation(); valor.textContent = cambiarLetra(paso) + " %"; };
+    valor.addEventListener("click", cambiar(0));
+    return el("div", { class: "menu-tema menu-letra" },
+      el("span", { class: "menu-titulo", text: "Tamaño de la letra" }),
+      el("div", { class: "letra-control", role: "group", "aria-label": "Tamaño de la letra" },
+        el("button", { type: "button", "aria-label": "Letra más pequeña", text: "A−", onclick: cambiar(-1) }),
+        valor,
+        el("button", { type: "button", class: "letra-grande", "aria-label": "Letra más grande", text: "A+", onclick: cambiar(1) })));
+  }
+
+  function opcionPortapapeles() {
+    const activo = preferenciaPortapapeles() === "si";
+    return el("label", { class: "menu-interruptor", title: "Al volver a Axio con una cédula copiada en otro programa, te ofrece buscarla" },
+      el("input", { type: "checkbox", checked: activo, onchange: async (ev) => {
+        if (!ev.target.checked) { elegirPortapapeles("no"); return; }
+        try { await navigator.clipboard.readText(); elegirPortapapeles("si"); }
+        catch (_) { ev.target.checked = false; toast("El navegador no dio el permiso para leer lo copiado."); }
+      } }),
+      el("span", { text: "Ofrecer buscar la cédula que copie" }));
+  }
+
+  // ------------------------------------------------------------------ atajos (tecla «?»)
+  const dialogoAtajos = el("dialog", { class: "dialogo-axio dialogo-atajos", "aria-labelledby": "atajos-titulo" });
+  document.body.append(dialogoAtajos);
+  dialogoAtajos.addEventListener("click", (ev) => { if (ev.target === dialogoAtajos || ev.target.closest("[data-cerrar]")) dialogoAtajos.close(); });
+
+  function mostrarAtajos() {
+    const teclas = (lista) => el("span", { class: "atajo-teclas" },
+      ...lista.flatMap((t, i) => [i ? el("span", { class: "atajo-mas", text: "+" }) : null, el("kbd", { text: t })]).filter(Boolean));
+    const grupo = (titulo, filas) => el("section", { class: "atajos-grupo" }, el("h3", { text: titulo }),
+      el("ul", null, ...filas.map(([t, que]) => el("li", null, teclas(t), el("span", { text: que })))));
+    const conVisor = typeof window.axioMejorarEnlace === "function";
+    dialogoAtajos.replaceChildren(
+      el("div", { class: "dialogo-axio-cabecera" },
+        el("div", null, el("h2", { id: "atajos-titulo", text: "Atajos de teclado" }), el("span", { class: "dialogo-axio-sub", text: "Para trabajar sin soltar el teclado" })),
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
+      el("div", { class: "dialogo-axio-cuerpo atajos-grupos" },
+        grupo("En toda la página", [
+          [["/"], "Ir al buscador"], [["Ctrl", "K"], "Paleta de comandos"], [["Ctrl", "Shift", "H"], "Ocultar la pantalla"],
+          [["D"], "Tu día"], [["?"], "Ver estos atajos"], [["Esc"], "Cerrar ventanas y menús"]]),
+        grupo("Con una persona en pantalla", [
+          [["L"], "Modo llamada"], [["1", "2", "3", "4"], "Resultado de la llamada (en el modo llamada)"],
+          [["Enter"], "Buscar la cédula que copiaste (cuando Axio lo ofrece)"]]),
+        conVisor ? grupo("En el visor de hojas", [
+          [["Ctrl", "C"], "Copiar"], [["Ctrl", "V"], "Pegar"], [["Ctrl", "Z"], "Deshacer"], [["Ctrl", "F"], "Buscar en la hoja"],
+          [["Enter"], "Escribir en la celda"], [["Alt", "↑ ↓"], "Cambiar de pestaña"], [["Ctrl", "rueda"], "Acercar o alejar"]]) : null));
+    if (!dialogoAtajos.open) dialogoAtajos.showModal();
+  }
+
+  // ------------------------------------------------------------------ buscar varias cédulas
+  // Se pega una lista (de Excel, un correo, un chat) y se ve el estado de todas a la vez:
+  // nombre, créditos en mora, saldo en mora y último pago. Tocar una fila la busca; la tabla
+  // se copia para pegarla en Excel. Pegar varias cédulas en el buscador también abre esto.
+  const MAXIMO_LISTA = 200;
+  const dialogoLista = el("dialog", { class: "dialogo-axio dialogo-lista", "aria-labelledby": "lista-titulo" });
+  document.body.append(dialogoLista);
+  dialogoLista.addEventListener("click", (ev) => { if (ev.target === dialogoLista || ev.target.closest("[data-cerrar]")) dialogoLista.close(); });
+  dialogoLista.addEventListener("close", () => { if (dialogoLista.tarea) dialogoLista.tarea.cancelada = true; });
+
+  function cedulasDeTexto(texto) {
+    const vistas = new Set();
+    for (const trozo of String(texto || "").replace(/(\d)\.(?=\d{3}\b)/g, "$1").split(/\D+/)) {
+      if (trozo.length >= 6 && trozo.length <= 10) vistas.add(trozo);
+    }
+    return [...vistas];
+  }
+  const numeroDe = (v) => { const n = Number(String(v || "").replace(/[^\d,-]/g, "").replace(/,/g, "")); return Number.isFinite(n) ? n : 0; };
+
+  function abrirBuscarVarias(texto) {
+    const area = el("textarea", { class: "lista-entrada", rows: "5", spellcheck: "false", "aria-label": "Cédulas a buscar",
+      placeholder: "Pega aquí las cédulas: una por línea, o separadas por comas o espacios.\nSirve copiar una columna de Excel." });
+    area.value = texto || "";
+    const contador = el("span", { class: "lista-contador" });
+    const actualizarContador = () => {
+      const n = cedulasDeTexto(area.value).length;
+      contador.textContent = n ? `${plural(Math.min(n, MAXIMO_LISTA), "cédula", "cédulas")}${n > MAXIMO_LISTA ? ` (de ${n}: máximo ${MAXIMO_LISTA})` : ""}` : "";
+      botonBuscar.disabled = !n;
+    };
+    const botonBuscar = el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Buscar todas", onclick: () => correrLista(cedulasDeTexto(area.value).slice(0, MAXIMO_LISTA)) });
+    area.addEventListener("input", actualizarContador);
+    area.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); botonBuscar.click(); } });
+    const zona = el("div", { class: "lista-zona" });
+    dialogoLista.replaceChildren(
+      el("div", { class: "dialogo-axio-cabecera" },
+        el("div", null, el("h2", { id: "lista-titulo", text: "Buscar varias cédulas" }),
+          el("span", { class: "dialogo-axio-sub", text: "El estado de muchas personas de una vez" })),
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
+      el("div", { class: "dialogo-axio-cuerpo" },
+        area,
+        el("div", { class: "lista-barra" }, contador, botonBuscar),
+        zona));
+    actualizarContador();
+    if (!dialogoLista.open) dialogoLista.showModal();
+    if (texto && cedulasDeTexto(texto).length) botonBuscar.click(); else area.focus();
+
+    async function correrLista(cedulas) {
+      if (dialogoLista.tarea) dialogoLista.tarea.cancelada = true;
+      const tarea = { cancelada: false };
+      dialogoLista.tarea = tarea;
+      const filas = cedulas.map((c) => ({ cedula: c, estado: "pendiente" }));
+      const avance = el("div", { class: "lista-avance", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(filas.length) }, el("span"));
+      const resumen = el("p", { class: "lista-resumen", "aria-live": "polite" });
+      const cuerpoTabla = el("tbody");
+      const soloMora = el("input", { type: "checkbox" });
+      const copiarTabla = el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar tabla", disabled: true,
+        title: "Para pegar en Excel o en Google Sheets",
+        onclick: (ev) => copiar(tsvLista(filas), "Tabla copiada: pégala en Excel o en Google Sheets.", ev.currentTarget) });
+      soloMora.addEventListener("change", pintar);
+      zona.replaceChildren(avance, resumen,
+        el("div", { class: "lista-tabla-envoltura" },
+          el("table", { class: "lista-tabla" },
+            el("thead", null, el("tr", null, ...["Cédula", "Nombre", "Estado", "Saldo en mora", "Último pago"].map((t) => el("th", { text: t })))),
+            cuerpoTabla)),
+        el("div", { class: "lista-barra" }, el("label", { class: "lista-filtro" }, soloMora, " Solo las que tienen mora"), copiarTabla));
+
+      function pintar() {
+        cuerpoTabla.replaceChildren(...filas.filter((f) => !soloMora.checked || f.mora > 0).map((f) => {
+          const clase = f.estado === "pendiente" ? "cargando" : f.estado === "error" ? "error" : f.mora > 0 ? "mora" : f.creditos ? "dia" : f.nombre ? "neutro" : "nada";
+          const tr = el("tr", { class: "lista-" + clase, tabindex: f.nombre ? "0" : null, title: f.nombre ? "Buscar a esta persona" : null },
+            el("td", { class: "num", text: formatoMiles.format(Number(f.cedula)) }),
+            el("td", { text: f.estado === "pendiente" ? "…" : f.nombre ? nombrePropio(f.nombre) : f.estado === "error" ? "No se pudo buscar" : "—" }),
+            el("td", null, el("span", { class: "lista-estado", text: f.textoEstado || (f.estado === "pendiente" ? "Buscando…" : "") })),
+            el("td", { class: "num", text: f.saldoMora ? pesos(f.saldoMora) : "" }),
+            el("td", { text: f.ultimoPago || "" }));
+          if (f.nombre) {
+            const ir = () => { dialogoLista.close(); campo.value = f.cedula; buscar(); };
+            tr.addEventListener("click", ir);
+            tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") ir(); });
+          }
+          return tr;
+        }));
+      }
+
+      pintar();
+      let hechas = 0;
+      const siguiente = async () => {
+        for (let f = filas.find((x) => x.estado === "pendiente" && !x.tomada); f && !tarea.cancelada; f = filas.find((x) => x.estado === "pendiente" && !x.tomada)) {
+          f.tomada = true;
+          try {
+            let r = await apiJson("/api/buscar?q=" + encodeURIComponent(f.cedula));
+            for (let intento = 0; r.status === 202 && intento < 30 && !tarea.cancelada; intento++) {   // las hojas aún cargan
+              await new Promise((ok) => setTimeout(ok, 2000));
+              r = await apiJson("/api/buscar?q=" + encodeURIComponent(f.cedula));
+            }
+            const a = r.datos && r.datos.asociado;
+            if (a) {
+              const todos = creditosDe(a);
+              const enMora = todos.filter((x) => x.estado.mora);
+              const ultimo = (a.pagos || []).find((p) => p.fecha);
+              Object.assign(f, {
+                estado: "ok", nombre: a.nombre || "(sin nombre)", mora: enMora.length, creditos: todos.length,
+                saldoMora: enMora.reduce((s, x) => s + numeroDe(x.e.saldo_actual || x.e.saldo), 0),
+                textoEstado: enMora.length ? `🔴 ${plural(enMora.length, "en mora", "en mora")}` : todos.length ? "🟢 Al día" : "⚪ Sin créditos",
+                ultimoPago: ultimo ? `${fechaCorta(aFecha(ultimo.fecha))}${ultimo.valor ? " · " + pesos(ultimo.valor) : ""}` : "",
+              });
+            } else {
+              const enExtractos = r.datos && (r.datos.grupos || []).some((g) => (g.filas || []).length);
+              Object.assign(f, { estado: "ok", nombre: "", mora: 0, textoEstado: enExtractos ? "Solo en Extractos" : "No encontrada" });
+            }
+          } catch (_) {
+            Object.assign(f, { estado: "error", textoEstado: "⚠️ Error" });
+          }
+          hechas += 1;
+          avance.firstChild.style.width = `${(hechas / filas.length) * 100}%`;
+          avance.setAttribute("aria-valuenow", String(hechas));
+          resumen.textContent = hechas < filas.length ? `Buscando… ${hechas} de ${filas.length}` : "";
+          pintar();
+        }
+      };
+      await Promise.all([siguiente(), siguiente(), siguiente()]);
+      if (tarea.cancelada) return;
+      const conMora = filas.filter((f) => f.mora > 0);
+      const sinFicha = filas.filter((f) => f.estado === "ok" && !f.nombre).length;
+      resumen.textContent = `${plural(filas.length, "cédula", "cédulas")} · ${plural(conMora.length, "con mora", "con mora")}`
+        + (conMora.length ? ` (${pesos(conMora.reduce((s, f) => s + f.saldoMora, 0))})` : "") + (sinFicha ? ` · ${sinFicha} sin ficha` : "");
+      avance.classList.add("listo");
+      copiarTabla.disabled = false;
+      anotarAccion({ tipo: "lista", texto: `Búsqueda por lista: ${plural(filas.length, "cédula", "cédulas")}` }, null);
+    }
+  }
+
+  function tsvLista(filas) {
+    const lineas = [["Cédula", "Nombre", "Estado", "Créditos en mora", "Saldo en mora", "Último pago"].join("\t")];
+    for (const f of filas) {
+      lineas.push([f.cedula, nombrePropio(f.nombre) || "", (f.textoEstado || "").replace(/^\S+\s/, ""), f.mora || 0, f.saldoMora ? Math.round(f.saldoMora) : "", f.ultimoPago || ""].join("\t"));
+    }
+    return lineas.join("\n");
+  }
+
+  // Pegar varias cédulas en el buscador abre la búsqueda por lista con ellas.
+  campo.addEventListener("paste", (ev) => {
+    const texto = (ev.clipboardData || window.clipboardData).getData("text");
+    if (cedulasDeTexto(texto).length < 2) return;
+    ev.preventDefault();
+    abrirBuscarVarias(texto);
+  });
+
+  const formSalir = document.querySelector('form[action$="logout"]');
+  if (formSalir) formSalir.addEventListener("submit", olvidarDia);
 
   // ------------------------------------------------------------------ ocultar la pantalla
   // La sesión puede quedar abierta toda la jornada: si alguien se acerca al puesto, los saldos
