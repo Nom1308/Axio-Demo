@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-27-144539");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-27-150209");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -279,7 +279,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-27-144539";
+    script.src = "estatico/app.js?v=2026-10-27-150209";
     document.body.append(script);
   }
 
@@ -352,6 +352,22 @@
   }
 
   const conToken = (url) => fetch(url, { headers: { Authorization: "Bearer " + token } });
+
+  // El permiso de Google dura una hora. Si se espera a que venza, la ventanita de Google sale
+  // justo al guardar una gestión. Por eso, cuando le quedan menos de 10 minutos, se renueva
+  // con el siguiente clic cualquiera (Google exige un clic para abrir su ventana). No se hace
+  // al tocar un campo de texto, para no quitarle el foco a quien va a escribir.
+  const RENOVAR_ANTES = 10 * 60000;
+  let renovando = false, ultimoIntento = 0;
+  document.addEventListener("click", (ev) => {
+    if (!usuario || !token || renovando || venceToken - Date.now() > RENOVAR_ANTES) return;
+    if (Date.now() - ultimoIntento < 120000) return;
+    if (ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]")) return;
+    renovando = true;
+    ultimoIntento = Date.now();
+    pedirToken("").then(enviarToken).catch(() => { /* se reintenta al guardar, como antes */ })
+      .finally(() => { renovando = false; });
+  }, true);
 
   // ------------------------------------------------------------------ registro de gestiones
   // Si el config trae «url_registro_gestiones» (una hoja de Google aparte), cada valor que
@@ -503,11 +519,20 @@
   // memoria. Con sesión, además se le devuelve el token a Google para que deje de valer.
   // app.js llama lo mismo cuando cierra la sesión por inactividad o al terminar la jornada.
   const MARCA_INACTIVIDAD = "axio_cierre_inactividad";   // solo una marca, sin datos
+  // Recargar (F5) o cerrar la pestaña sin querer borra la sesión y obliga a esperar la carga
+  // otra vez: el navegador pregunta antes. Al cerrar la sesión a propósito no se pregunta.
+  let saliendo = false;
+  window.addEventListener("beforeunload", (ev) => {
+    if (!usuario || saliendo) return;
+    ev.preventDefault();
+    ev.returnValue = "";
+  });
   const AVISOS_CIERRE = {
     inactividad: "Se cerró la sesión por inactividad y se borraron los datos de la pestaña. Vuelve a entrar para seguir.",
     jornada: "Terminó la jornada y se cerró la sesión; se borraron los datos de la pestaña. Si necesitas seguir, vuelve a entrar.",
   };
   function cerrarSesion(motivo) {
+    saliendo = true;
     if (AVISOS_CIERRE[motivo]) {
       try { sessionStorage.setItem(MARCA_INACTIVIDAD, motivo); } catch (_) { /* sin almacenamiento */ }
     }

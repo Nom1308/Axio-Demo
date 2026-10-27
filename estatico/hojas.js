@@ -146,7 +146,22 @@
   // de nombre y se acerca o aleja con los botones de zoom o Ctrl + rueda del mouse.
   const ventana = nodo("dialog", { class: "visor-hoja", "aria-label": "Hoja de Google" });
   document.body.append(ventana);
-  ventana.addEventListener("cancel", (ev) => { if (ventana.querySelector(".celda-editando")) ev.preventDefault(); });
+  // Esc cierra primero lo que esté abierto encima (menú, mis cambios, confirmación, búsqueda)
+  // y solo después la ventana.
+  ventana.addEventListener("cancel", (ev) => {
+    if (ventana.querySelector(".celda-editando") || cerrarFlotantes() || cerrarBuscador(true)) ev.preventDefault();
+  });
+  ventana.addEventListener("keydown", (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || (ev.key !== "f" && ev.key !== "F") || !visor || !visor.mapa) return;
+    ev.preventDefault();
+    abrirBuscador(visor);
+  });
+  // Un clic fuera del menú o de «Mis cambios» los cierra.
+  ventana.addEventListener("mousedown", (ev) => {
+    for (const e of ventana.querySelectorAll(".visor-menu, .visor-panel-cambios")) {
+      if (!e.contains(ev.target) && !ev.target.closest(".visor-cambios-boton")) e.remove();
+    }
+  }, true);
 
   const ALTO_CABECERA = 22;   // fila de letras A, B, C...
   const ANCHO_NUMEROS = 46;   // columna de números de fila
@@ -180,11 +195,27 @@
     }
   }
 
+  // «10937 - 71712176 - ALVEIRO ROJO ARENAS-Acuerdo Hipotecario - v2»: el nombre arriba y,
+  // debajo y más pequeño, lo demás (código, cédula, tipo de acuerdo). Sin guiones, una línea.
+  function partesTitulo(nombre) {
+    const partes = String(nombre || "").split(/\s*-\s*/).map((t) => t.trim()).filter(Boolean);
+    const k = partes.findIndex((t) => /[A-Za-zÁÉÍÓÚÑáéíóúñ]{3}/.test(t));
+    if (partes.length < 2 || k < 0) return { principal: String(nombre || ""), detalle: "" };
+    return { principal: partes[k], detalle: partes.filter((_, n) => n !== k).join(" · ") };
+  }
+  function tituloVisor(v) {
+    if (!v) return nodo("div", { class: "visor-titulo" }, nodo("strong", { class: "vt-principal", text: "Hoja de Google" }));
+    const t = partesTitulo(v.archivo.name);
+    return nodo("div", { class: "visor-titulo", title: v.archivo.name },
+      nodo("strong", { class: "vt-principal", text: t.principal }),
+      t.detalle ? nodo("span", { class: "vt-detalle", text: t.detalle }) : null);
+  }
+
   function cabeceraVisor(v) {
     const estado = nodo("span", { class: "visor-estado", id: "visor-estado" });
     const cabecera = nodo("div", { class: "visor-cabecera" },
       nodo("span", { class: "icono-sheets", "aria-hidden": "true" }),
-      nodo("strong", { class: "visor-titulo", text: v ? v.archivo.name : "Hoja de Google", title: v ? v.archivo.name : null }),
+      tituloVisor(v),
       // El nombre del archivo trae código, cédula y nombre: Cartera lo copia seguido.
       v ? nodo("button", { class: "boton boton-texto visor-copiar-titulo", type: "button", title: "Copiar el nombre completo de la hoja",
         "aria-label": "Copiar el nombre de la hoja", text: "📋", onclick: () => copiarTexto(v.archivo.name, "📋 Nombre de la hoja copiado") }) : null,
@@ -234,7 +265,14 @@
         text: "📋 Copiar", onclick: () => { copiarRango(v, rangoSeleccionado(v)); enfocarCuerpo(); } }),
       nodo("button", { class: "visor-copiar visor-copiar-encabezado", type: "button", hidden: true,
         title: "Copia las filas de arriba de la hoja (las inmovilizadas): cédula, nombre, PR, celular...",
-        text: "📋 Copiar encabezado", onclick: () => copiarEncabezado(v) }),
+        text: "📋 Encabezado", onclick: () => copiarEncabezado(v) }),
+      nodo("button", { class: "visor-copiar visor-icono", type: "button", title: "Buscar en esta hoja (Ctrl+F)", "aria-label": "Buscar en esta hoja",
+        text: "🔍", onclick: () => abrirBuscador(v) }),
+      v.editable ? nodo("button", { class: "visor-copiar visor-icono visor-deshacer", type: "button", disabled: true,
+        title: "Deshacer tu último cambio en esta hoja (Ctrl+Z)", "aria-label": "Deshacer", text: "↶", onclick: () => deshacer(v) }) : null,
+      nodo("button", { class: "visor-copiar visor-cambios-boton", type: "button", hidden: true, "aria-expanded": "false",
+        title: "Lo que has cambiado desde el visor en esta sesión", onclick: (ev) => alternarCambios(v, ev.currentTarget) },
+        "🕘 Mis cambios ", nodo("span", { class: "visor-cambios-n" })),
       nodo("div", { class: "visor-zoom", role: "group", "aria-label": "Zoom" },
         nodo("button", { type: "button", title: "Alejar (Ctrl + rueda)", "aria-label": "Alejar", text: "−", onclick: () => pasoZoom(-1) }),
         valorZoom,
@@ -319,10 +357,13 @@
     if (botonEncabezado) botonEncabezado.hidden = !v.fijasF;
     seleccionar(v, 0, 0, false);
     enfocarCuerpo();
-    avisar(v.editable ? "Doble clic o Enter en una celda para escribir · Ctrl+C y Ctrl+V para copiar y pegar"
-      : v.excel ? "Es un archivo de Excel guardado en Drive: para editarlo, ábrelo en Google Sheets" : "", "gris");
+    avisar(v.editable ? "Doble clic para escribir · Ctrl+C / Ctrl+V · Ctrl+F para buscar · clic derecho para más"
+      : v.excel ? "Es un archivo de Excel guardado en Drive: para editarlo, ábrelo en Google Sheets" : "Ctrl+F para buscar · clic derecho para más", "gris");
     if (v.destino) irADestino(v, v.destino);
     v.destino = null;
+    if (celdaPendiente && celdaPendiente.id === v.id) irACelda(v, celdaPendiente.f, celdaPendiente.c);
+    celdaPendiente = null;
+    actualizarHistorial(v);
   }
 
   // La fila pedida queda seleccionada entera, al centro de la vista y resaltada un momento.
@@ -643,6 +684,20 @@
       const td = ev.target.closest(".visor-tabla td");
       if (td && v.editable && !ev.target.closest("a")) editar(v, td);
     });
+    cuerpo.addEventListener("contextmenu", (ev) => menuCelda(v, ev));
+    cuerpo.addEventListener("scroll", () => { const m = ventana.querySelector(".visor-menu"); if (m) m.remove(); }, { passive: true });
+    // Texto que no cabe en la celda: al pasar el mouse se ve completo (y la fórmula, si tiene).
+    cuerpo.addEventListener("mouseover", (ev) => {
+      const td = ev.target.closest(".visor-tabla td");
+      if (!td || !td._celda || td.classList.contains("celda-editando")) return;
+      const div = td.querySelector(".visor-c");
+      const valor = td._celda.formattedValue || "";
+      const formula = (td._celda.userEnteredValue || {}).formulaValue;
+      const cortado = div && valor && !td.classList.contains("c-derramar")
+        && (div.scrollWidth > div.clientWidth + 1 || div.scrollHeight > div.clientHeight + 1);
+      const titulo = [cortado ? valor : "", formula ? "Fórmula: " + formula : ""].filter(Boolean).join("\n");
+      if (titulo) td.title = titulo; else td.removeAttribute("title");
+    });
     cuerpo.addEventListener("wheel", (ev) => {
       if (!ev.ctrlKey) return;
       ev.preventDefault();
@@ -671,6 +726,7 @@
           else if (ctrl && ev.key === "0") ponerZoom(100);
           // Ctrl+C y Ctrl+V: se dejan pasar para que el navegador lance copy y paste (abajo).
           else if (ctrl && (ev.key === "c" || ev.key === "C" || ev.key === "v" || ev.key === "V")) hecho = false;
+          else if (ctrl && !shift && (ev.key === "z" || ev.key === "Z")) { if (v.editable) deshacer(v); }
           else if (ctrl && (ev.key === "a" || ev.key === "A")) seleccionarRango(v, 0, 0, v.visF.length - 1, v.visC.length - 1);
           else if (ctrl && (ev.key === "g" || ev.key === "G" || ev.key === "j" || ev.key === "J")) ventana.querySelector(".visor-nombre").focus();
           // Escribir sobre una celda empieza a editarla, como en Sheets.
@@ -824,7 +880,7 @@
         if (!td || Number(td.dataset.i) !== i || Number(td.dataset.j) !== j) continue;
         const nuevo = uno ? valores[0][0] : (valores[a][b] === undefined ? "" : valores[a][b]);
         if (nuevo === textoEditable(td._celda)) continue;
-        cambios.push({ td, texto: nuevo });
+        cambios.push(cambioDe(v, td, nuevo));
       }
     }
     if (cambios.length > MAXIMO_PEGADO) {
@@ -834,49 +890,335 @@
     // Queda seleccionado lo que se pegó, como en Sheets.
     seleccionarRango(v, Math.min(v.visF.length - 1, r.i0 + alto - 1), Math.min(v.visC.length - 1, r.j0 + ancho - 1), r.i0, r.j0);
     if (!cambios.length) { avisar("Ya tenía esos mismos valores: no hubo nada que cambiar", "gris"); return; }
-    if (cambios.length === 1) { guardar(v, cambios[0].td, cambios[0].td._celda, cambios[0].texto); return; }
-    await guardarVarias(v, cambios);
+    const conDatos = cambios.filter((k) => k.antes !== "" || k.antesVisto !== "");
+    if (conDatos.length && !(await confirmarPegado(conDatos, cambios.length))) { avisar("Pegado cancelado: no se cambió nada", "gris"); return; }
+    await escribirCeldas(v, cambios, "pegar");
   }
 
-  // Varias celdas de una vez (un pegado): una sola petición a Sheets y una línea por celda en
-  // el registro de gestiones.
-  async function guardarVarias(v, cambios) {
-    const antes = cambios.map(({ td }) => td._celda.formattedValue || "");
-    for (const { td, texto } of cambios) {
-      td.classList.add("celda-guardando");
-      td.replaceChildren(nodo("div", { class: "visor-c" }, texto));
+  // Antes de pisar celdas que ya tienen algo, una barrita pregunta. Enter pega, Esc cancela.
+  // Sobre celdas vacías se pega directo.
+  function confirmarPegado(conDatos, total) {
+    cerrarFlotantes();
+    return new Promise((resolver) => {
+      const recortar = (t) => (t.length > 22 ? t.slice(0, 21) + "…" : t);
+      const muestra = conDatos.slice(0, 3).map((k) => `${refCelda(k)} «${recortar(k.antesVisto || k.antes)}»`).join(", ") + (conDatos.length > 3 ? "…" : "");
+      let barra = null;
+      const terminar = (si) => { barra.remove(); enfocarCuerpo(); resolver(si); };
+      const botonPegar = nodo("button", { class: "boton boton-principal boton-chico", type: "button", text: "Pegar", onclick: () => terminar(true) });
+      barra = nodo("div", { class: "visor-confirmar", role: "alertdialog", "aria-live": "assertive" },
+        nodo("span", { class: "vcf-icono", "aria-hidden": "true", text: "⚠️" }),
+        nodo("span", { class: "vcf-texto" },
+          nodo("strong", { text: conDatos.length === 1 ? "Vas a reemplazar 1 celda que ya tiene datos" : `Vas a reemplazar ${conDatos.length} celdas que ya tienen datos` }),
+          nodo("span", { text: (total > conDatos.length ? ` (de ${total} que se pegan)` : "") + ": " + muestra })),
+        nodo("span", { class: "vcf-atajos", text: "Enter pega · Esc cancela" }),
+        botonPegar,
+        nodo("button", { class: "boton boton-chico", type: "button", text: "Cancelar", onclick: () => terminar(false) }));
+      barra.cerrar = () => terminar(false);
+      barra.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        terminar(false);
+      });
+      ventana.querySelector(".visor-barra").after(barra);
+      botonPegar.focus();
+    });
+  }
+
+  // ------------------------------------------------------------------ guardar, deshacer y «Mis cambios»
+  // Lo que esta persona escribe o pega desde el visor queda anotado para «Mis cambios» y para
+  // Ctrl+Z. Vive solo en la memoria de la pestaña: al cerrar la sesión se borra con lo demás.
+  const misCambios = [];      // { id, archivo, hoja, sheetId, f, c, antes, despues, hora, deshecho }, el último primero
+  const pilaDeshacer = [];    // una entrada por edición o pegado: { id, cambios }
+  let celdaPendiente = null;  // { id, f, c }: la celda a la que ir cuando termine de cargar la hoja
+
+  const refCelda = (k) => letra(k.c) + (k.f + 1);
+  const horaCorta = (d) => d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
+  const cambioDe = (v, td, texto) => ({ td, hoja: v.hoja.title, sheetId: v.hoja.sheetId, f: Number(td.dataset.f), c: Number(td.dataset.c),
+    texto, antes: textoEditable(td._celda), antesVisto: td._celda.formattedValue || "" });
+  const tdDe = (v, k) => (v.hoja && v.hoja.sheetId === k.sheetId ? ventana.querySelector(`.visor-tabla td[data-f="${k.f}"][data-c="${k.c}"]`) : null);
+
+  // Escribe en Google Sheets en una sola petición y deja todo al día: las celdas en pantalla,
+  // «Mis cambios», Ctrl+Z y el registro de gestiones. modo: "editar", "pegar" o "deshacer".
+  async function escribirCeldas(v, cambios, modo) {
+    const donde = cambios.length === 1 ? refCelda(cambios[0]) : `${cambios.length} celdas`;
+    for (const k of cambios) {
+      if (!k.td) continue;
+      k.td.classList.add("celda-guardando");
+      k.td.replaceChildren(nodo("div", { class: "visor-c" }, k.texto));
     }
-    avisar(`⏳ Pegando ${cambios.length} celdas…`, "gris");
-    const data = cambios.map(({ td, texto }) => ({ range: rango(v.hoja.title, Number(td.dataset.f), Number(td.dataset.c)), values: [[texto]] }));
+    avisar(`⏳ ${{ editar: "Guardando", pegar: "Pegando", deshacer: "Deshaciendo" }[modo]} ${donde}…`, "gris");
+    let resp;
     try {
-      const resp = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}/values:batchUpdate`, {
+      resp = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}/values:batchUpdate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valueInputOption: "USER_ENTERED", includeValuesInResponse: true, responseValueRenderOption: "FORMATTED_VALUE", data }),
+        body: JSON.stringify({ valueInputOption: "USER_ENTERED", includeValuesInResponse: true, responseValueRenderOption: "FORMATTED_VALUE",
+          data: cambios.map((k) => ({ range: rango(k.hoja, k.f, k.c), values: [[k.texto]] })) }),
       });
-      const respuestas = resp.responses || [];
-      cambios.forEach(({ td, texto }, k) => {
-        const nuevo = ((((respuestas[k] || {}).updatedData || {}).values || [[]])[0] || [])[0];
-        td._celda.formattedValue = nuevo === undefined ? (respuestas[k] ? "" : texto) : String(nuevo);
-        td._celda.userEnteredValue = texto.startsWith("=") ? { formulaValue: texto } : { stringValue: texto };
-        escribirContenido(td, td._celda);
-        td.classList.remove("celda-guardando");
-        td.classList.add("celda-guardada");
-        setTimeout(() => td.classList.remove("celda-guardada"), 1600);
-      });
-      seleccionar(v, v.sel.i, v.sel.j, false, true);
-      const guardado = `✓ Pegadas ${cambios.length} celdas en Google Sheets · ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`;
-      avisar(guardado, "ok");
-      try {
-        if (google().registrar) await google().registrar(cambios.map(({ td, texto }, k) => ({ hoja: `${v.archivo.name} · ${v.hoja.title}`,
-          ubicacion: `${letra(Number(td.dataset.c))}${Number(td.dataset.f) + 1}`, columna: "", antes: antes[k], despues: texto })));
-      } catch (e) {
-        avisar(guardado + " · ⚠️ No quedó en el registro de gestiones: " + e.message, "ambar");
-      }
     } catch (e) {
-      for (const { td } of cambios) { td.classList.remove("celda-guardando"); escribirContenido(td, td._celda); }
-      avisar("❌ No se pegó: " + e.message, "error");
+      for (const k of cambios) if (k.td) { k.td.classList.remove("celda-guardando"); escribirContenido(k.td, k.td._celda); }
+      avisar(`❌ No se ${{ editar: "guardó", pegar: "pegó", deshacer: "deshizo" }[modo]}: ${e.message}`, "error");
+      return false;
     }
+    const respuestas = resp.responses || [];
+    const ahora = new Date();
+    const vistos = [], grupo = [];
+    cambios.forEach((k, n) => {
+      const valor = ((((respuestas[n] || {}).updatedData || {}).values || [[]])[0] || [])[0];
+      const visto = valor === undefined ? "" : String(valor);
+      vistos.push(visto);
+      if (k.td) {
+        k.td._celda.formattedValue = visto;
+        k.td._celda.userEnteredValue = k.texto.startsWith("=") ? { formulaValue: k.texto } : { stringValue: k.texto };
+        escribirContenido(k.td, k.td._celda);
+        k.td.classList.remove("celda-guardando");
+        k.td.classList.add("celda-guardada");
+        setTimeout(() => k.td.classList.remove("celda-guardada"), 1600);
+      }
+      misCambios.unshift({ id: v.id, archivo: v.archivo.name, hoja: k.hoja, sheetId: k.sheetId, f: k.f, c: k.c,
+        antes: k.antesVisto, despues: visto, hora: ahora, deshecho: modo === "deshacer" });
+      // Deshacer = volver a escribir lo que había (la fórmula, si era una fórmula).
+      grupo.push({ hoja: k.hoja, sheetId: k.sheetId, f: k.f, c: k.c, texto: k.antes, antes: k.texto, antesVisto: visto });
+    });
+    if (modo !== "deshacer") pilaDeshacer.push({ id: v.id, cambios: grupo });
+    if (visor === v && v.sel) seleccionar(v, v.sel.i, v.sel.j, false, true);
+    actualizarHistorial(v);
+    const listo = modo === "deshacer" ? `↶ Deshecho: ${donde} ${cambios.length > 1 ? "volvieron a como estaban" : "volvió a como estaba"} · ${horaCorta(ahora)}`
+      : `✓ ${cambios.length > 1 ? `Pegadas ${donde}` : "Guardado " + donde} en Google Sheets · ${horaCorta(ahora)} · Ctrl+Z deshace`;
+    avisar(listo, "ok");
+    // Al registro de gestiones (si el config lo trae). Las celdas ya quedaron guardadas.
+    try {
+      if (google().registrar) await google().registrar(cambios.map((k, n) => ({ hoja: `${v.archivo.name} · ${k.hoja}`, ubicacion: refCelda(k),
+        columna: "", antes: k.antesVisto, despues: vistos[n] })));
+    } catch (e) {
+      avisar(listo + " · ⚠️ No quedó en el registro de gestiones: " + e.message, "ambar");
+    }
+    return true;
+  }
+
+  // Ctrl+Z: deshace el último cambio hecho en este archivo (una edición o un pegado entero).
+  async function deshacer(v) {
+    if (!v.editable) return;
+    let n = pilaDeshacer.length - 1;
+    while (n >= 0 && pilaDeshacer[n].id !== v.id) n--;
+    if (n < 0) { avisar("No hay nada que deshacer en esta hoja", "gris"); return; }
+    const [grupo] = pilaDeshacer.splice(n, 1);
+    const cambios = grupo.cambios.map((k) => ({ ...k, td: tdDe(v, k) }));
+    const primera = cambios.find((k) => k.td);
+    if (primera) seleccionar(v, Number(primera.td.dataset.i), Number(primera.td.dataset.j));
+    if (!(await escribirCeldas(v, cambios, "deshacer"))) { pilaDeshacer.splice(n, 0, grupo); actualizarHistorial(v); }
+  }
+
+  function actualizarHistorial(v) {
+    const b = ventana.querySelector(".visor-deshacer");
+    if (b) b.disabled = !pilaDeshacer.some((g) => g.id === v.id);
+    const boton = ventana.querySelector(".visor-cambios-boton");
+    if (boton) { boton.hidden = !misCambios.length; boton.querySelector(".visor-cambios-n").textContent = misCambios.length; }
+    const panel = ventana.querySelector(".visor-panel-cambios");
+    if (panel) pintarCambios(v, panel);
+  }
+
+  function alternarCambios(v, boton) {
+    const abierto = ventana.querySelector(".visor-panel-cambios");
+    boton.setAttribute("aria-expanded", String(!abierto));
+    if (abierto) { abierto.remove(); return; }
+    cerrarFlotantes();
+    const panel = nodo("div", { class: "visor-panel-cambios", role: "dialog", "aria-label": "Mis cambios" });
+    panel.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault(); ev.stopPropagation();
+      panel.remove(); boton.setAttribute("aria-expanded", "false"); boton.focus();
+    });
+    pintarCambios(v, panel);
+    ventana.append(panel);
+    const caja = ventana.getBoundingClientRect(), b = boton.getBoundingClientRect();
+    panel.style.top = (b.bottom - caja.top + 6) + "px";
+    panel.style.right = Math.max(8, caja.right - b.right) + "px";
+    const primero = panel.querySelector("button");
+    if (primero) primero.focus();
+  }
+
+  function pintarCambios(v, panel) {
+    panel.replaceChildren(
+      nodo("div", { class: "vpc-titulo" }, nodo("strong", { text: "Mis cambios" }),
+        nodo("span", { text: misCambios.length === 1 ? "1 en esta sesión" : `${misCambios.length} en esta sesión` })),
+      misCambios.length
+        ? nodo("ol", { class: "vpc-lista" }, ...misCambios.map((k) => nodo("li", null,
+          nodo("button", { type: "button", class: "vpc-item" + (k.deshecho ? " deshecho" : ""), title: "Ir a esta celda", onclick: () => irACambio(v, k) },
+            nodo("span", { class: "vpc-donde" }, nodo("b", { text: refCelda(k) }),
+              ` · ${k.hoja}` + (k.id !== v.id ? ` · ${partesTitulo(k.archivo).principal}` : "")),
+            nodo("span", { class: "vpc-hora", text: (k.deshecho ? "↶ deshecho · " : "") + horaCorta(k.hora) }),
+            nodo("span", { class: "vpc-valores" },
+              nodo("s", { text: k.antes || "(vacía)" }), nodo("span", { "aria-hidden": "true", text: " → " }), nodo("b", { text: k.despues || "(vacía)" }))))))
+        : nodo("p", { class: "vpc-vacio", text: "Todavía no has cambiado nada." }),
+      nodo("p", { class: "vpc-pie", text: "Solo en esta pestaña: se borra al cerrar la sesión." }));
+  }
+
+  function irACambio(v, k) {
+    cerrarFlotantes();
+    if (k.id === v.id && v.hoja && k.sheetId === v.hoja.sheetId) { irACelda(v, k.f, k.c); return; }
+    celdaPendiente = { id: k.id, f: k.f, c: k.c };
+    if (k.id === v.id) cambiarPestana(v, v.hojas.find((h) => h.sheetId === k.sheetId));
+    else abrirVisor(k.id, k.sheetId, null);
+  }
+
+  function irACelda(v, f, c) {
+    if (!irA(v, f, c)) return;
+    enfocarCuerpo();
+    const td = v.mapa.get(v.sel.i + ":" + v.sel.j);
+    if (td) { td.classList.add("celda-guardada"); setTimeout(() => td.classList.remove("celda-guardada"), 1600); }
+  }
+
+  // Cierra el menú, «Mis cambios» y la confirmación de pegado. Devuelve si había algo abierto.
+  function cerrarFlotantes() {
+    let algo = false;
+    for (const e of ventana.querySelectorAll(".visor-menu, .visor-panel-cambios")) { e.remove(); algo = true; }
+    const b = ventana.querySelector(".visor-cambios-boton");
+    if (b) b.setAttribute("aria-expanded", "false");
+    const c = ventana.querySelector(".visor-confirmar");
+    if (c) { c.cerrar(); algo = true; }
+    return algo;
+  }
+
+  // ------------------------------------------------------------------ buscar en la hoja (Ctrl+F)
+  // Busca en lo que está cargado de la pestaña, sin tildes ni mayúsculas. Si se escriben solo
+  // cifras, se comparan solo las cifras: «71712176» encuentra «71.712.176».
+  const normalizar = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const soloCifras = (t) => String(t || "").replace(/\D/g, "");
+
+  function abrirBuscador(v) {
+    let caja = ventana.querySelector(".visor-buscar");
+    if (!caja) caja = crearBuscador(v);
+    caja.hidden = false;
+    const barra = ventana.querySelector(".visor-barra");
+    caja.style.top = (barra.offsetTop + barra.offsetHeight + 8) + "px";
+    const entrada = caja.querySelector("input");
+    entrada.focus();
+    entrada.select();
+    if (entrada.value) caja.buscar();
+  }
+
+  function crearBuscador(v) {
+    const entrada = nodo("input", { type: "text", class: "vb-entrada", placeholder: "Buscar en esta hoja", "aria-label": "Buscar en esta hoja", spellcheck: "false" });
+    const conteo = nodo("span", { class: "vb-conteo", "aria-live": "polite" });
+    let hallazgos = [], actual = -1, temporizadorBusqueda = null;
+    const limpiar = () => ventana.querySelectorAll(".visor-tabla td.vb-hallada, .visor-tabla td.vb-actual")
+      .forEach((td) => td.classList.remove("vb-hallada", "vb-actual"));
+    const ir = () => {
+      ventana.querySelectorAll(".visor-tabla td.vb-actual").forEach((td) => td.classList.remove("vb-actual"));
+      const td = hallazgos[actual];
+      td.classList.add("vb-actual");
+      seleccionar(v, Number(td.dataset.i), Number(td.dataset.j));
+      conteo.textContent = `${actual + 1} de ${hallazgos.length}`;
+    };
+    const saltar = (d) => { if (!hallazgos.length) return; actual = (actual + d + hallazgos.length) % hallazgos.length; ir(); };
+    const buscar = () => {
+      limpiar();
+      hallazgos = []; actual = -1;
+      const q = normalizar(entrada.value);
+      const cifras = /^[\d\s.,$]+$/.test(entrada.value.trim()) ? soloCifras(entrada.value) : "";
+      if (!q) { conteo.textContent = ""; return; }
+      const vistas = new Set();
+      for (let i = 0; i < v.visF.length; i++) {
+        for (let j = 0; j < v.visC.length; j++) {
+          const td = v.mapa.get(i + ":" + j);
+          if (!td || vistas.has(td)) continue;
+          vistas.add(td);
+          const texto = td._celda.formattedValue || "";
+          if (cifras ? soloCifras(texto).includes(cifras) : normalizar(texto).includes(q)) { hallazgos.push(td); td.classList.add("vb-hallada"); }
+        }
+      }
+      if (!hallazgos.length) { conteo.textContent = "Sin resultados"; return; }
+      // Primero el que sigue a la celda activa, como en Sheets.
+      actual = hallazgos.findIndex((td) => Number(td.dataset.i) > v.sel.i || (Number(td.dataset.i) === v.sel.i && Number(td.dataset.j) >= v.sel.j));
+      if (actual < 0) actual = 0;
+      ir();
+    };
+    entrada.addEventListener("input", () => { clearTimeout(temporizadorBusqueda); temporizadorBusqueda = setTimeout(buscar, 120); });
+    entrada.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); clearTimeout(temporizadorBusqueda); if (actual < 0) buscar(); else saltar(ev.shiftKey ? -1 : 1); }
+      else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); cerrarBuscador(true); }
+    });
+    const caja = nodo("div", { class: "visor-buscar", role: "search" },
+      nodo("span", { class: "vb-lupa", "aria-hidden": "true", text: "🔍" }), entrada, conteo,
+      nodo("button", { type: "button", title: "Anterior (Shift+Enter)", "aria-label": "Anterior", text: "↑", onclick: () => saltar(-1) }),
+      nodo("button", { type: "button", title: "Siguiente (Enter)", "aria-label": "Siguiente", text: "↓", onclick: () => saltar(1) }),
+      nodo("button", { type: "button", title: "Cerrar (Esc)", "aria-label": "Cerrar la búsqueda", text: "✕", onclick: () => cerrarBuscador(true) }));
+    caja.buscar = buscar;
+    caja.limpiar = () => { limpiar(); hallazgos = []; actual = -1; conteo.textContent = ""; };
+    ventana.append(caja);
+    return caja;
+  }
+
+  function cerrarBuscador(enfocar) {
+    const caja = ventana.querySelector(".visor-buscar");
+    if (!caja || caja.hidden) return false;
+    caja.hidden = true;
+    caja.limpiar();
+    if (enfocar) enfocarCuerpo();
+    return true;
+  }
+
+  // ------------------------------------------------------------------ clic derecho en una celda
+  function menuCelda(v, ev) {
+    const td = ev.target.closest(".visor-tabla td");
+    if (!td || td.classList.contains("celda-editando")) return;
+    ev.preventDefault();
+    const i = Number(td.dataset.i), j = Number(td.dataset.j);
+    const r = rangoSeleccionado(v);
+    if (i < r.i0 || i > r.i1 || j < r.j0 || j > r.j1) seleccionar(v, i, j, false);
+    enfocarCuerpo();
+    cerrarFlotantes();
+    const sel = rangoSeleccionado(v);
+    const f = v.visF[sel.i0], c = v.visC[sel.j0];
+    const enlace = v.excel || !v.hoja ? v.archivo.webViewLink
+      : `https://docs.google.com/spreadsheets/d/${v.id}/edit#gid=${v.hoja.sheetId}&range=${letra(c)}${f + 1}`;
+    let menu = null;
+    const opcion = (texto, atajo, hacer, desactivada) => nodo("button", { type: "button", role: "menuitem", class: "vm-item", disabled: desactivada,
+      onclick: () => { menu.remove(); hacer(); } }, nodo("span", { text: texto }), atajo ? nodo("kbd", { text: atajo }) : null);
+    menu = nodo("div", { class: "visor-menu", role: "menu", "aria-label": "Opciones de la celda" },
+      opcion("Copiar", "Ctrl+C", () => { copiarRango(v, sel); enfocarCuerpo(); }),
+      v.editable ? opcion("Pegar", "Ctrl+V", () => pegarDelPortapapeles(v)) : null,
+      opcion(sel.i0 === sel.i1 ? "Copiar fila completa" : "Copiar filas completas", "", () => {
+        seleccionarRango(v, sel.i0, 0, sel.i1, v.visC.length - 1);
+        copiarRango(v, rangoSeleccionado(v));
+        enfocarCuerpo();
+      }),
+      v.editable ? opcion("Deshacer", "Ctrl+Z", () => { enfocarCuerpo(); deshacer(v); }, !pilaDeshacer.some((g) => g.id === v.id)) : null,
+      nodo("div", { class: "vm-separador", role: "separator" }),
+      opcion("Buscar en la hoja", "Ctrl+F", () => abrirBuscador(v)),
+      enlace ? opcion("Abrir esta celda en Google Sheets ↗", "", () => { window.open(enlace, "_blank", "noopener"); }) : null);
+    menu.addEventListener("keydown", (e) => {
+      const items = [...menu.querySelectorAll(".vm-item:not([disabled])")];
+      const k = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        items[(k + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+      } else if (e.key === "Escape" || e.key === "Tab") {
+        e.preventDefault(); e.stopPropagation();
+        menu.remove(); enfocarCuerpo();
+      }
+    });
+    ventana.append(menu);
+    const caja = ventana.getBoundingClientRect();
+    const x = ev.clientX - caja.left, y = ev.clientY - caja.top;
+    const m = menu.getBoundingClientRect();
+    menu.style.left = (x + m.width > caja.width - 8 ? Math.max(8, x - m.width) : x) + "px";
+    menu.style.top = (y + m.height > caja.height - 8 ? Math.max(8, y - m.height) : y) + "px";
+    menu.querySelector(".vm-item:not([disabled])").focus();
+  }
+
+  async function pegarDelPortapapeles(v) {
+    enfocarCuerpo();
+    let texto;
+    try {
+      texto = await navigator.clipboard.readText();
+    } catch (_) {
+      avisar("El navegador no dejó leer el portapapeles desde el menú: usa Ctrl+V", "ambar");
+      return;
+    }
+    pegar(v, texto);
   }
 
   // ------------------------------------------------------------------ edición
@@ -909,7 +1251,7 @@
       td.classList.remove("celda-editando");
       const nuevo = entrada.value;
       if (!guardarCambio || nuevo === original) { escribirContenido(td, celda); avisar("", ""); }
-      else guardar(v, td, celda, nuevo);
+      else escribirCeldas(v, [cambioDe(v, td, nuevo)], "editar");
       enfocarCuerpo();
       if (di || dj) mover(v, di, dj);
     };
@@ -919,44 +1261,6 @@
       else if (ev.key === "Escape") { ev.preventDefault(); cerrar(false); }
     });
     entrada.addEventListener("blur", () => cerrar(true));
-  }
-
-  async function guardar(v, td, celda, texto) {
-    const f = Number(td.dataset.f), c = Number(td.dataset.c);
-    const r = rango(v.hoja.title, f, c);
-    const antes = celda.formattedValue || "";
-    td.classList.add("celda-guardando");
-    td.replaceChildren(nodo("div", { class: "visor-c" }, texto));
-    avisar("⏳ Guardando " + letra(c) + (f + 1) + "…", "gris");
-    try {
-      const resp = await apiGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${v.id}/values/${encodeURIComponent(r)}` +
-        "?valueInputOption=USER_ENTERED&includeValuesInResponse=true&responseValueRenderOption=FORMATTED_VALUE", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ range: r, majorDimension: "ROWS", values: [[texto]] }),
-      });
-      const nuevo = (((resp.updatedData || {}).values || [[]])[0] || [])[0];
-      celda.formattedValue = nuevo === undefined ? "" : String(nuevo);
-      celda.userEnteredValue = texto.startsWith("=") ? { formulaValue: texto } : { stringValue: texto };
-      escribirContenido(td, celda);
-      td.classList.remove("celda-guardando");
-      td.classList.add("celda-guardada");
-      setTimeout(() => td.classList.remove("celda-guardada"), 1600);
-      if (td.classList.contains("sel")) seleccionar(v, v.sel.i, v.sel.j, false);
-      const guardado = `✓ Guardado en Google Sheets · ${letra(c)}${f + 1} · ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`;
-      avisar(guardado, "ok");
-      // Al registro de gestiones (si el config lo trae). La celda ya quedó guardada.
-      try {
-        if (google().registrar) await google().registrar([{ hoja: `${v.archivo.name} · ${v.hoja.title}`, ubicacion: `${letra(c)}${f + 1}`,
-          columna: "", antes, despues: texto }]);
-      } catch (e) {
-        avisar(guardado + " · ⚠️ No quedó en el registro de gestiones: " + e.message, "ambar");
-      }
-    } catch (e) {
-      td.classList.remove("celda-guardando");
-      escribirContenido(td, celda);
-      avisar("❌ No se guardó: " + e.message, "error");
-    }
   }
 
   // ------------------------------------------------------------------ mover la ventana

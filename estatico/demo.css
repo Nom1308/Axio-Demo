@@ -120,12 +120,15 @@
 .visor-hoja::backdrop { background: rgba(3, 10, 36, .45); backdrop-filter: blur(3px); animation: fondo-entra .35s ease both; }
 .juego-secreto::backdrop { animation: fondo-entra .35s ease both; }
 .visor-cabecera {
-  display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 16px; cursor: grab; user-select: none;
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 14px; cursor: grab; user-select: none;
   border-bottom: 1px solid var(--borde); flex-wrap: wrap;
 }
 .visor-hoja.maximizada .visor-cabecera { cursor: default; }
 .visor-cabecera:active { cursor: grabbing; }
-.visor-titulo { font-size: 15px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; cursor: text; }
+.visor-titulo { display: flex; flex-direction: column; min-width: 0; max-width: 46%; line-height: 1.25; user-select: text; cursor: text; }
+.visor-titulo .vt-principal, .visor-titulo .vt-detalle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.visor-titulo .vt-principal { font-size: 15px; letter-spacing: .01em; }
+.visor-titulo .vt-detalle { font-size: 11.5px; font-weight: 500; color: var(--texto-2); font-variant-numeric: tabular-nums; }
 .visor-cabecera .visor-copiar-titulo { margin-left: -6px; padding: 3px 6px; font-size: 14px; line-height: 1; opacity: .7; }
 .visor-cabecera .visor-copiar-titulo:hover { opacity: 1; }
 .visor-insignia {
@@ -138,11 +141,12 @@
 .visor-estado.error { color: var(--rojo); }
 .visor-estado.ambar { color: var(--ambar); }
 .visor-cabecera .boton-icono { font-size: 17px; line-height: 1; padding: 4px 8px; }
+.visor-cabecera .boton-chico { padding: 5px 11px; font-size: 12.5px; }
 
 /* Barra como la de Google Sheets: cuadro de nombre, fx y zoom */
-.visor-barra { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #f8f9fa; border-bottom: 1px solid #dadce0; color: #3c4043; }
+.visor-barra { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #f8f9fa; border-bottom: 1px solid #dadce0; color: #3c4043; }
 .visor-barra .visor-nombre {
-  width: 92px; flex: none; padding: 4px 8px; font: 600 12.5px var(--fuente); color: #202124; background: #fff;
+  width: 84px; flex: none; padding: 3px 8px; font: 600 12.5px var(--fuente); color: #202124; background: #fff;
   border: 1px solid #dadce0; border-radius: 6px; text-transform: uppercase;
 }
 .visor-barra .visor-nombre:hover { background: #fff; }
@@ -150,7 +154,7 @@
 .visor-barra .visor-nombre.invalido { outline: 2px solid #d93025; animation: visor-sacudir .3s; }
 @keyframes visor-sacudir { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 .visor-fx { flex: none; padding: 0 6px 0 8px; border-left: 1px solid #dadce0; color: #80868b; font: italic 600 13px Georgia, serif; }
-.visor-formula { flex: 1; min-width: 0; font: 13px Arial, sans-serif; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+.visor-formula { flex: 1; min-width: 80px; font: 13px Arial, sans-serif; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
 .visor-zoom { flex: none; display: flex; align-items: center; border: 1px solid #dadce0; border-radius: 6px; background: #fff; overflow: hidden; }
 .visor-zoom button { border: 0; background: none; color: #3c4043; font: 600 13px var(--fuente); padding: 3px 9px; cursor: pointer; }
 .visor-zoom button:hover { background: #f1f3f4; }
@@ -288,11 +292,82 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
 .visor-tabla tr.visor-fila-destino td { animation: fila-destino 2.4s ease-out; }
 @keyframes fila-destino { 0%, 35% { box-shadow: inset 0 0 0 999px rgba(26, 115, 232, .22); } 100% { box-shadow: none; } }
 .visor-barra .visor-copiar {
-  flex: none; padding: 4px 10px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; color: #1f1f1f;
+  flex: none; padding: 3px 9px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; color: #1f1f1f;
   font: 600 12px var(--fuente); cursor: pointer; white-space: nowrap;
 }
 .visor-barra .visor-copiar:hover { background: #e8f0fe; border-color: #aecbfa; color: #0b57d0; }
 .visor-barra .visor-copiar[hidden] { display: none; }
+.visor-barra .visor-copiar:disabled { opacity: .45; cursor: default; background: #fff; border-color: #dadce0; color: #1f1f1f; }
+.visor-barra .visor-icono { min-width: 30px; padding-inline: 6px; font-size: 13px; }
+.visor-barra .visor-deshacer { font-size: 15px; line-height: 1; }
+.visor-cambios-n { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: #e8f0fe; color: #0b57d0; font-size: 11px; text-align: center; }
+@media (max-width: 720px) {
+  .visor-barra { flex-wrap: wrap; }
+  .visor-titulo { max-width: 100%; flex: 1 1 60%; }
+}
+
+/* Ctrl+F: coincidencias en amarillo, la actual en naranja (como Sheets). */
+.visor-tabla td.vb-hallada { background-image: linear-gradient(rgba(251, 188, 4, .32), rgba(251, 188, 4, .32)) !important; }
+.visor-tabla td.vb-actual { background-image: linear-gradient(rgba(242, 153, 0, .55), rgba(242, 153, 0, .55)) !important; }
+
+/* Lo que flota sobre la hoja: búsqueda, menú del clic derecho y «Mis cambios». Claros, como
+   la barra y la hoja, con la sombra de los menús de Google. */
+.visor-buscar, .visor-menu, .visor-panel-cambios {
+  position: absolute; z-index: 30; background: #fff; color: #202124; border: 1px solid #dadce0; border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(60, 64, 67, .28), 0 1px 3px rgba(60, 64, 67, .2); font-family: var(--fuente);
+  animation: flotante-entra .14s ease-out;
+}
+@keyframes flotante-entra { from { opacity: 0; transform: translateY(-4px); } }
+.visor-buscar[hidden] { display: none; }
+.visor-buscar { right: 18px; display: flex; align-items: center; gap: 4px; padding: 5px 6px 5px 10px; }
+.visor-buscar .vb-lupa { font-size: 12px; opacity: .6; }
+.visor-buscar .vb-entrada {
+  width: 210px; padding: 5px 6px; border: 0; background: none; color: #202124; font: 13px var(--fuente); box-shadow: none;
+}
+.visor-buscar .vb-entrada:focus, .visor-buscar .vb-entrada:hover { outline: none; border: 0; background: none; box-shadow: none; }
+.visor-buscar .vb-conteo { min-width: 64px; font-size: 12px; color: #5f6368; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.visor-buscar button {
+  width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: #3c4043; font: 600 13px var(--fuente); cursor: pointer;
+}
+.visor-buscar button:hover { background: #f1f3f4; }
+
+.visor-menu { min-width: 250px; padding: 6px 0; }
+.visor-menu .vm-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px; width: 100%; padding: 7px 16px;
+  border: 0; background: none; color: #202124; font: 13px var(--fuente); text-align: left; cursor: pointer;
+}
+.visor-menu .vm-item:hover, .visor-menu .vm-item:focus-visible { background: #f1f3f4; outline: none; }
+.visor-menu .vm-item:disabled { color: #9aa0a6; cursor: default; background: none; }
+.visor-menu kbd { font: 11.5px var(--fuente); color: #5f6368; background: none; border: 0; padding: 0; }
+.visor-menu .vm-separador { height: 1px; margin: 5px 0; background: #e8eaed; }
+
+.visor-panel-cambios { width: min(380px, 90%); max-height: 60%; display: flex; flex-direction: column; overflow: hidden; }
+.visor-panel-cambios .vpc-titulo { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 14px 8px; border-bottom: 1px solid #e8eaed; }
+.visor-panel-cambios .vpc-titulo span { font-size: 12px; color: #5f6368; }
+.visor-panel-cambios .vpc-lista { list-style: none; margin: 0; padding: 4px 0; overflow-y: auto; }
+.visor-panel-cambios .vpc-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; width: 100%; padding: 8px 14px; border: 0; background: none;
+  color: #202124; font: 12.5px var(--fuente); text-align: left; cursor: pointer;
+}
+.visor-panel-cambios .vpc-item:hover, .visor-panel-cambios .vpc-item:focus-visible { background: #f1f3f4; outline: none; }
+.visor-panel-cambios .vpc-donde { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.visor-panel-cambios .vpc-hora { font-size: 11.5px; color: #5f6368; }
+.visor-panel-cambios .vpc-valores { grid-column: 1 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #3c4043; }
+.visor-panel-cambios .vpc-valores s { color: #80868b; }
+.visor-panel-cambios .vpc-valores b { color: #137333; }
+.visor-panel-cambios .vpc-item.deshecho .vpc-valores b { color: #b06000; }
+.visor-panel-cambios .vpc-vacio, .visor-panel-cambios .vpc-pie { margin: 0; padding: 10px 14px; font-size: 12px; color: #5f6368; }
+.visor-panel-cambios .vpc-pie { padding-top: 6px; border-top: 1px solid #e8eaed; font-size: 11px; }
+
+/* Antes de pisar celdas con datos al pegar */
+.visor-confirmar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 12px; background: #fef7e0; color: #3c4043;
+  border-bottom: 1px solid #f9e2a5; font-size: 12.5px; animation: flotante-entra .14s ease-out;
+}
+.visor-confirmar .vcf-texto { flex: 1; min-width: 200px; }
+.visor-confirmar .vcf-texto strong { color: #7a4f01; }
+.visor-confirmar .vcf-atajos { font-size: 11.5px; color: #80868b; }
+.visor-confirmar .boton-chico { padding: 4px 12px; font-size: 12.5px; }
 
 /* ==========================================================================
    Escena de carga (estatico/espera.js)
