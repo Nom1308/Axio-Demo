@@ -1029,7 +1029,7 @@
       [e.saldo_actual ? "Saldo actual" : etiquetaColumna(e.columna_saldo, "Saldo actual"),
         e.saldo_actual ? "$ " + e.saldo_actual : (e.saldo ? "$ " + e.saldo : null)],
       ["Último pago", e.fecha_ultimo_pago],
-      ["Cuota cancelada mes", e.mes_ultimo_pago],
+      ["Cuota mes cancelado", e.mes_ultimo_pago],
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
       ["Altura", buscarCampo(e.campos, "ALTURA")],
       ["Observación", e.observacion_estado],
@@ -1363,7 +1363,7 @@
     const datos = [
       ["Observación", e.observacion_estado],
       ["Último pago", e.fecha_ultimo_pago],
-      ["Cuota cancelada mes", e.mes_ultimo_pago],
+      ["Cuota mes cancelado", e.mes_ultimo_pago],
       [etiquetaColumna(e.columna_tarifa, "Tarifa"), conPesos(e.tarifa)],
       ["Meses en mora", e.meses_mora, e.en_mora ? "dato-mora" : null],
     ].filter(([, v]) => v);
@@ -1430,7 +1430,7 @@
     const datos = [
       ["Observación", e.observacion_estado],
       ["Último pago", e.fecha_ultimo_pago],
-      ["Cuota cancelada mes", e.mes_ultimo_pago],
+      ["Cuota mes cancelado", e.mes_ultimo_pago],
       ["Saldo actual", e.saldo_actual ? "$ " + e.saldo_actual : null],
     ].filter(([, v]) => v);
     if (datos.length) {
