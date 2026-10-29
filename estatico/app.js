@@ -1295,9 +1295,15 @@
       + '<rect width="64" height="64" rx="14" fill="url(#fi-logo-g)"/><circle cx="28" cy="28" r="13" fill="none" stroke="#fff" stroke-width="6"/>'
       + '<path d="M38 38l12 12" stroke="#fff" stroke-width="7" stroke-linecap="round"/><circle cx="41" cy="9" r="2.6" fill="#FCB400"/>'
       + '<circle cx="50" cy="13" r="4.5" fill="#FCB400"/><circle cx="55.5" cy="22" r="2.6" fill="#FCB400"/></svg>';
+    // El logo de la empresa sale de la misma carpeta que el ícono de la página (en el
+    // servidor /static/, en la versión de navegador estatico/).
+    const icono = document.querySelector('link[rel="icon"]');
+    const logoEmpresa = icono ? icono.href.replace(/icono\.svg.*$/, "corpentunida.png") : "";
     const membrete = el("div", { class: "ficha-impresion" },
-      el("div", { class: "fi-marca" }, logo,
-        el("div", null, el("strong", { text: "Axio" }), el("span", { text: "Ficha del asociado" }))),
+      el("div", { class: "fi-izquierda" },
+        logoEmpresa ? el("span", { class: "fi-empresa" }, el("img", { src: logoEmpresa, alt: "Corpentunida" })) : null,
+        el("div", { class: "fi-marca" }, logo,
+          el("div", null, el("strong", { text: "Axio" }), el("span", { text: "Ficha del asociado" })))),
       el("div", { class: "fi-meta" },
         el("span", { text: "Consultada el " + ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" }) }),
         el("span", { text: "a las " + ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) }),

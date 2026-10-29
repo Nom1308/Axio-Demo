@@ -82,7 +82,7 @@ def main():
 
     estatico = AQUI / "estatico"
     estatico.mkdir(exist_ok=True)
-    for nombre in ["estilos.css", "icono.svg", "portada.js"]:
+    for nombre in ["estilos.css", "icono.svg", "portada.js", "corpentunida.png"]:
         shutil.copy2(ORIGEN / "web" / "estatico" / nombre, estatico / nombre)
 
     app_js = (ORIGEN / "web" / "estatico" / "app.js").read_text(encoding="utf-8")
