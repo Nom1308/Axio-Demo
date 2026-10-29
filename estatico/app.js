@@ -533,6 +533,7 @@
       if (!repetida) filtro.value = "";
       guardarReciente(termino);
       if (datos.asociado) anotarPersona(datos.asociado);
+      seguirEnLista(datos, termino);
       animarEntrada = !repetida;
       pintarResultados();
       if (datos.parcial) {
@@ -2665,10 +2666,12 @@
   const escribiendo = (n) => n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName));
   document.addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented || document.querySelector("dialog[open]")) return;
-    // «?»: los atajos; «D»: tu día; «L»: modo llamada con la persona en pantalla.
+    // «?»: los atajos; «D»: tu día; «L»: modo llamada con la persona en pantalla; con una
+    // lista de trabajo, «N»: la siguiente sin gestionar y «G»: gestionada y siguiente.
     if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target) && !ev.target.closest(".panel-llamada")) {
       const a = busqueda && busqueda.asociado;
-      const accion = ev.key === "?" ? mostrarAtajos : ev.key === "d" ? () => mostrarTuDia() : ev.key === "l" && a ? () => abrirLlamada(a) : null;
+      const accion = ev.key === "?" ? mostrarAtajos : ev.key === "d" ? () => mostrarTuDia() : ev.key === "l" && a ? () => abrirLlamada(a)
+        : ev.key === "n" && lista ? () => moverEnLista(1, true) : ev.key === "g" && lista ? gestionadaYSiguiente : null;
       if (accion) { ev.preventDefault(); accion(); return; }
     }
     const ctrlK = (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K");
@@ -2805,7 +2808,7 @@
     try { sessionStorage.setItem(CLAVE_DIA, JSON.stringify(d)); } catch (_) { /* sin almacenamiento */ }
   }
   function olvidarDia() {
-    try { sessionStorage.removeItem(CLAVE_DIA); } catch (_) { /* sin almacenamiento */ }
+    try { sessionStorage.removeItem(CLAVE_DIA); sessionStorage.removeItem("axio_lista"); } catch (_) { /* sin almacenamiento */ }
   }
 
   function anotarPersona(a) {
@@ -3310,6 +3313,8 @@
         grupo("Con una persona en pantalla", [
           [["L"], "Modo llamada"], [["1", "2", "3", "4"], "Resultado de la llamada (en el modo llamada)"],
           [["Enter"], "Buscar la cédula que copiaste (cuando Axio lo ofrece)"]]),
+        grupo("Con una lista de trabajo (Buscar varias cédulas)", [
+          [["N"], "Siguiente cédula sin gestionar"], [["G"], "Marcar la de pantalla como gestionada y pasar a la siguiente"]]),
         conVisor ? grupo("En el visor de hojas", [
           [["Ctrl", "C"], "Copiar"], [["Ctrl", "V"], "Pegar"], [["Ctrl", "Z"], "Deshacer"], [["Ctrl", "F"], "Buscar en la hoja"],
           [["Enter"], "Escribir en la celda"], [["Alt", "↑ ↓"], "Cambiar de pestaña"], [["Ctrl", "rueda"], "Acercar o alejar"]]) : null));
@@ -3318,13 +3323,36 @@
 
   // ------------------------------------------------------------------ buscar varias cédulas
   // Se pega una lista (de Excel, un correo, un chat) y se ve el estado de todas a la vez:
-  // nombre, créditos en mora, saldo en mora y último pago. Tocar una fila la busca; la tabla
-  // se copia para pegarla en Excel. Pegar varias cédulas en el buscador también abre esto.
+  // nombre, créditos en mora, saldo en mora y último pago. Pegar varias cédulas en el
+  // buscador también abre esto. La lista no se pierde al abrir a una persona: queda en un
+  // panel al lado («lista de trabajo») para ir de una en una y chulear las gestionadas. Vive
+  // en esta pestaña (sessionStorage, como «Tu día») y se borra al cerrar la sesión.
   const MAXIMO_LISTA = 200;
+  const CLAVE_LISTA = "axio_lista";
   const dialogoLista = el("dialog", { class: "dialogo-axio dialogo-lista", "aria-labelledby": "lista-titulo" });
   document.body.append(dialogoLista);
   dialogoLista.addEventListener("click", (ev) => { if (ev.target === dialogoLista || ev.target.closest("[data-cerrar]")) dialogoLista.close(); });
-  dialogoLista.addEventListener("close", () => { if (dialogoLista.tarea) dialogoLista.tarea.cancelada = true; });
+  const panelLista = el("aside", { class: "panel-lista", "aria-label": "Lista de trabajo", hidden: true });
+  document.body.append(panelLista);
+  let lista = leerLista();   // { filas: [{ cedula, estado, nombre, …, hecha, vista }], actual, plegada, ocultarHechas } o null
+  let tareaLista = null;
+
+  function leerLista() {
+    try {
+      const l = JSON.parse(sessionStorage.getItem(CLAVE_LISTA));
+      if (l && Array.isArray(l.filas) && l.filas.length) return l;
+    } catch (_) { /* sin almacenamiento */ }
+    return null;
+  }
+  // Cada cambio se guarda y se pinta donde se esté viendo la lista (panel y ventana).
+  function cambioLista() {
+    try {
+      if (lista) sessionStorage.setItem(CLAVE_LISTA, JSON.stringify(lista));
+      else sessionStorage.removeItem(CLAVE_LISTA);
+    } catch (_) { /* sin almacenamiento */ }
+    pintarPanelLista();
+    if (dialogoLista.open && dialogoLista.pintar) dialogoLista.pintar();
+  }
 
   function cedulasDeTexto(texto) {
     const vistas = new Set();
@@ -3334,127 +3362,315 @@
     return [...vistas];
   }
   const numeroDe = (v) => { const n = Number(String(v || "").replace(/[^\d,-]/g, "").replace(/,/g, "")); return Number.isFinite(n) ? n : 0; };
+  const claseFilaLista = (f) => (f.estado === "pendiente" ? "cargando" : f.estado === "error" ? "error" : f.mora > 0 ? "mora" : f.creditos ? "dia" : f.nombre ? "neutro" : "nada");
+  const nombreFilaLista = (f) => (f.nombre ? nombrePropio(f.nombre) : "Cédula " + formatoMiles.format(Number(f.cedula)));
+
+  // Una lista nueva: se conservan las marcas (gestionada / vista) de las cédulas que ya
+  // estaban, y todas se buscan otra vez para traer el estado de ahora.
+  function nuevaLista(cedulas) {
+    const antes = new Map((lista ? lista.filas : []).map((f) => [f.cedula, f]));
+    if (tareaLista) tareaLista.cancelada = true;
+    tareaLista = null;
+    lista = {
+      filas: cedulas.map((c) => ({ cedula: c, estado: "pendiente", hecha: Boolean(antes.get(c) && antes.get(c).hecha), vista: Boolean(antes.get(c) && antes.get(c).vista) })),
+      actual: lista && cedulas.includes(lista.actual) ? lista.actual : null,
+      ocultarHechas: Boolean(lista && lista.ocultarHechas),
+    };
+    cambioLista();
+    correrLista();
+  }
+
+  // Busca las cédulas pendientes, 3 a la vez. Sigue aunque se cierre la ventana; también
+  // retoma lo que quedó a medias si se recargó la página.
+  function correrLista() {
+    if (!lista || tareaLista || !lista.filas.some((f) => f.estado === "pendiente")) return;
+    const tarea = { cancelada: false, tomadas: new Set() };
+    tareaLista = tarea;
+    const filas = lista.filas;
+    const libre = () => filas.find((x) => x.estado === "pendiente" && !tarea.tomadas.has(x));
+    const siguiente = async () => {
+      for (let f = libre(); f && !tarea.cancelada; f = libre()) {
+        tarea.tomadas.add(f);
+        const datos = {};
+        try {
+          let r = await apiJson("/api/buscar?q=" + encodeURIComponent(f.cedula));
+          for (let intento = 0; r.status === 202 && intento < 30 && !tarea.cancelada; intento++) {   // las hojas aún cargan
+            await new Promise((ok) => setTimeout(ok, 2000));
+            r = await apiJson("/api/buscar?q=" + encodeURIComponent(f.cedula));
+          }
+          const a = r.datos && r.datos.asociado;
+          if (a) {
+            const todos = creditosDe(a);
+            const enMora = todos.filter((x) => x.estado.mora);
+            const ultimo = (a.pagos || []).find((p) => p.fecha);
+            Object.assign(datos, {
+              estado: "ok", nombre: a.nombre || "(sin nombre)", mora: enMora.length, creditos: todos.length,
+              saldoMora: enMora.reduce((s, x) => s + numeroDe(x.e.saldo_actual || x.e.saldo), 0),
+              textoEstado: enMora.length ? `🔴 ${plural(enMora.length, "en mora", "en mora")}` : todos.length ? "🟢 Al día" : "⚪ Sin créditos",
+              ultimoPago: ultimo ? `${fechaCorta(aFecha(ultimo.fecha))}${ultimo.valor ? " · " + pesos(ultimo.valor) : ""}` : "",
+            });
+          } else {
+            const enExtractos = r.datos && (r.datos.grupos || []).some((g) => (g.filas || []).length);
+            Object.assign(datos, { estado: "ok", nombre: "", mora: 0, textoEstado: enExtractos ? "Solo en Extractos" : "No encontrada" });
+          }
+        } catch (_) {
+          Object.assign(datos, { estado: "error", textoEstado: "⚠️ Error" });
+        }
+        if (tarea.cancelada) return;
+        Object.assign(f, datos);
+        cambioLista();
+      }
+    };
+    Promise.all([siguiente(), siguiente(), siguiente()]).then(() => {
+      if (tarea.cancelada) return;
+      tareaLista = null;
+      anotarAccion({ tipo: "lista", texto: `Búsqueda por lista: ${plural(filas.length, "cédula", "cédulas")}` }, null);
+      cambioLista();
+    });
+  }
 
   function abrirBuscarVarias(texto) {
     const area = el("textarea", { class: "lista-entrada", rows: "5", spellcheck: "false", "aria-label": "Cédulas a buscar",
       placeholder: "Pega aquí las cédulas: una por línea, o separadas por comas o espacios.\nSirve copiar una columna de Excel." });
-    area.value = texto || "";
+    area.value = texto || (lista ? lista.filas.map((f) => f.cedula).join("\n") : "");
     const contador = el("span", { class: "lista-contador" });
     const actualizarContador = () => {
       const n = cedulasDeTexto(area.value).length;
       contador.textContent = n ? `${plural(Math.min(n, MAXIMO_LISTA), "cédula", "cédulas")}${n > MAXIMO_LISTA ? ` (de ${n}: máximo ${MAXIMO_LISTA})` : ""}` : "";
       botonBuscar.disabled = !n;
     };
-    const botonBuscar = el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Buscar todas", onclick: () => correrLista(cedulasDeTexto(area.value).slice(0, MAXIMO_LISTA)) });
+    const botonBuscar = el("button", { class: "boton boton-principal boton-chico", type: "button", text: lista ? "Buscar otra vez" : "Buscar todas",
+      title: lista ? "Vuelve a buscar las cédulas del cuadro; las marcas de gestionada se conservan" : null,
+      onclick: () => { nuevaLista(cedulasDeTexto(area.value).slice(0, MAXIMO_LISTA)); botonBuscar.textContent = "Buscar otra vez"; montarTablaLista(zona); } });
     area.addEventListener("input", actualizarContador);
     area.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); botonBuscar.click(); } });
     const zona = el("div", { class: "lista-zona" });
+    dialogoLista.pintar = null;
     dialogoLista.replaceChildren(
       el("div", { class: "dialogo-axio-cabecera" },
         el("div", null, el("h2", { id: "lista-titulo", text: "Buscar varias cédulas" }),
-          el("span", { class: "dialogo-axio-sub", text: "El estado de muchas personas de una vez" })),
+          el("span", { class: "dialogo-axio-sub", text: "Toca una persona para verla: la lista queda al lado para seguir con las demás" })),
         el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
       el("div", { class: "dialogo-axio-cuerpo" },
         area,
         el("div", { class: "lista-barra" }, contador, botonBuscar),
         zona));
     actualizarContador();
+    if (lista && !texto) montarTablaLista(zona);
     if (!dialogoLista.open) dialogoLista.showModal();
-    if (texto && cedulasDeTexto(texto).length) botonBuscar.click(); else area.focus();
+    if (texto && cedulasDeTexto(texto).length) botonBuscar.click(); else if (!lista) area.focus();
+  }
 
-    async function correrLista(cedulas) {
-      if (dialogoLista.tarea) dialogoLista.tarea.cancelada = true;
-      const tarea = { cancelada: false };
-      dialogoLista.tarea = tarea;
-      const filas = cedulas.map((c) => ({ cedula: c, estado: "pendiente" }));
-      const avance = el("div", { class: "lista-avance", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(filas.length) }, el("span"));
-      const resumen = el("p", { class: "lista-resumen", "aria-live": "polite" });
-      const cuerpoTabla = el("tbody");
-      const soloMora = el("input", { type: "checkbox" });
-      const copiarTabla = el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar tabla", disabled: true,
-        title: "Para pegar en Excel o en Google Sheets",
-        onclick: (ev) => copiar(tsvLista(filas), "Tabla copiada: pégala en Excel o en Google Sheets.", ev.currentTarget) });
-      soloMora.addEventListener("change", pintar);
-      zona.replaceChildren(avance, resumen,
-        el("div", { class: "lista-tabla-envoltura" },
-          el("table", { class: "lista-tabla" },
-            el("thead", null, el("tr", null, ...["Cédula", "Nombre", "Estado", "Saldo en mora", "Último pago"].map((t) => el("th", { text: t })))),
-            cuerpoTabla)),
-        el("div", { class: "lista-barra" }, el("label", { class: "lista-filtro" }, soloMora, " Solo las que tienen mora"), copiarTabla));
+  function montarTablaLista(zona) {
+    const avance = el("div", { class: "lista-avance", role: "progressbar", "aria-valuemin": "0" }, el("span"));
+    const resumen = el("p", { class: "lista-resumen", "aria-live": "polite" });
+    const cuerpoTabla = el("tbody");
+    const soloMora = el("input", { type: "checkbox" });
+    const copiarTabla = el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar tabla",
+      title: "Para pegar en Excel o en Google Sheets",
+      onclick: (ev) => copiar(tsvLista(lista.filas), "Tabla copiada: pégala en Excel o en Google Sheets.", ev.currentTarget) });
+    const empezar = el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Empezar a gestionar →",
+      title: "Abre la primera persona sin gestionar; la lista queda al lado",
+      onclick: () => moverEnLista(1, true) });
+    soloMora.addEventListener("change", pintar);
+    zona.replaceChildren(avance, resumen,
+      el("div", { class: "lista-tabla-envoltura" },
+        el("table", { class: "lista-tabla" },
+          el("thead", null, el("tr", null, el("th", { class: "lista-check", title: "Gestionada", text: "✓" }),
+            ...["Cédula", "Nombre", "Estado", "Saldo en mora", "Último pago"].map((t) => el("th", { text: t })))),
+          cuerpoTabla)),
+      el("div", { class: "lista-barra" }, el("label", { class: "lista-filtro" }, soloMora, " Solo las que tienen mora"),
+        el("div", { class: "fila-flex" }, copiarTabla, empezar)));
 
-      function pintar() {
-        cuerpoTabla.replaceChildren(...filas.filter((f) => !soloMora.checked || f.mora > 0).map((f) => {
-          const clase = f.estado === "pendiente" ? "cargando" : f.estado === "error" ? "error" : f.mora > 0 ? "mora" : f.creditos ? "dia" : f.nombre ? "neutro" : "nada";
-          const tr = el("tr", { class: "lista-" + clase, tabindex: f.nombre ? "0" : null, title: f.nombre ? "Buscar a esta persona" : null },
-            el("td", { class: "num", text: formatoMiles.format(Number(f.cedula)) }),
-            el("td", { text: f.estado === "pendiente" ? "…" : f.nombre ? nombrePropio(f.nombre) : f.estado === "error" ? "No se pudo buscar" : "—" }),
-            el("td", null, el("span", { class: "lista-estado", text: f.textoEstado || (f.estado === "pendiente" ? "Buscando…" : "") })),
-            el("td", { class: "num", text: f.saldoMora ? pesos(f.saldoMora) : "" }),
-            el("td", { text: f.ultimoPago || "" }));
-          if (f.nombre) {
-            const ir = () => { dialogoLista.close(); campo.value = f.cedula; buscar(); };
-            tr.addEventListener("click", ir);
-            tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") ir(); });
-          }
-          return tr;
-        }));
+    function pintar() {
+      if (!lista) return;
+      const filas = lista.filas;
+      cuerpoTabla.replaceChildren(...filas.filter((f) => !soloMora.checked || f.mora > 0).map((f) => {
+        const tr = el("tr", { class: "lista-" + claseFilaLista(f) + (f.hecha ? " lista-hecha" : ""), tabindex: "0", title: "Ver a esta persona" },
+          el("td", { class: "lista-check" }, casillaGestionada(f)),
+          el("td", { class: "num", text: formatoMiles.format(Number(f.cedula)) }),
+          el("td", { text: f.estado === "pendiente" ? "…" : f.nombre ? nombrePropio(f.nombre) : f.estado === "error" ? "No se pudo buscar" : "—" }),
+          el("td", null, el("span", { class: "lista-estado", text: f.textoEstado || (f.estado === "pendiente" ? "Buscando…" : "") })),
+          el("td", { class: "num", text: f.saldoMora ? pesos(f.saldoMora) : "" }),
+          el("td", { text: f.ultimoPago || "" }));
+        tr.addEventListener("click", (ev) => { if (!ev.target.closest("input")) irAFila(f); });
+        tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === tr) irAFila(f); });
+        return tr;
+      }));
+      const listas = filas.filter((f) => f.estado !== "pendiente").length;
+      avance.firstChild.style.width = `${(listas / filas.length) * 100}%`;
+      avance.setAttribute("aria-valuemax", String(filas.length));
+      avance.setAttribute("aria-valuenow", String(listas));
+      avance.classList.toggle("listo", listas === filas.length);
+      if (listas < filas.length) {
+        resumen.textContent = `Buscando… ${listas} de ${filas.length}`;
+      } else {
+        const conMora = filas.filter((f) => f.mora > 0);
+        const sinFicha = filas.filter((f) => f.estado === "ok" && !f.nombre).length;
+        const gestionadas = filas.filter((f) => f.hecha).length;
+        resumen.textContent = `${plural(filas.length, "cédula", "cédulas")} · ${plural(conMora.length, "con mora", "con mora")}`
+          + (conMora.length ? ` (${pesos(conMora.reduce((s, f) => s + f.saldoMora, 0))})` : "") + (sinFicha ? ` · ${sinFicha} sin ficha` : "")
+          + (gestionadas ? ` · ✓ ${gestionadas} gestionadas` : "");
       }
-
-      pintar();
-      let hechas = 0;
-      const siguiente = async () => {
-        for (let f = filas.find((x) => x.estado === "pendiente" && !x.tomada); f && !tarea.cancelada; f = filas.find((x) => x.estado === "pendiente" && !x.tomada)) {
-          f.tomada = true;
-          try {
-            let r = await apiJson("/api/buscar?q=" + encodeURIComponent(f.cedula));
-            for (let intento = 0; r.status === 202 && intento < 30 && !tarea.cancelada; intento++) {   // las hojas aún cargan
-              await new Promise((ok) => setTimeout(ok, 2000));
-              r = await apiJson("/api/buscar?q=" + encodeURIComponent(f.cedula));
-            }
-            const a = r.datos && r.datos.asociado;
-            if (a) {
-              const todos = creditosDe(a);
-              const enMora = todos.filter((x) => x.estado.mora);
-              const ultimo = (a.pagos || []).find((p) => p.fecha);
-              Object.assign(f, {
-                estado: "ok", nombre: a.nombre || "(sin nombre)", mora: enMora.length, creditos: todos.length,
-                saldoMora: enMora.reduce((s, x) => s + numeroDe(x.e.saldo_actual || x.e.saldo), 0),
-                textoEstado: enMora.length ? `🔴 ${plural(enMora.length, "en mora", "en mora")}` : todos.length ? "🟢 Al día" : "⚪ Sin créditos",
-                ultimoPago: ultimo ? `${fechaCorta(aFecha(ultimo.fecha))}${ultimo.valor ? " · " + pesos(ultimo.valor) : ""}` : "",
-              });
-            } else {
-              const enExtractos = r.datos && (r.datos.grupos || []).some((g) => (g.filas || []).length);
-              Object.assign(f, { estado: "ok", nombre: "", mora: 0, textoEstado: enExtractos ? "Solo en Extractos" : "No encontrada" });
-            }
-          } catch (_) {
-            Object.assign(f, { estado: "error", textoEstado: "⚠️ Error" });
-          }
-          hechas += 1;
-          avance.firstChild.style.width = `${(hechas / filas.length) * 100}%`;
-          avance.setAttribute("aria-valuenow", String(hechas));
-          resumen.textContent = hechas < filas.length ? `Buscando… ${hechas} de ${filas.length}` : "";
-          pintar();
-        }
-      };
-      await Promise.all([siguiente(), siguiente(), siguiente()]);
-      if (tarea.cancelada) return;
-      const conMora = filas.filter((f) => f.mora > 0);
-      const sinFicha = filas.filter((f) => f.estado === "ok" && !f.nombre).length;
-      resumen.textContent = `${plural(filas.length, "cédula", "cédulas")} · ${plural(conMora.length, "con mora", "con mora")}`
-        + (conMora.length ? ` (${pesos(conMora.reduce((s, f) => s + f.saldoMora, 0))})` : "") + (sinFicha ? ` · ${sinFicha} sin ficha` : "");
-      avance.classList.add("listo");
-      copiarTabla.disabled = false;
-      anotarAccion({ tipo: "lista", texto: `Búsqueda por lista: ${plural(filas.length, "cédula", "cédulas")}` }, null);
+      copiarTabla.disabled = listas < filas.length;
+      empezar.textContent = lista.actual ? "Seguir gestionando →" : "Empezar a gestionar →";
     }
+    dialogoLista.pintar = pintar;
+    pintar();
+  }
+
+  function casillaGestionada(f) {
+    const casilla = el("input", { type: "checkbox", class: "lista-casilla", "aria-label": "Gestionada: " + nombreFilaLista(f), title: "Marcar como gestionada" });
+    casilla.checked = Boolean(f.hecha);
+    casilla.addEventListener("click", (ev) => ev.stopPropagation());
+    casilla.addEventListener("change", () => marcarGestionada(f, casilla.checked));
+    return casilla;
+  }
+
+  function marcarGestionada(f, valor) {
+    f.hecha = valor;
+    if (valor) anotarAccion({ tipo: "lista", texto: "Gestionada en la lista de trabajo" }, f.cedula);
+    cambioLista();
+    if (valor && lista.filas.every((x) => x.hecha)) toast("🎉 ¡Lista terminada! Todas las cédulas quedaron gestionadas.");
+  }
+
+  function irAFila(f) {
+    if (!lista) return;
+    if (dialogoLista.open) dialogoLista.close();
+    lista.actual = f.cedula;
+    lista.plegada = false;
+    f.vista = true;
+    cambioLista();
+    campo.value = f.cedula;
+    buscar();
+  }
+
+  // paso 1 / -1. soloPendientes: salta las gestionadas y, al llegar al final, vuelve a empezar.
+  function moverEnLista(paso, soloPendientes) {
+    if (!lista) return;
+    const filas = lista.filas;
+    const n = filas.length;
+    const i = filas.findIndex((f) => f.cedula === lista.actual);
+    const orden = [];
+    if (i < 0) {
+      orden.push(...(paso > 0 ? filas : [...filas].reverse()));
+    } else {
+      for (let k = 1; k < n; k++) {
+        const j = i + paso * k;
+        if (j >= 0 && j < n) orden.push(filas[j]);
+        else if (soloPendientes) orden.push(filas[(j % n + n) % n]);
+      }
+    }
+    const destino = orden.find((f) => !soloPendientes || !f.hecha);
+    if (destino) irAFila(destino);
+    else if (soloPendientes) toast(filas.every((f) => f.hecha) ? "🎉 ¡Lista terminada! No quedan cédulas sin gestionar." : "No hay más cédulas sin gestionar.");
+  }
+
+  function gestionadaYSiguiente() {
+    const f = lista && lista.filas.find((x) => x.cedula === lista.actual);
+    if (f && !f.hecha) marcarGestionada(f, true);
+    if (lista && lista.filas.some((x) => !x.hecha)) moverEnLista(1, true);
+  }
+
+  // Una búsqueda hecha a mano de una cédula de la lista también la marca como vista.
+  function seguirEnLista(datos, termino) {
+    if (!lista) return;
+    const cedula = (datos && datos.asociado && soloDigitos(datos.asociado.cedula_limpia)) || soloDigitos(termino);
+    const f = lista.filas.find((x) => x.cedula === cedula);
+    if (!f || (lista.actual === f.cedula && f.vista)) return;
+    lista.actual = f.cedula;
+    f.vista = true;
+    cambioLista();
+  }
+
+  function cerrarLista() {
+    if (tareaLista) tareaLista.cancelada = true;
+    tareaLista = null;
+    lista = null;
+    cambioLista();
+  }
+
+  // El panel: a la izquierda en pantallas anchas (el contenido se corre), abajo en el
+  // celular. Plegado queda una pastilla con el avance.
+  function pintarPanelLista() {
+    document.body.classList.toggle("con-lista", Boolean(lista && !lista.plegada));
+    if (!lista) { panelLista.hidden = true; panelLista.replaceChildren(); return; }
+    const barra = $(".barra");
+    if (barra) panelLista.style.setProperty("--arriba", Math.round(barra.getBoundingClientRect().height + 12) + "px");
+    panelLista.hidden = false;
+    panelLista.classList.toggle("plegado", Boolean(lista.plegada));
+    const filas = lista.filas;
+    const hechas = filas.filter((f) => f.hecha).length;
+    const buscando = filas.filter((f) => f.estado === "pendiente").length;
+    if (lista.plegada) {
+      panelLista.replaceChildren(el("button", { class: "pl-pastilla", type: "button", title: "Abrir la lista de trabajo",
+        onclick: () => { lista.plegada = false; cambioLista(); } },
+      "📋 Lista ", el("strong", { text: `${hechas}/${filas.length}` })));
+      return;
+    }
+    const boton = (texto, titulo, accion) => el("button", { class: "boton boton-texto pl-icono", type: "button", title: titulo, "aria-label": titulo, text: texto, onclick: accion });
+    const cerrar = boton("✕", "Cerrar la lista", () => {
+      const quedan = filas.filter((f) => !f.hecha).length;
+      if (!quedan || cerrar.dataset.confirmar) { cerrarLista(); return; }
+      cerrar.dataset.confirmar = "1";
+      cerrar.textContent = `¿Cerrar? Quedan ${quedan}`;
+      cerrar.classList.add("pl-confirmar");
+      setTimeout(() => {
+        if (!cerrar.isConnected) return;
+        delete cerrar.dataset.confirmar;
+        cerrar.textContent = "✕";
+        cerrar.classList.remove("pl-confirmar");
+      }, 3500);
+    });
+    const ocultar = el("input", { type: "checkbox" });
+    ocultar.checked = Boolean(lista.ocultarHechas);
+    ocultar.addEventListener("change", () => { lista.ocultarHechas = ocultar.checked; cambioLista(); });
+    const visibles = filas.filter((f) => !lista.ocultarHechas || !f.hecha || f.cedula === lista.actual);
+    const ul = el("ul", { class: "pl-filas" }, ...visibles.map((f) => el("li", {
+      class: "pl-fila lista-" + claseFilaLista(f) + (f.cedula === lista.actual ? " actual" : "") + (f.hecha ? " hecha" : ""),
+      "aria-current": f.cedula === lista.actual ? "true" : null },
+    casillaGestionada(f),
+    el("button", { class: "pl-ir", type: "button", title: "Ver a esta persona", onclick: () => irAFila(f) },
+      el("span", { class: "pl-nombre", text: nombreFilaLista(f) }),
+      el("span", { class: "pl-sub" },
+        f.nombre ? formatoMiles.format(Number(f.cedula)) + " · " : "",
+        el("span", { class: "lista-estado", text: f.textoEstado || "Buscando…" }))),
+    f.vista && !f.hecha && f.cedula !== lista.actual ? el("span", { class: "pl-vista", title: "Ya la abriste", text: "👁" }) : null)));
+    if (!visibles.length) ul.append(el("li", { class: "pl-vacia", text: "🎉 Todas gestionadas" }));
+    const actual = filas.find((f) => f.cedula === lista.actual);
+    panelLista.replaceChildren(
+      el("div", { class: "pl-cabecera" },
+        el("div", { class: "pl-titulo" },
+          el("strong", { text: "Lista de trabajo" }),
+          el("span", { text: buscando ? `Buscando… ${filas.length - buscando} de ${filas.length}` : `${hechas} de ${filas.length} gestionadas` })),
+        boton("⤢", "Ver la tabla completa", () => abrirBuscarVarias()),
+        boton("–", "Plegar la lista", () => { lista.plegada = true; cambioLista(); }),
+        cerrar),
+      el("div", { class: "lista-avance pl-avance" }, el("span", { style: `width:${(hechas / filas.length) * 100}%` })),
+      el("label", { class: "lista-filtro pl-filtro" }, ocultar, " Ocultar las gestionadas"),
+      ul,
+      el("div", { class: "pl-pie" },
+        boton("←", "Anterior (sin saltar ninguna)", () => moverEnLista(-1, false)),
+        el("button", { class: "boton boton-principal boton-chico pl-siguiente", type: "button",
+          title: "Marca la persona en pantalla como gestionada y abre la siguiente sin gestionar (G)",
+          disabled: hechas === filas.length,
+          onclick: gestionadaYSiguiente, text: actual && !actual.hecha ? "✓ Gestionada y siguiente" : "Siguiente sin gestionar" }),
+        boton("→", "Siguiente sin gestionar (N)", () => moverEnLista(1, true))));
+    const enPantalla = ul.querySelector(".actual");
+    if (enPantalla) enPantalla.scrollIntoView({ block: "nearest" });
   }
 
   function tsvLista(filas) {
-    const lineas = [["Cédula", "Nombre", "Estado", "Créditos en mora", "Saldo en mora", "Último pago"].join("\t")];
+    const lineas = [["Cédula", "Nombre", "Estado", "Créditos en mora", "Saldo en mora", "Último pago", "Gestionada"].join("\t")];
     for (const f of filas) {
-      lineas.push([f.cedula, nombrePropio(f.nombre) || "", (f.textoEstado || "").replace(/^\S+\s/, ""), f.mora || 0, f.saldoMora ? Math.round(f.saldoMora) : "", f.ultimoPago || ""].join("\t"));
+      lineas.push([f.cedula, nombrePropio(f.nombre) || "", (f.textoEstado || "").replace(/^\S+\s/, ""), f.mora || 0, f.saldoMora ? Math.round(f.saldoMora) : "", f.ultimoPago || "", f.hecha ? "Sí" : ""].join("\t"));
     }
     return lineas.join("\n");
   }
+
+  // Al recargar la página la lista sigue ahí; si quedaron cédulas por buscar, se retoman.
+  pintarPanelLista();
+  correrLista();
 
   // Pegar varias cédulas en el buscador abre la búsqueda por lista con ellas.
   campo.addEventListener("paste", (ev) => {
