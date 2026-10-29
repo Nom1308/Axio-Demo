@@ -910,7 +910,8 @@ h3.gris { text-transform: uppercase; letter-spacing: .08em; font-size: 11px !imp
 .tc-chip-quitar:hover { color: var(--texto) !important; }
 
 .tc-cuerpo { flex: 1; min-height: 0; overflow: auto; outline: none; position: relative; }
-.tc-nota { margin: 28px 22px; color: var(--texto-2); }
+/* .tc-nota también la usa la tarjeta del crédito: aquí, solo la de la tabla. */
+.tc-cuerpo > .tc-nota { margin: 28px 22px; color: var(--texto-2); }
 .tc-vacio { margin: 0; padding: 26px 22px; color: var(--texto-2); }
 .tc-tabla { table-layout: fixed; min-width: 0; }
 .tc-tabla th, .tc-tabla td { max-width: none; }
@@ -1096,10 +1097,13 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
    ========================================================================== */
 .asociado-avatar { font-size: 17px; letter-spacing: .02em; }
 .asociado-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.asociado-chips { gap: 8px; margin-top: 6px; }
 .asociado-nombre .chip-dato {
-  padding: 2px 10px; border-radius: 99px; font-size: 12px; color: var(--texto-2);
-  background: var(--campo); border: 1px solid var(--borde);
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 99px;
+  font-size: 13.5px; font-weight: 650; color: var(--texto); font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--azul-vivo) 14%, var(--campo)); border: 1px solid color-mix(in srgb, var(--azul-vivo) 35%, var(--borde));
 }
+.chip-icono { font-size: 13px; }
 .ficha-historia { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; margin-top: 14px; }
 .ficha-grafico, .ficha-tiempo { min-width: 0; padding: 14px 16px; border-radius: 16px; background: var(--campo); border: 1px solid var(--borde); }
 /* Van debajo de la tabla de los Extractos, sueltos sobre el fondo: el mismo vidrio de los grupos. */
@@ -1229,8 +1233,8 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   }
   html:has(body.imprimir-ficha) { background: #fff; }
   body.imprimir-ficha::after, body.imprimir-ficha .aurora, body.imprimir-ficha .barra,
-  body.imprimir-ficha .contenido > :not(#asociado-zona, #resultados),
-  body.imprimir-ficha #resultados > :not(.ficha-historia), body.imprimir-ficha dialog,
+  body.imprimir-ficha .contenido > :not(#asociado-zona), body.imprimir-ficha dialog,
+  body.imprimir-ficha .asociado-barra, body.imprimir-ficha .panel-lista, body.imprimir-ficha .panel-llamada,
   body.imprimir-ficha .toast, body.imprimir-ficha .asociado-acciones,
   body.imprimir-ficha .tc-pie, body.imprimir-ficha .credito-ver { display: none !important; }
   body.imprimir-ficha .contenido { padding: 0; max-width: none; }
@@ -1242,7 +1246,22 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   }
   .ficha-impresion strong { font-size: 18px; letter-spacing: -.01em; }
   .ficha-impresion span { display: block; font-size: 11px; color: var(--texto-2); text-align: right; }
-  body.imprimir-ficha .asociado-creditos { grid-template-columns: repeat(2, 1fr); }
+  /* Compacta, para que la ficha quepa en una hoja: tarjetas a su alto (sin estirarse para
+     igualar a la vecina), cifras un poco más chicas y los datos de a dos por fila. */
+  body.imprimir-ficha .asociado-creditos { grid-template-columns: repeat(2, 1fr); gap: 8px; align-items: start; }
+  body.imprimir-ficha .asociado-cabecera { gap: 12px; margin-bottom: 10px; }
+  body.imprimir-ficha .asociado-nombre strong { font-size: 17px; }
+  body.imprimir-ficha .asociado-nombre .chip-dato { padding: 2px 10px; font-size: 12px; background: #EEF3FF; border-color: #AEC3EE; }
+  body.imprimir-ficha .tarjeta-credito { gap: 4px; padding: 10px 12px; border-radius: 12px; }
+  body.imprimir-ficha .tc-titulo { font-size: 13.5px; }
+  body.imprimir-ficha .tc-descripcion { font-size: 11px; }
+  body.imprimir-ficha .tc-saldo { margin-top: 2px; padding: 6px 10px; border-radius: 9px; }
+  body.imprimir-ficha .tc-saldo strong { font-size: 18px; }
+  body.imprimir-ficha .tc-datos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 6px; }
+  body.imprimir-ficha .tc-datos div { padding: 5px 8px; border-radius: 8px; }
+  body.imprimir-ficha .tc-datos dt { font-size: 8.5px; }
+  body.imprimir-ficha .tc-datos dd { font-size: 11.5px; }
+  body.imprimir-ficha .tc-nota { font-size: 11px; }
   body.imprimir-ficha .tarjeta-credito { break-inside: avoid; background: #fff; border: 1px solid var(--borde-fuerte); }
   body.imprimir-ficha .tarjeta-credito.credito-mora { border-color: #E8A0A0; }
   body.imprimir-ficha .tarjeta-credito.credito-dia { border-color: #9BD5BE; }
@@ -1250,12 +1269,6 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   body.imprimir-ficha .credito-mora .tc-saldo strong, body.imprimir-ficha .insignia-mora,
   body.imprimir-ficha .asociado-mora { color: #B91C1C; }
   body.imprimir-ficha .credito-dia .tc-saldo strong { color: #047857; }
-  body.imprimir-ficha #resultados > .ficha-historia { margin-top: 14px; }
-  body.imprimir-ficha .ficha-grafico { break-inside: avoid; }
-  body.imprimir-ficha .tl-item { break-inside: avoid; }
-  body.imprimir-ficha .tb-mes-menor, body.imprimir-ficha .tl-mas, body.imprimir-ficha .tl-filtro-quitar { display: none; }
-  body.imprimir-ficha .tb-columna-activa { background: none; }
-  body.imprimir-ficha .ficha-columnas.con-mes .tb-pila { opacity: 1 !important; }
   body.imprimir-ficha .ficha-pie { display: block; margin-top: 18px; font-size: 10px; color: var(--texto-3); text-align: center; }
   @page { margin: 14mm; }
 }

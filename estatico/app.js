@@ -1259,7 +1259,7 @@
       el("span", { class: "asociado-avatar", "aria-hidden": "true", text: iniciales(a.nombre) }),
       el("div", { class: "asociado-nombre" },
         el("strong", { text: a.nombre || "Asociado" }),
-        el("div", { class: "asociado-chips" }, ...datosClave.map(([icono, texto]) => el("span", { class: "chip-dato" }, icono + " " + texto)))),
+        el("div", { class: "asociado-chips" }, ...datosClave.map(([icono, texto]) => el("span", { class: "chip-dato" }, el("span", { class: "chip-icono", "aria-hidden": "true", text: icono }), texto)))),
       el("div", { class: "asociado-acciones" },
         el("button", { class: "boton boton-chico", type: "button", text: "📋 Copiar cédula",
           onclick: (ev) => copiar(a.cedula_limpia, "Cédula copiada, lista para pegar en Siasoft.", ev.currentTarget) }),
@@ -1316,12 +1316,9 @@
       a.total_creditos ? creditos : null, pie);
   }
 
+  // Al papel va solo la ficha: la persona y sus créditos, en una hoja. Los pagos por mes y la
+  // línea de tiempo se quedan en pantalla.
   function imprimirFicha() {
-    // Los gráficos que aún no se vieron siguen en pausa en su primer cuadro (invisibles):
-    // al papel van completos, con todos los movimientos de la línea de tiempo.
-    soltarPorVer();
-    const tiempo = document.querySelector(".ficha-tiempo");
-    if (tiempo && tiempo.mostrarTodo) tiempo.mostrarTodo();
     anotarAccion({ tipo: "ficha" });
     document.body.classList.add("imprimir-ficha");
     window.addEventListener("afterprint", () => document.body.classList.remove("imprimir-ficha"), { once: true });
