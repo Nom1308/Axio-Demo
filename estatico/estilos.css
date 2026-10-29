@@ -1226,51 +1226,100 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
 @media print {
   body.imprimir-ficha {
     --texto: #0B1A5C; --texto-2: #3C4A75; --texto-3: #6B7699;
-    --borde: #CBD3E6; --borde-fuerte: #AEB8D2; --campo: #F4F6FB; --vidrio: #fff;
+    --borde: #DCE3F2; --borde-fuerte: #C3CDE4; --campo: #F5F7FC; --vidrio: #fff;
     --verde: #047857; --rojo: #B91C1C; --morado: #1E3A8A;
     background: #fff; color: var(--texto); font-size: 12px;
     print-color-adjust: exact; -webkit-print-color-adjust: exact;
   }
   html:has(body.imprimir-ficha) { background: #fff; }
-  body.imprimir-ficha::after, body.imprimir-ficha .aurora, body.imprimir-ficha .barra,
+  /* Fuera todo lo que no es la ficha (también lo propio de la versión de navegador, como su
+     portada): si no, una página en blanco puede colarse al final. */
+  body.imprimir-ficha > :not(main.contenido), body.imprimir-ficha::after,
   body.imprimir-ficha .contenido > :not(#asociado-zona), body.imprimir-ficha dialog,
-  body.imprimir-ficha .asociado-barra, body.imprimir-ficha .panel-lista, body.imprimir-ficha .panel-llamada,
-  body.imprimir-ficha .toast, body.imprimir-ficha .asociado-acciones,
+  body.imprimir-ficha .asociado-barra, body.imprimir-ficha .asociado-acciones,
   body.imprimir-ficha .tc-pie, body.imprimir-ficha .credito-ver { display: none !important; }
-  body.imprimir-ficha .contenido { padding: 0; max-width: none; }
+  body.imprimir-ficha .contenido { padding: 0; max-width: none; zoom: 1; }
   body.imprimir-ficha * { animation: none !important; transition: none !important; box-shadow: none !important; }
   body.imprimir-ficha .asociado { margin: 0; padding: 0; border: 0; background: none; }
+
+  /* Membrete: franja azul corporativa con el logo, y un filo dorado (los puntos de la marca). */
   body.imprimir-ficha .ficha-impresion {
-    display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;
-    padding-bottom: 10px; margin-bottom: 16px; border-bottom: 2px solid #0B1A5C;
+    display: flex; justify-content: space-between; align-items: center; gap: 16px; position: relative;
+    margin-bottom: 16px; padding: 14px 18px; border-radius: 14px; color: #fff;
+    background: linear-gradient(120deg, #0B1A5C 0%, #1E3A8A 55%, #2453C7 100%);
   }
-  .ficha-impresion strong { font-size: 18px; letter-spacing: -.01em; }
-  .ficha-impresion span { display: block; font-size: 11px; color: var(--texto-2); text-align: right; }
-  /* Compacta, para que la ficha quepa en una hoja: tarjetas a su alto (sin estirarse para
-     igualar a la vecina), cifras un poco más chicas y los datos de a dos por fila. */
-  body.imprimir-ficha .asociado-creditos { grid-template-columns: repeat(2, 1fr); gap: 8px; align-items: start; }
-  body.imprimir-ficha .asociado-cabecera { gap: 12px; margin-bottom: 10px; }
-  body.imprimir-ficha .asociado-nombre strong { font-size: 17px; }
-  body.imprimir-ficha .asociado-nombre .chip-dato { padding: 2px 10px; font-size: 12px; background: #EEF3FF; border-color: #AEC3EE; }
-  body.imprimir-ficha .tarjeta-credito { gap: 4px; padding: 10px 12px; border-radius: 12px; }
-  body.imprimir-ficha .tc-titulo { font-size: 13.5px; }
-  body.imprimir-ficha .tc-descripcion { font-size: 11px; }
-  body.imprimir-ficha .tc-saldo { margin-top: 2px; padding: 6px 10px; border-radius: 9px; }
-  body.imprimir-ficha .tc-saldo strong { font-size: 18px; }
-  body.imprimir-ficha .tc-datos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 6px; }
-  body.imprimir-ficha .tc-datos div { padding: 5px 8px; border-radius: 8px; }
-  body.imprimir-ficha .tc-datos dt { font-size: 8.5px; }
-  body.imprimir-ficha .tc-datos dd { font-size: 11.5px; }
-  body.imprimir-ficha .tc-nota { font-size: 11px; }
-  body.imprimir-ficha .tarjeta-credito { break-inside: avoid; background: #fff; border: 1px solid var(--borde-fuerte); }
-  body.imprimir-ficha .tarjeta-credito.credito-mora { border-color: #E8A0A0; }
-  body.imprimir-ficha .tarjeta-credito.credito-dia { border-color: #9BD5BE; }
-  body.imprimir-ficha .tc-saldo { background: var(--campo); }
-  body.imprimir-ficha .credito-mora .tc-saldo strong, body.imprimir-ficha .insignia-mora,
-  body.imprimir-ficha .asociado-mora { color: #B91C1C; }
+  body.imprimir-ficha .ficha-impresion::after {
+    content: ""; position: absolute; left: 18px; right: 18px; bottom: -6px; height: 3px; border-radius: 99px;
+    background: linear-gradient(90deg, #FCB400, #FFD66B 60%, rgba(252, 180, 0, 0));
+  }
+  .fi-marca { display: flex; align-items: center; gap: 12px; }
+  .fi-logo { width: 42px; height: 42px; flex: none; border-radius: 11px; outline: 2px solid rgba(255, 255, 255, .25); }
+  .fi-logo svg { display: block; width: 100%; height: 100%; }
+  .fi-marca strong { display: block; font-family: var(--fuente-titulo); font-size: 21px; font-weight: 750; letter-spacing: -.02em; line-height: 1.05; }
+  .fi-marca span { display: block; margin-top: 2px; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: #FCD34D; }
+  .fi-meta { display: grid; justify-items: end; gap: 1px; font-size: 10.5px; color: rgba(255, 255, 255, .82); text-align: right; }
+  .fi-meta .fi-quien { margin-top: 3px; padding: 1px 9px; border-radius: 99px; font-weight: 650; color: #fff; background: rgba(255, 255, 255, .14); }
+
+  /* La persona: nombre grande en azul rey y sus datos clave en pastillas claras. */
+  body.imprimir-ficha .asociado-cabecera { gap: 14px; margin: 4px 2px 12px; }
+  body.imprimir-ficha .asociado-avatar {
+    width: 50px; height: 50px; border-radius: 14px; font-size: 18px;
+    background: linear-gradient(135deg, #1E3A8A, #2F7DF6); outline: 3px solid #FCE7A6; outline-offset: -1px;
+  }
+  body.imprimir-ficha .asociado-nombre strong { font-size: 20px; color: #0B1A5C; }
+  body.imprimir-ficha .asociado-nombre .chip-dato {
+    padding: 2px 11px; font-size: 12px; color: #0B1A5C; background: #EEF3FF; border-color: #BCCDF2;
+  }
+
+  /* Título de la sección con su acento dorado, y el conteo de mora / al día. */
+  body.imprimir-ficha .asociado-resumen { margin: 6px 0 10px; padding-top: 10px; border-top: 1px solid var(--borde); }
+  body.imprimir-ficha .asociado-titulo { position: relative; padding-left: 10px; color: #1E3A8A; font-size: 11px; }
+  body.imprimir-ficha .asociado-titulo::before { content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px; border-radius: 99px; background: #FCB400; }
+  body.imprimir-ficha .asociado-mora { color: #B91C1C; background: #FDECEC; border-color: #F3B4B4; }
+  body.imprimir-ficha .asociado-dia { color: #047857; background: #E7F7F0; border-color: #A7DFC6; }
+
+  /* Tarjetas: blancas, franja de estado arriba, cabecera teñida y cifras a dos columnas.
+     Cada una a su alto, sin cortarse entre hojas. */
+  body.imprimir-ficha .asociado-creditos { grid-template-columns: repeat(2, 1fr); gap: 10px; align-items: start; }
+  body.imprimir-ficha .tarjeta-credito {
+    break-inside: avoid; gap: 4px; padding: 12px 13px 11px; border-radius: 13px; background: #fff; border: 1px solid var(--borde-fuerte);
+  }
+  body.imprimir-ficha .tarjeta-credito::before { height: 4px; }
+  body.imprimir-ficha .tarjeta-credito.credito-mora { border-color: #EBB5B5; background: linear-gradient(180deg, #FFF6F6, #fff 90px); }
+  body.imprimir-ficha .tarjeta-credito.credito-dia { border-color: #A9DCC6; background: linear-gradient(180deg, #F2FBF7, #fff 90px); }
+  body.imprimir-ficha .tc-linea { color: #2453C7; font-size: 10px; }
+  body.imprimir-ficha .insignia { padding: 2px 8px; font-size: 9px; color: #047857; background: #E7F7F0; border-color: #A7DFC6; }
+  body.imprimir-ficha .insignia-mora { color: #B91C1C; background: #FDECEC; border-color: #F3B4B4; }
+  body.imprimir-ficha .tc-titulo { font-size: 14px; color: #0B1A5C; }
+  body.imprimir-ficha .tc-descripcion { font-size: 10.5px; color: var(--texto-2); }
+  body.imprimir-ficha .tc-saldo {
+    margin-top: 4px; padding: 7px 11px; border-radius: 10px; background: #F5F7FC; border: 1px solid var(--borde);
+    border-left: 3px solid #1E3A8A;
+  }
+  body.imprimir-ficha .credito-mora .tc-saldo { border-left-color: #DC2626; background: #FFF1F1; border-color: #F6CACA; }
+  body.imprimir-ficha .credito-dia .tc-saldo { border-left-color: #10B981; background: #F0FAF5; border-color: #C5E9D8; }
+  body.imprimir-ficha .tc-saldo span { font-size: 9px; }
+  body.imprimir-ficha .tc-saldo strong { font-size: 19px; color: #0B1A5C; }
+  body.imprimir-ficha .credito-mora .tc-saldo strong { color: #B91C1C; }
   body.imprimir-ficha .credito-dia .tc-saldo strong { color: #047857; }
-  body.imprimir-ficha .ficha-pie { display: block; margin-top: 18px; font-size: 10px; color: var(--texto-3); text-align: center; }
-  @page { margin: 14mm; }
+  body.imprimir-ficha .tc-datos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 6px; }
+  body.imprimir-ficha .tc-datos div { padding: 5px 9px; border-radius: 8px; background: #F7F9FD; border-color: var(--borde); }
+  body.imprimir-ficha .tc-datos .dato-mora { background: #FFF1F1; border-color: #F3B4B4; }
+  body.imprimir-ficha .tc-datos dt { font-size: 8.5px; color: #5B6B95; }
+  body.imprimir-ficha .tc-datos dd { font-size: 11.5px; color: #0B1A5C; }
+  body.imprimir-ficha .tc-datos .dato-mora dd { color: #B91C1C; }
+  body.imprimir-ficha .tc-nota { margin-top: 4px; padding: 5px 9px; border-radius: 8px; font-size: 10.5px; background: #FFF8E1; border: 1px solid #F7DE95; color: #5C4A12; }
+
+  /* Pie: los tres puntos dorados de la marca, el aviso legal y la firma. */
+  body.imprimir-ficha .ficha-pie {
+    display: flex; align-items: center; gap: 10px; margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--borde);
+  }
+  .ficha-pie p { flex: 1; margin: 0; font-size: 9.5px; color: var(--texto-3); }
+  .ficha-pie strong { font-family: var(--fuente-titulo); font-size: 12px; color: #1E3A8A; }
+  .fi-puntos { display: inline-flex; align-items: flex-end; gap: 3px; }
+  .fi-puntos i { width: 5px; height: 5px; border-radius: 50%; background: #FCB400; }
+  .fi-puntos i:nth-child(2) { width: 8px; height: 8px; }
+  @page { margin: 12mm; }
 }
 
 /* ==========================================================================

@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-29-134859");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-29-135744");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -279,7 +279,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-29-134859";
+    script.src = "estatico/app.js?v=2026-10-29-135744";
     document.body.append(script);
   }
 

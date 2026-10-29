@@ -1288,12 +1288,24 @@
     // Solo se ven al imprimir la ficha (ver «ficha del asociado» en estilos.css).
     const ahora = new Date();
     const quien = (($(".usuario-nombre") || {}).textContent || "").trim();
+    // Membrete con la marca: el logo (la lupa con sus tres puntos dorados) sobre la franja azul.
+    const logo = el("span", { class: "fi-logo", "aria-hidden": "true" });
+    logo.innerHTML = '<svg viewBox="0 0 64 64"><defs><linearGradient id="fi-logo-g" x1="0" y1="0" x2="1" y2="1">'
+      + '<stop offset="0" stop-color="#0B1A5C"/><stop offset=".55" stop-color="#1E3A8A"/><stop offset="1" stop-color="#2F7DF6"/></linearGradient></defs>'
+      + '<rect width="64" height="64" rx="14" fill="url(#fi-logo-g)"/><circle cx="28" cy="28" r="13" fill="none" stroke="#fff" stroke-width="6"/>'
+      + '<path d="M38 38l12 12" stroke="#fff" stroke-width="7" stroke-linecap="round"/><circle cx="41" cy="9" r="2.6" fill="#FCB400"/>'
+      + '<circle cx="50" cy="13" r="4.5" fill="#FCB400"/><circle cx="55.5" cy="22" r="2.6" fill="#FCB400"/></svg>';
     const membrete = el("div", { class: "ficha-impresion" },
-      el("strong", { text: "Axio · Ficha del asociado" }),
-      el("div", null,
-        el("span", { text: `Consultada el ${ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })} a las ${ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}` }),
-        quien ? el("span", { text: "Por " + quien }) : null));
-    const pie = el("p", { class: "ficha-pie", text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." });
+      el("div", { class: "fi-marca" }, logo,
+        el("div", null, el("strong", { text: "Axio" }), el("span", { text: "Ficha del asociado" }))),
+      el("div", { class: "fi-meta" },
+        el("span", { text: "Consultada el " + ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" }) }),
+        el("span", { text: "a las " + ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) }),
+        quien ? el("span", { class: "fi-quien", text: "Por " + quien }) : null));
+    const pie = el("div", { class: "ficha-pie" },
+      el("span", { class: "fi-puntos", "aria-hidden": "true" }, el("i"), el("i"), el("i")),
+      el("p", { text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." }),
+      el("strong", { text: "Axio" }));
     // Pagos por mes y línea de tiempo, lado a lado (uno debajo del otro en el celular). No van
     // en la ficha: pintarResultados los pone debajo de la tabla de los Extractos.
     // Tocar un mes del gráfico deja en la línea de tiempo solo los movimientos de ese mes.
