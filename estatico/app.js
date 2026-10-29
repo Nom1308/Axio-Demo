@@ -490,7 +490,7 @@
       zona.append(el("button", { type: "button", text: t, onclick: () => { campo.value = t; buscar(); } }));
     }
     zona.append(el("button", { type: "button", class: "recientes-varias", text: "🔎 Buscar varias cédulas…",
-      title: "Pega una lista de cédulas y mira el estado de todas a la vez", onclick: () => abrirBuscarVarias() }));
+      title: "Pega una lista de cédulas y mira el estado de todas a la vez (tecla V)", onclick: () => abrirBuscarVarias() }));
   }
 
   // ------------------------------------------------------------------ búsqueda
@@ -2534,7 +2534,7 @@
       ES_ADMIN ? { icono: "↻", titulo: "Refrescar datos", detalle: "Vuelve a descargar todas las hojas", accion: refrescar } : null,
       { icono: "🗓", titulo: "Tu día", detalle: "A quién buscaste hoy y qué hiciste", claves: "resumen dia hoy actividad", accion: () => mostrarTuDia() },
       a ? { icono: "📞", titulo: `Modo llamada con ${nombrePropio(a.nombre) || "la persona"}`, claves: "llamar llamada telefono", accion: () => abrirLlamada(a) } : null,
-      { icono: "🔎", titulo: "Buscar varias cédulas", detalle: "Pega una lista y mira el estado de todas", claves: "lista masiva varias cedulas", accion: () => abrirBuscarVarias() },
+      { icono: "🔎", titulo: "Buscar varias cédulas", detalle: "Tecla V · pega una lista y mira el estado de todas", claves: "lista masiva varias cedulas", accion: () => abrirBuscarVarias() },
       { icono: "⌨", titulo: "Atajos de teclado", detalle: "Tecla ?", claves: "teclas ayuda", accion: mostrarAtajos },
       { icono: "A", titulo: "Letra más grande", claves: "tamaño zoom aumentar", accion: () => toast(`Tamaño de la letra: ${cambiarLetra(1)} %`) },
       { icono: "a", titulo: "Letra más pequeña", claves: "tamaño zoom reducir", accion: () => toast(`Tamaño de la letra: ${cambiarLetra(-1)} %`) },
@@ -2666,12 +2666,13 @@
   const escribiendo = (n) => n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName));
   document.addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented || document.querySelector("dialog[open]")) return;
-    // «?»: los atajos; «D»: tu día; «L»: modo llamada con la persona en pantalla; con una
+    // «?»: los atajos; «D»: tu día; «V»: buscar varias cédulas; «L»: modo llamada con la persona en pantalla; con una
     // lista de trabajo, «N»: la siguiente sin gestionar y «G»: gestionada y siguiente.
     if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target) && !ev.target.closest(".panel-llamada")) {
       const a = busqueda && busqueda.asociado;
       const accion = ev.key === "?" ? mostrarAtajos : ev.key === "d" ? () => mostrarTuDia() : ev.key === "l" && a ? () => abrirLlamada(a)
-        : ev.key === "n" && lista ? () => moverEnLista(1, true) : ev.key === "g" && lista ? gestionadaYSiguiente : null;
+        : ev.key === "n" && lista ? () => moverEnLista(1, true) : ev.key === "g" && lista ? gestionadaYSiguiente
+        : ev.key === "v" ? () => abrirBuscarVarias() : null;
       if (accion) { ev.preventDefault(); accion(); return; }
     }
     const ctrlK = (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K");
@@ -3309,7 +3310,7 @@
       el("div", { class: "dialogo-axio-cuerpo atajos-grupos" },
         grupo("En toda la página", [
           [["/"], "Ir al buscador"], [["Ctrl", "K"], "Paleta de comandos"], [["Ctrl", "Shift", "H"], "Ocultar la pantalla"],
-          [["D"], "Tu día"], [["?"], "Ver estos atajos"], [["Esc"], "Cerrar ventanas y menús"]]),
+          [["D"], "Tu día"], [["V"], "Buscar varias cédulas"], [["?"], "Ver estos atajos"], [["Esc"], "Cerrar ventanas y menús"]]),
         grupo("Con una persona en pantalla", [
           [["L"], "Modo llamada"], [["1", "2", "3", "4"], "Resultado de la llamada (en el modo llamada)"],
           [["Enter"], "Buscar la cédula que copiaste (cuando Axio lo ofrece)"]]),
