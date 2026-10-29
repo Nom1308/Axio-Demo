@@ -898,6 +898,18 @@ def _clave_orden_valor(valor):
     return (2, texto.upper())
 
 
+_MESES = ('enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+          'septiembre', 'octubre', 'noviembre', 'diciembre')
+
+
+def _mes_y_anio(v):
+    """'OBSERVACION CUOTA PAGA' se ve en la hoja como 'octubre/2026'. Si la celda es una
+    fecha con ese formato (y no texto), se muestra igual y no como '01/10/2026'."""
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return f"{_MESES[v.month - 1]}/{v.year}"
+    return v
+
+
 def _formatear_valor_celda(v):
     """Formatea un valor de celda para mostrar en la tabla de resultados: fechas como
     dd/mm/aaaa, números con separador de miles, vacíos/NaN como texto vacío."""
@@ -1481,6 +1493,9 @@ def descargar_linea_credito(url, clave=None):
     idx_tipo_credito = _buscar_columna(['TIPO CREDITO', 'TIPO CRÉDITO', 'TIPO DE CREDITO', 'TIPO DE CRÉDITO'])
     idx_obs_estado = (_buscar_columna_con_todas(['OBSERVACI', 'ACTIV'])
                       if clave not in CLAVES_LINEAS_CON_INFO_EXTRA else None)
+    # 'OBSERVACION CUOTA PAGA': el último mes que pagó. Seguro de Vida no la trae.
+    idx_mes_ultimo_pago = (_buscar_columna_con_todas(['OBSERVACI', 'CUOTA', 'PAG'])
+                           if clave not in CLAVES_LINEAS_CON_INFO_EXTRA else None)
     idx_fecha_ultimo_pago = _buscar_columna(['ULTIMO PAGO', 'ÚLTIMO PAGO'])
     idx_saldo_actual = _buscar_columna(['SALDO ACTUAL DE LA TABLA'])
     if clave in CLAVES_LINEAS_CON_INFO_EXTRA:
@@ -1596,6 +1611,7 @@ def descargar_linea_credito(url, clave=None):
             'link_registro': link_registro,
             'observacion_estado': _texto_o_none(fila_celdas, idx_obs_estado),
             'fecha_ultimo_pago': _valor_o_none(fila_celdas, idx_fecha_ultimo_pago),
+            'mes_ultimo_pago': _mes_y_anio(_valor_o_none(fila_celdas, idx_mes_ultimo_pago)),
             'saldo_actual': _valor_o_none(fila_celdas, idx_saldo_actual),
             # La fila COMPLETA de la obligación, para verla tal cual en su detalle: solo
             # las celdas con algo, en el orden de la hoja, con su hipervínculo si lo tiene.

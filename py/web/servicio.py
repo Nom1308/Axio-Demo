@@ -802,6 +802,8 @@ class MotorWeb:
             'observacion_estado': e.get('observacion_estado'),
             'fecha_ultimo_pago': (_formatear_valor_celda(e['fecha_ultimo_pago'])
                                   if e.get('fecha_ultimo_pago') is not None else None),
+            'mes_ultimo_pago': (_formatear_valor_celda(e['mes_ultimo_pago'])
+                                if e.get('mes_ultimo_pago') is not None else None),
             'saldo_actual': (_formatear_valor_celda(e['saldo_actual'])
                              if e.get('saldo_actual') is not None else None),
             # Toda la fila de la obligación, para su detalle. Una celda que es en sí misma
