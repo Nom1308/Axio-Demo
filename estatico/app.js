@@ -1288,7 +1288,8 @@
     // Solo se ven al imprimir la ficha (ver «ficha del asociado» en estilos.css).
     const ahora = new Date();
     const quien = (($(".usuario-nombre") || {}).textContent || "").trim();
-    // Membrete con la marca: el logo (la lupa con sus tres puntos dorados) sobre la franja azul.
+    // Membrete: el logo de la empresa (letras blancas, «tu» y puntos dorados) sobre la franja
+    // azul. La lupa de Axio, con sus tres puntos dorados, firma el pie.
     const logo = el("span", { class: "fi-logo", "aria-hidden": "true" });
     logo.innerHTML = '<svg viewBox="0 0 64 64"><defs><linearGradient id="fi-logo-g" x1="0" y1="0" x2="1" y2="1">'
       + '<stop offset="0" stop-color="#0B1A5C"/><stop offset=".55" stop-color="#1E3A8A"/><stop offset="1" stop-color="#2F7DF6"/></linearGradient></defs>'
@@ -1298,12 +1299,11 @@
     // El logo de la empresa sale de la misma carpeta que el ícono de la página (en el
     // servidor /static/, en la versión de navegador estatico/).
     const icono = document.querySelector('link[rel="icon"]');
-    const logoEmpresa = icono ? icono.href.replace(/icono\.svg.*$/, "corpentunida.png") : "";
+    const logoEmpresa = icono ? icono.href.replace(/icono\.svg.*$/, "corpentunida-blanco.png") : "";
     const membrete = el("div", { class: "ficha-impresion" },
-      el("div", { class: "fi-izquierda" },
-        logoEmpresa ? el("span", { class: "fi-empresa" }, el("img", { src: logoEmpresa, alt: "Corpentunida" })) : null,
-        el("div", { class: "fi-marca" }, logo,
-          el("div", null, el("strong", { text: "Axio" }), el("span", { text: "Ficha del asociado" })))),
+      el("div", { class: "fi-marca" },
+        logoEmpresa ? el("img", { class: "fi-empresa", src: logoEmpresa, alt: "Corpentunida" }) : el("strong", { text: "Corpentunida" }),
+        el("span", { text: "Ficha del asociado" })),
       el("div", { class: "fi-meta" },
         el("span", { text: "Consultada el " + ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" }) }),
         el("span", { text: "a las " + ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) }),
@@ -1311,7 +1311,7 @@
     const pie = el("div", { class: "ficha-pie" },
       el("span", { class: "fi-puntos", "aria-hidden": "true" }, el("i"), el("i"), el("i")),
       el("p", { text: "Documento de uso interno con datos personales protegidos por la Ley 1581 de 2012. No compartir fuera de la entidad." }),
-      el("strong", { text: "Axio" }));
+      el("span", { class: "fi-firma" }, logo, el("strong", { text: "Axio" })));
     // Pagos por mes y línea de tiempo, lado a lado (uno debajo del otro en el celular). No van
     // en la ficha: pintarResultados los pone debajo de la tabla de los Extractos.
     // Tocar un mes del gráfico deja en la línea de tiempo solo los movimientos de ese mes.

@@ -1245,22 +1245,18 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   /* Membrete: franja azul corporativa con el logo, y un filo dorado (los puntos de la marca). */
   body.imprimir-ficha .ficha-impresion {
     display: flex; justify-content: space-between; align-items: center; gap: 16px; position: relative;
-    margin-bottom: 16px; padding: 14px 18px; border-radius: 14px; color: #fff; align-items: flex-start;
+    margin-bottom: 16px; padding: 12px 18px 14px; border-radius: 14px; color: #fff;
     background: linear-gradient(120deg, #0B1A5C 0%, #1E3A8A 55%, #2453C7 100%);
   }
   body.imprimir-ficha .ficha-impresion::after {
     content: ""; position: absolute; left: 18px; right: 18px; bottom: -6px; height: 3px; border-radius: 99px;
     background: linear-gradient(90deg, #FCB400, #FFD66B 60%, rgba(252, 180, 0, 0));
   }
-  /* Arriba el logo de la empresa, tal cual (en su recuadro blanco); debajo, la marca de Axio. */
-  .fi-izquierda { display: grid; justify-items: start; gap: 10px; }
-  .fi-empresa { display: block; padding: 4px 10px; border-radius: 10px; background: #fff; }
-  .fi-empresa img { display: block; height: 46px; width: auto; }
-  .fi-marca { display: flex; align-items: center; gap: 10px; }
-  .fi-logo { width: 34px; height: 34px; flex: none; border-radius: 9px; outline: 2px solid rgba(255, 255, 255, .25); }
-  .fi-logo svg { display: block; width: 100%; height: 100%; }
-  .fi-marca strong { display: block; font-family: var(--fuente-titulo); font-size: 18px; font-weight: 750; letter-spacing: -.02em; line-height: 1.05; }
-  .fi-marca span { display: block; margin-top: 2px; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: #FCD34D; }
+  /* El logo de la empresa, fundido en la franja, y debajo qué documento es. */
+  .fi-marca { display: grid; justify-items: start; gap: 2px; }
+  .fi-empresa { display: block; height: 52px; width: auto; margin: -4px 0 0 -6px; }
+  .fi-marca strong { font-family: var(--fuente-titulo); font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+  .fi-marca span { display: block; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: #FCD34D; }
   .fi-meta { display: grid; justify-items: end; gap: 1px; font-size: 10.5px; color: rgba(255, 255, 255, .82); text-align: right; }
   .fi-meta .fi-quien { margin-top: 3px; padding: 1px 9px; border-radius: 99px; font-weight: 650; color: #fff; background: rgba(255, 255, 255, .14); }
 
@@ -1319,6 +1315,9 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
     display: flex; align-items: center; gap: 10px; margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--borde);
   }
   .ficha-pie p { flex: 1; margin: 0; font-size: 9.5px; color: var(--texto-3); }
+  .fi-firma { display: inline-flex; align-items: center; gap: 6px; }
+  .fi-firma .fi-logo { width: 20px; height: 20px; flex: none; }
+  .fi-firma .fi-logo svg { display: block; width: 100%; height: 100%; }
   .ficha-pie strong { font-family: var(--fuente-titulo); font-size: 12px; color: #1E3A8A; }
   .fi-puntos { display: inline-flex; align-items: flex-end; gap: 3px; }
   .fi-puntos i { width: 5px; height: 5px; border-radius: 50%; background: #FCB400; }
