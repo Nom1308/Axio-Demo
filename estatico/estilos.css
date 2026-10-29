@@ -1254,8 +1254,8 @@ button.tb-fila:disabled { cursor: default; opacity: .5; }
   }
   /* Arriba el logo de la empresa, tal cual (en su recuadro blanco); debajo, la marca de Axio. */
   .fi-izquierda { display: grid; justify-items: start; gap: 10px; }
-  .fi-empresa { display: block; padding: 6px 12px; border-radius: 10px; background: #fff; }
-  .fi-empresa img { display: block; height: 40px; width: auto; }
+  .fi-empresa { display: block; padding: 4px 10px; border-radius: 10px; background: #fff; }
+  .fi-empresa img { display: block; height: 46px; width: auto; }
   .fi-marca { display: flex; align-items: center; gap: 10px; }
   .fi-logo { width: 34px; height: 34px; flex: none; border-radius: 9px; outline: 2px solid rgba(255, 255, 255, .25); }
   .fi-logo svg { display: block; width: 100%; height: 100%; }
