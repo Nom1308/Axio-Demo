@@ -957,6 +957,10 @@
   const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toUpperCase();
 
   function estadoCredito(e) {
+    // Seguro de Vida: su columna «ESTADO» (AL DIA / EN MORA) manda.
+    const propio = sinTildes(e.estado_seguro);
+    if (/MORA/.test(propio)) return { mora: true, texto: "En mora" };
+    if (/DIA/.test(propio)) return { mora: false, texto: "Al día" };
     const valor = buscarCampo(e.campos, "MORA/DIA") || buscarCampo(e.campos, "ESTADO PAGO AUTOMATICO") || "";
     const v = sinTildes(valor);
     if (/MORA/.test(v) || (!v && e.en_mora === true)) return { mora: true, texto: "En mora" };
@@ -1034,6 +1038,8 @@
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
       ["Altura", buscarCampo(e.campos, "ALTURA")],
       ["Observación", e.observacion_estado],
+      ["Estado", e.estado_seguro],
+      ["Mes que se encuentra", e.mes_encuentra],
       [etiquetaColumna(e.columna_tarifa, "Tarifa"), e.tarifa ? "$ " + e.tarifa : null],
       ["Meses en mora", e.meses_mora],
     ].filter(([, v]) => v);
@@ -1366,6 +1372,8 @@
       ["Último pago", e.fecha_ultimo_pago],
       ["Cuota mes cancelado", e.mes_ultimo_pago],
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
+      ["Estado", e.estado_seguro],
+      ["Mes que se encuentra", e.mes_encuentra],
       [etiquetaColumna(e.columna_tarifa, "Tarifa"), conPesos(e.tarifa)],
       ["Meses en mora", e.meses_mora, e.en_mora ? "dato-mora" : null],
     ].filter(([, v]) => v);

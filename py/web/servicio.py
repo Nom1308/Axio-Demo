@@ -145,7 +145,12 @@ def _sin_tildes(texto):
 def _estado_credito(e):
     """'mora', 'dia' o None, con la misma regla que la página (estadoCredito en app.js):
     manda «ESTADO: MORA/DIA»; si no está, «ESTADO PAGO AUTOMATICO»; si tampoco, los meses
-    en mora."""
+    en mora. En Seguro de Vida, antes que todo, su columna «ESTADO»."""
+    propio = _sin_tildes(e.get('estado_seguro'))
+    if 'MORA' in propio:
+        return 'mora'
+    if 'DIA' in propio:
+        return 'dia'
     valor = ''
     for palabras in (('MORA/DIA',), ('ESTADO', 'PAGO', 'AUTOMATICO')):
         for columna, v, _ in e.get('campos') or []:
@@ -797,6 +802,9 @@ class MotorWeb:
             'en_mora': en_mora,
             'observacion_directivos': e.get('observacion_directivos'),
             'observacion_general': e.get('observacion_general'),
+            'estado_seguro': e.get('estado_seguro'),
+            'mes_encuentra': (_formatear_valor_celda(e['mes_encuentra'])
+                              if e.get('mes_encuentra') is not None else None),
             'tipo_credito': e.get('tipo_credito'),
             'link_registro': _enlace_seguro(e.get('link_registro')),
             'observacion_estado': e.get('observacion_estado'),

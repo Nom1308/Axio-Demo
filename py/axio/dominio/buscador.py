@@ -1510,9 +1510,19 @@ def descargar_linea_credito(url, clave=None):
         idx_obs_general = _buscar_columna_con_todas(['OBSERVACI', 'GENERAL'])
         if idx_obs_directivos is None and idx_obs_general is None:
             idx_obs_directivos = _buscar_columna(['OBSERVACION', 'OBSERVACIÓN'])
+        # 'ESTADO' (AL DIA / EN MORA) y 'MES QUE SE ENCUENTRA'. La de estado, por el título
+        # exacto primero: así no se confunde con otra columna que solo mencione la palabra.
+        idx_estado_seguro = next((i for i, t in cols_por_mayus.items()
+                                  if i not in columnas_ya_asignadas and t.strip() == 'ESTADO'), None)
+        if idx_estado_seguro is None:
+            idx_estado_seguro = _buscar_columna_con_todas(['ESTADO'])
+        else:
+            columnas_ya_asignadas.add(idx_estado_seguro)
+        idx_mes_encuentra = _buscar_columna_con_todas(['MES', 'ENCUENTRA'])
     else:
         idx_estado = _buscar_columna(['ACTIV', 'ESTADO'])
         idx_tarifa = idx_saldo = idx_mora = idx_obs_directivos = idx_obs_general = None
+        idx_estado_seguro = idx_mes_encuentra = None
     idx_nombre = _buscar_columna(['NOMBRE', 'RESPONSABLE', 'PASTOR'])
 
     if idx_cedula is None:
@@ -1561,14 +1571,16 @@ def descargar_linea_credito(url, clave=None):
             if estado_txt is None or estado_txt.strip().upper() != 'ACTIVO':
                 continue
         elif clave in CLAVES_LINEAS_CON_INFO_EXTRA and idx_saldo is not None:
+            # Primero la regla de siempre: está activo quien tiene saldo. Si no, la columna
+            # ESTADO: quien está AL DIA (saldo 0, sin meses en mora) también tiene que salir.
             saldo_val = _valor_o_none(fila_celdas, idx_saldo)
-            if saldo_val is None:
-                continue
+            con_saldo = saldo_val is not None
             try:
-                if float(saldo_val) == 0:
-                    continue
+                con_saldo = con_saldo and float(saldo_val) != 0
             except (TypeError, ValueError):
                 pass
+            if not con_saldo and _texto_o_none(fila_celdas, idx_estado_seguro) is None:
+                continue
 
         link_obligacion = None
         for celda in fila_celdas:
@@ -1607,6 +1619,8 @@ def descargar_linea_credito(url, clave=None):
             'meses_mora': _valor_o_none(fila_celdas, idx_mora),
             'observacion_directivos': _texto_o_none(fila_celdas, idx_obs_directivos),
             'observacion_general': _texto_o_none(fila_celdas, idx_obs_general),
+            'estado_seguro': _texto_o_none(fila_celdas, idx_estado_seguro),
+            'mes_encuentra': _mes_y_anio(_valor_o_none(fila_celdas, idx_mes_encuentra)),
             'tipo_credito': _texto_o_none(fila_celdas, idx_tipo_credito),
             'link_registro': link_registro,
             'observacion_estado': _texto_o_none(fila_celdas, idx_obs_estado),
