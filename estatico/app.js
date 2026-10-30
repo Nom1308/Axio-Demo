@@ -1033,7 +1033,7 @@
     const resumen = [
       [e.saldo_actual ? "Saldo actual" : etiquetaColumna(e.columna_saldo, "Saldo actual"),
         e.saldo_actual ? "$ " + e.saldo_actual : (e.saldo ? "$ " + e.saldo : null)],
-      ["Último pago", e.fecha_ultimo_pago],
+      ["Última consignación registrada", e.fecha_ultimo_pago],
       ["Cuota mes cancelado", e.mes_ultimo_pago],
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
       ["Altura", buscarCampo(e.campos, "ALTURA")],
@@ -1384,7 +1384,7 @@
 
     const datos = [
       ["Observación", e.observacion_estado],
-      ["Último pago", e.fecha_ultimo_pago],
+      ["Última consignación registrada", e.fecha_ultimo_pago],
       ["Cuota mes cancelado", e.mes_ultimo_pago],
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
       ["Estado", e.estado_seguro],
@@ -1454,7 +1454,7 @@
     // Resumen de la obligación: lo que se mira primero en la hoja de la línea.
     const datos = [
       ["Observación", e.observacion_estado],
-      ["Último pago", e.fecha_ultimo_pago],
+      ["Última consignación registrada", e.fecha_ultimo_pago],
       ["Cuota mes cancelado", e.mes_ultimo_pago],
       ["Última cuota paga", buscarCampo(e.campos, "ULTIMA CUOTA PAGA")],
       ["Saldo actual", e.saldo_actual ? "$ " + e.saldo_actual : null],
