@@ -263,6 +263,23 @@ self.onmessage = async (ev) => {
       proxy.destroy();
       const cuerpo = aBytes(cuerpoPy).buffer;
       postMessage({ tipo: "respuesta", id, codigo, tipoContenido: tipo, cuerpo }, [cuerpo]);
+    } else if (accion === "sincronizar") {
+      // Volver a bajar solo los Extractos para que los colores sigan a la Matriz (ver
+      // sincronizar en motor/navegador.py). La descarga va aquí, sin frenar las búsquedas;
+      // Python solo lee y compara. Si no toca o la descarga falla, no cambia nada.
+      const nav = await motorConToken();
+      const forzar = Boolean(ev.data.forzar);
+      const url = ultimoConfig ? urlExportacion(JSON.parse(ultimoConfig).url_base_global, "csv") : "";
+      let datos = { version: null, cambio: false };
+      if (url && nav.toca_sincronizar(forzar)) {
+        const b = await bajarUna(url);
+        if (b && b.estado < 400) {
+          nav.fijar_token(tokenGoogle);
+          nav.guardar_precarga(url, b.datos, b.estado, b.urlFinal, b.tipo);
+          datos = JSON.parse(nav.sincronizar(url, forzar));
+        }
+      }
+      postMessage({ tipo: "respuesta", id, datos });
     } else if (accion === "excel") {
       const d = ev.data;
       const nav = await motorConToken();

@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-10-30-154129");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-11-03-153110");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -161,6 +161,13 @@
       cargarDatos({ accion: "recargar" }, usuario ? tokenVigente : null);
       return respuestaJson({ iniciada: true, mensaje: "Descargando los datos de nuevo..." });
     }
+    if (metodo === "POST" && url.startsWith("/api/sincronizar")) {
+      // La pide app.js sola cada pocos minutos. Nunca abre la ventana de Google: si el
+      // permiso venció, espera a que se renueve con el próximo clic (ver RENOVAR_ANTES).
+      if (cargando || !motorListo || (usuario && (!token || Date.now() >= venceToken))) return respuestaJson({ version: null, cambio: false });
+      const r = await pedir({ accion: "sincronizar", forzar: url.includes("forzar=1") });
+      return r.error ? respuestaJson({ error: r.error }, 500) : respuestaJson(r.datos);
+    }
     if (cargando && !parcial) {
       if (url === "/api/estado") return respuestaJson(estadoCargando());
       if (url.startsWith("/api/buscar")) return respuestaJson({ cargando: true, mensaje: "Cargando los datos..." }, 202);
@@ -279,7 +286,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-10-30-154129";
+    script.src = "estatico/app.js?v=2026-11-03-153110";
     document.body.append(script);
   }
 

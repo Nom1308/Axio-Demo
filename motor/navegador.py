@@ -26,6 +26,7 @@ import os
 import pickle
 import re
 import sys
+import time
 import email.message
 import urllib.error
 import urllib.request
@@ -300,6 +301,25 @@ def recargar_por_pasos():
     """El «Refrescar datos» de la barra: vuelve a bajar todo con el mismo config. Mientras
     tanto se sigue buscando en la copia anterior."""
     return _por_pasos()
+
+
+def toca_sincronizar(forzar=False):
+    """Si ya toca volver a bajar los Extractos (ver MotorWeb.sincronizar_extractos). Se
+    pregunta antes de descargar: la descarga la hace trabajador.js, sin frenar la pestaña."""
+    m = _motor
+    if m is None or not m.listo or m.cargando or m.df_global is None:
+        return False
+    minimo = m.SEGUNDOS_TRAS_GESTIONAR if forzar else m.SEGUNDOS_ENTRE_SINCRONIZACIONES
+    return time.monotonic() - m._ultima_sincronizacion >= minimo
+
+
+def sincronizar(url, forzar=False):
+    """Con los Extractos ya bajados por trabajador.js (guardar_precarga con esta url):
+    pone al día la copia en memoria si cambiaron. Devuelve JSON {version, cambio, hora}."""
+    try:
+        return json.dumps(_motor.sincronizar_extractos(forzar=bool(forzar)))
+    finally:
+        _precarga.pop(_sin_fragmento(url), None)   # si no se usó, que no quede ocupando memoria
 
 
 def _de_corrido(pasos):

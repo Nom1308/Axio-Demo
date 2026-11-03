@@ -306,7 +306,9 @@
     formulario(d, cuerpo, mostrarEstado, m, filas[0], h, aviso);
   }
 
-  async function formulario(d, cuerpo, mostrarEstado, m, fila, h, aviso) {
+  // hecho: lo que se acaba de guardar ({ lista, estado, avisoRegistro, previos, deshecho }):
+  // la línea de confirmación con «Deshacer» (ver confirmacion).
+  async function formulario(d, cuerpo, mostrarEstado, m, fila, h, aviso, hecho) {
     const editable = m.canEdit && google().puedeEscribir();
     let opciones = null;
     try { opciones = await opcionesCredito(m, fila); } catch (_) { /* sin lista: se escribe a mano */ }
@@ -343,7 +345,7 @@
         c.ayuda ? nodo("span", { class: "gestion-ayuda", text: c.ayuda }) : null));
     }
 
-    const estadoLinea = nodo("p", { class: "gestion-estado gris" });
+    const estadoLinea = nodo("p", { class: "gestion-estado gris", "aria-live": "polite" });
     const guardar = nodo("button", { class: "boton boton-principal", type: "button", text: "Guardar en la Matriz", disabled: true });
     const cambios = () => Object.keys(entradas).filter((k) => entradas[k].value.trim() !== originales[k].trim());
     const alCambiar = () => {
@@ -354,7 +356,8 @@
     for (const e of Object.values(entradas)) { e.addEventListener("input", alCambiar); e.addEventListener("change", alCambiar); }
 
     const enlace = `https://docs.google.com/spreadsheets/d/${m.id}/edit#gid=${m.sheetId}&range=A${fila}`;
-    cuerpo.replaceChildren(
+    // filter(Boolean): replaceChildren escribiría «null» por cada parte que falta.
+    cuerpo.replaceChildren(...[
       nodo("p", { class: "gestion-fila" },
         `Fila ${fila} de «${m.titulo}»`,
         nodo("a", { class: "boton boton-chico", href: enlace, target: "_blank", rel: "noopener noreferrer", text: "Ver en Google Sheets ↗" })),
@@ -363,10 +366,13 @@
         ? "👁️ No aceptaste el permiso para editar hojas al iniciar sesión: cierra sesión y vuelve a entrar marcándolo."
         : "👁️ Tu cuenta solo puede ver la Matriz. Para gestionar pagos, pide permiso de edición a quien la administra." }),
       nodo("div", { class: "gestion-casillas" }, ...grupos),
-      editable ? nodo("div", { class: "gestion-pie" }, estadoLinea, guardar) : null);
+      editable ? nodo("div", { class: "gestion-pie" }, estadoLinea, guardar) : null].filter(Boolean));
 
-    guardar.addEventListener("click", async () => {
-      const lista = cambios();
+    // Escribe nuevos ({ clave: valor }) en la fila. Antes comprueba que siga siendo el mismo
+    // pago y que nadie haya cambiado esas casillas desde que se mostraron (originales).
+    // deshaciendo: es el «Deshacer» de lo recién guardado (no se ofrece deshacer otra vez).
+    const escribir = async (nuevos, deshaciendo) => {
+      const lista = Object.keys(nuevos);
       if (!lista.length) return;
       guardar.disabled = true;
       for (const e of Object.values(entradas)) e.disabled = true;
@@ -380,17 +386,17 @@
             aviso: "⚠️ La Matriz cambió mientras tanto (se movieron filas) y el pago ahora está en otra posición. Revisa y vuelve a guardar; no se guardó nada." });
           return;
         }
-        const ajenos = Object.keys(entradas).filter((k) => String(actual[m.columnas[k]] ?? "").trim() !== originales[k].trim());
+        const ajenos = lista.filter((k) => String(actual[m.columnas[k]] ?? "").trim() !== originales[k].trim());
         if (ajenos.length) {
           m.filas[fila - 1] = actual;
           const nombres = ajenos.map((k) => m.nombres[m.columnas[k]]).join(", ");
           await formulario(d, cuerpo, mostrarEstado, m, fila, h,
-            `⚠️ Alguien más cambió ${nombres} de este pago mientras lo tenías abierto. Te muestro lo que hay ahora; no se guardó nada.`);
+            `⚠️ Alguien más cambió ${nombres} de este pago mientras lo tenías abierto. Te muestro lo que hay ahora; no se ${deshaciendo ? "deshizo" : "guardó"} nada.`);
           return;
         }
-        estadoLinea.textContent = "⏳ Guardando en la Matriz…";
+        estadoLinea.textContent = deshaciendo ? "⏳ Devolviendo la fila a como estaba…" : "⏳ Guardando en la Matriz…";
         const datos = lista.map((k) => {
-          let valor = entradas[k].value.trim();
+          let valor = String(nuevos[k]).trim();
           if (valor.startsWith("=")) valor = "'" + valor;   // texto, nunca una fórmula
           return { range: `${comillas(m.titulo)}!${letra(m.columnas[k])}${fila}`, values: [[valor]] };
         });
@@ -405,7 +411,7 @@
         try {
           if (google().registrar) await google().registrar(lista.map((k) => ({
             hoja: "Matriz · " + m.titulo, ubicacion: `Fila ${fila}`, cedula: h.cedula || "",
-            columna: m.nombres[m.columnas[k]] || k, antes: originales[k], despues: entradas[k].value.trim(),
+            columna: (m.nombres[m.columnas[k]] || k) + (deshaciendo ? " (deshecho)" : ""), antes: originales[k], despues: String(nuevos[k]).trim(),
           })));
         } catch (e) {
           avisoRegistro = " ⚠️ No quedó en el registro de gestiones: " + e.message + ".";
@@ -413,27 +419,66 @@
         m.filas[fila - 1] = await leerFila(m, fila);
         const estado = estadoDe(m, fila);
         mostrarEstado(estado);
+        try { if (navigator.vibrate && window.matchMedia("(pointer: coarse)").matches) navigator.vibrate(deshaciendo ? 10 : [12, 50, 12]); } catch (_) { /* sin vibración */ }
         // A «Tu día» (app.js).
         window.dispatchEvent(new CustomEvent("axio-actividad", { detail: { tipo: "matriz", cedula: h.cedula || "",
-          texto: "Gestión en la Matriz" + (estado ? ": " + estado.etiqueta : "") } }));
-        await formulario(d, cuerpo, mostrarEstado, m, fila, h);
-        const linea = cuerpo.querySelector(".gestion-estado");
-        if (linea) {
-          linea.className = "gestion-estado " + (avisoRegistro ? "ambar" : "ok");
-          linea.replaceChildren(chulo(), nodo("span", { text: `Guardado en la Matriz · ${hora()} · ${estado ? estado.icono + " " + estado.etiqueta : "sin gestionar"}. ` +
-            "La lista de resultados se actualiza con «Refrescar datos»." + avisoRegistro }));
-        }
-        // Las casillas que se guardaron destellan con su color (verde, naranja o rojo).
-        for (const k of lista) {
-          const casilla = cuerpo.querySelector(`.gestion-casilla[data-clave="${k}"]`);
-          if (casilla) casilla.classList.add("gestion-guardada");
-        }
+          texto: (deshaciendo ? "Deshizo una gestión en la Matriz" : "Gestión en la Matriz") + (estado ? ": " + estado.etiqueta : "") } }));
+        const previos = {};
+        for (const k of lista) previos[k] = originales[k];
+        await formulario(d, cuerpo, mostrarEstado, m, fila, h, null, { lista, estado, avisoRegistro, previos, deshecho: Boolean(deshaciendo) });
       } catch (e) {
         estadoLinea.className = "gestion-estado error";
-        estadoLinea.textContent = "❌ No se guardó: " + e.message + ".";
-        for (const x of Object.values(entradas)) x.disabled = false;
-        guardar.disabled = false;
+        estadoLinea.textContent = `❌ No se ${deshaciendo ? "deshizo" : "guardó"}: ` + e.message + ".";
+        for (const x of Object.values(entradas)) x.disabled = !editable;
+        guardar.disabled = !cambios().length;
       }
+    };
+
+    guardar.addEventListener("click", () => {
+      const nuevos = {};
+      for (const k of cambios()) nuevos[k] = entradas[k].value.trim();
+      escribir(nuevos, false);
     });
+
+    if (hecho) confirmacion(cuerpo, estadoLinea, hecho, () => escribir(hecho.previos, true));
+  }
+
+  // La línea verde de «Guardado» y, durante unos segundos, «Deshacer» (también Ctrl+Z con
+  // el foco fuera de las casillas): vuelve a escribir lo que había antes, con las mismas
+  // comprobaciones que al guardar. Una barrita dorada muestra cuánto queda para deshacer.
+  const MS_DESHACER = 10000;
+  function confirmacion(cuerpo, linea, hecho, deshacer) {
+    const { lista, estado, avisoRegistro, deshecho } = hecho;
+    linea.className = "gestion-estado " + (avisoRegistro ? "ambar" : "ok");
+    const texto = deshecho
+      ? `Deshecho · la fila volvió a como estaba · ${hora()} · ${estado ? estado.icono + " " + estado.etiqueta : "sin gestionar"}.`
+      : `Guardado en la Matriz · ${hora()} · ${estado ? estado.icono + " " + estado.etiqueta : "sin gestionar"}.`;
+    linea.replaceChildren(chulo(), nodo("span", { text: texto + avisoRegistro }));
+    // Las casillas que se guardaron destellan con su color (verde, naranja o rojo).
+    for (const k of lista) {
+      const casilla = cuerpo.querySelector(`.gestion-casilla[data-clave="${k}"]`);
+      if (casilla) casilla.classList.add("gestion-guardada");
+    }
+    if (deshecho) return;
+    const boton = nodo("button", { class: "boton boton-chico gestion-deshacer", type: "button", title: "Devuelve la fila a como estaba antes de guardar (Ctrl+Z)" },
+      "↶ Deshacer", nodo("span", { class: "gestion-deshacer-tiempo", style: `animation-duration:${MS_DESHACER}ms`, "aria-hidden": "true" }));
+    linea.append(boton);
+    const dialogo = cuerpo.closest("dialog") || document;
+    let reloj = null;
+    const alTeclado = (ev) => {
+      if (!boton.isConnected) { quitar(); return; }
+      const enCasilla = ev.target && ev.target.closest && ev.target.closest("input, textarea, select");
+      if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && (ev.key === "z" || ev.key === "Z") && !enCasilla) { ev.preventDefault(); boton.click(); }
+    };
+    const quitar = () => {
+      dialogo.removeEventListener("keydown", alTeclado);
+      clearTimeout(reloj);
+      if (boton.isConnected) { boton.classList.add("saliendo"); setTimeout(() => boton.remove(), 250); }
+    };
+    reloj = setTimeout(quitar, MS_DESHACER);
+    dialogo.addEventListener("keydown", alTeclado);
+    boton.addEventListener("click", () => { quitar(); deshacer(); });
+    // Si se toca otra casilla, ya no se ofrece deshacer (se está haciendo otro cambio).
+    for (const e of cuerpo.querySelectorAll(".gestion-entrada")) e.addEventListener("input", quitar, { once: true });
   }
 })();

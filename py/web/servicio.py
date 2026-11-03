@@ -11,12 +11,14 @@ así que se puede probar sin levantar el servidor.
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import hashlib
 import io
 import json
 import re
 import secrets
 import sys
 import threading
+import time
 import unicodedata
 
 import numpy as np
@@ -71,6 +73,20 @@ def _valor_de_campo(columna, valor):
         if isinstance(valor, int):
             return str(valor)
     return _formatear_valor_celda(valor)
+
+
+# Las casillas que se llenan al gestionar un pago (las mismas que estatico/pagos.js de la
+# versión de navegador): RWS, NOTA CARTERA, CREDITO y NOTA RECAUDO. 'CREDIT' es CREDITO
+# -<01> renombrada por descargar_base_global.
+_COLUMNA_DE_GESTION = re.compile(r'^(RWS|RCW|CREDIT)$|NOTA CARTERA|NOTA RECAUDO|^CREDITO')
+
+
+def _llave_pago(fila):
+    """Lo que identifica una fila aunque se gestione: todos sus datos menos las casillas de
+    gestión. Con ella la página reconoce el mismo pago después de sincronizar."""
+    partes = [f"{c}{_formatear_valor_celda(v)}" for c, v in fila.items()
+              if not _COLUMNA_DE_GESTION.search(str(c).strip().upper())]
+    return hashlib.blake2b(''.join(partes).encode('utf-8'), digest_size=8).hexdigest()
 
 
 def _cedula_con_puntos(cedula_limpia):
@@ -176,10 +192,15 @@ class MotorWeb:
         self._candado_carga = threading.Lock()
         self._candado_indice = threading.Lock()
         self._candado_busquedas = threading.Lock()
+        self._candado_sincronizar = threading.Lock()
 
         self.config = cargar_config()
         self.df_global = None
         self.hora_matriz = None
+        # Sube cada vez que cambia la copia de los Extractos (carga, «Refrescar» o
+        # sincronizar_extractos): la página la compara para saber si ponerse al día.
+        self.version_extractos = 0
+        self._ultima_sincronizacion = 0.0
         self.error_matriz = None
         self.aviso_matriz = None
         self.rosters = {}
@@ -256,6 +277,7 @@ class MotorWeb:
                 self.df_global, self.hora_matriz, self.error_matriz = df, hora, error
                 self.aviso_matriz = aviso
                 self.cache_normalizado = {}
+                self.version_extractos += 1
                 self.parcial = True
                 self.listo = True
             yield 'extractos'
@@ -264,6 +286,8 @@ class MotorWeb:
             whatsapp, error_whatsapp = self._cargar_whatsapp(config)
 
             self.config = config
+            if df is not self.df_global:
+                self.version_extractos += 1
             self.df_global, self.hora_matriz, self.error_matriz = df, hora, error
             self.aviso_matriz = aviso
             self.rosters, self.hora_lineas, self.errores_lineas = rosters, hora_lineas, errores
@@ -354,6 +378,54 @@ class MotorWeb:
         contacto = self.whatsapp.get(cedula_limpia) if cedula_limpia else None
         return f"https://wa.me/{contacto['celular']}" if contacto else None
 
+    # ------------------------------------------------------------------ sincronizar
+    # Cuando alguien gestiona un pago en la Matriz (o José sube pagos nuevos), el color
+    # cambia en la hoja. La página pide esto cada pocos minutos, sin que se note: se baja
+    # SOLO la hoja de los Extractos (las líneas de crédito no) y, si cambió, reemplaza la
+    # copia en memoria. Con varias personas conectadas al servidor, se baja una sola vez por
+    # intervalo y las demás reciben la copia ya fresca.
+    SEGUNDOS_ENTRE_SINCRONIZACIONES = 90
+    SEGUNDOS_TRAS_GESTIONAR = 10   # forzar tampoco baja la hoja más seguido que esto
+
+    def sincronizar_extractos(self, forzar=False):
+        """{'version', 'cambio', 'hora'}. forzar: casi sin esperar el intervalo (se acaba
+        de gestionar un pago desde Axio). Si algo falla, la copia anterior sigue tal cual."""
+        if not self.listo or self.cargando or self.df_global is None:
+            return self._version_sincronizada(False)
+        if not self._candado_sincronizar.acquire(blocking=False):
+            return self._version_sincronizada(False)   # ya hay una en curso
+        try:
+            minimo = self.SEGUNDOS_TRAS_GESTIONAR if forzar else self.SEGUNDOS_ENTRE_SINCRONIZACIONES
+            if time.monotonic() - self._ultima_sincronizacion < minimo:
+                return self._version_sincronizada(False)
+            config = self.config
+            url = config.get('url_base_global', '')
+            if not url:
+                return self._version_sincronizada(False)
+            df = asegurar_columna_cedula(descargar_base_global(url, config), config.get('col_cedula', 'Cedula'))
+            self._ultima_sincronizacion = time.monotonic()
+            if self.cargando:
+                return self._version_sincronizada(False)   # empezó un «Refrescar»: él manda
+            viejo = self.df_global
+            self.hora_matriz = datetime.now()
+            if viejo is not None and list(viejo.columns) == list(df.columns) and viejo.equals(df):
+                return self._version_sincronizada(False)
+            guardar_matriz_nube(df, url)
+            self.df_global = df
+            self.error_matriz = None
+            self.aviso_matriz = aviso_columna_cedula(df)
+            self.cache_normalizado = {}
+            self.version_extractos += 1
+            return self._version_sincronizada(True)
+        except Exception:
+            logger.warning("No se pudieron sincronizar los Extractos; sigue la copia anterior", exc_info=True)
+            return self._version_sincronizada(False)
+        finally:
+            self._candado_sincronizar.release()
+
+    def _version_sincronizada(self, cambio):
+        return {'version': self.version_extractos, 'cambio': cambio, 'hora': _hora_iso(self.hora_matriz)}
+
     # ------------------------------------------------------------------ estado
     def estado(self):
         carpeta = self._carpeta_cierres()
@@ -369,6 +441,7 @@ class MotorWeb:
                 'hora': _hora_iso(self.hora_matriz),
                 'error': self.error_matriz,
                 'aviso': self.aviso_matriz,
+                'version': self.version_extractos,
             },
             'lineas': {
                 'configuradas': hay_lineas,
@@ -715,6 +788,7 @@ class MotorWeb:
                 'v': [_formatear_valor_celda(r['fila'].get(c, '')) for c in g['columnas']],
                 'm': [j for j, c in enumerate(g['columnas']) if c in r['columnas_coincidentes']],
                 'e': estado['clave'] if estado else None,
+                'k': _llave_pago(r['fila']),
             })
         for g in grupos.values():
             g['total'] = max(g['total'], len(g['filas']))
@@ -1165,6 +1239,7 @@ class MotorWeb:
             'extractos': extractos,
             'lineas': self._tablero_lineas(),
             'hora': _hora_iso(self.hora_matriz),
+            'version': self.version_extractos,
             'hora_lineas': _hora_iso(self.hora_lineas),
             'parcial': self.parcial,
         }

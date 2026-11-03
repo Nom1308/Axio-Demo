@@ -100,6 +100,76 @@
     return { status: resp.status, datos };
   }
 
+  // ------------------------------------------------------------------ errores que dicen qué hacer
+  // Un error técnico («HTTP Error 403», «Failed to fetch») se cuenta en palabras de la gente:
+  // qué pasó y qué hacer. donde: "hoja" (una hoja de Google no se pudo leer) o nada (una
+  // consulta a Axio). El texto original nunca se pierde: va en «Detalle técnico».
+  function explicarError(error, donde) {
+    const t = String((error && error.message) || error || "");
+    const hoja = donde === "hoja";
+    if (/failed to fetch|networkerror|load failed|sin conexi[oó]n|err_internet|network request failed|conexi[oó]n.*(rechaz|perdi)/i.test(t)) {
+      return { titulo: "Parece que no hay conexión a internet.", consejo: "Revisa el wifi o el cable de red y vuelve a intentarlo." };
+    }
+    // Una hoja con 401 es falta de permiso (Google), no una sesión vencida de Axio.
+    if (!hoja && /sesi[oó]n expir|vuelve a iniciar sesi[oó]n|\b401\b/i.test(t)) {
+      return { titulo: "Tu sesión venció.", consejo: "Vuelve a entrar; lo que tenías en pantalla no se pierde en las hojas." };
+    }
+    if (/permiso|\b40[13]\b|forbidden|unauthorized|access denied|no tiene acceso|privad/i.test(t)) {
+      return { titulo: hoja ? "No tengo permiso para leer esta hoja." : "Tu cuenta no tiene permiso para esto.",
+        consejo: hoja ? "Pídele a quien administra la hoja que la comparta con tu cuenta, y luego refresca los datos." : "Si crees que deberías tenerlo, avísale a sistemas." };
+    }
+    if (/\b404\b|not found|no existe|no se encontr[oó] la hoja/i.test(t)) {
+      return { titulo: hoja ? "No encontré la hoja: puede que la hayan movido o borrado." : "Eso ya no está disponible.",
+        consejo: hoja ? "Avísale a quien administra la configuración de Axio para que actualice el enlace." : "Vuelve a buscar para traer los datos de ahora." };
+    }
+    if (/c[eé]dula|encabezado|columna/i.test(t) && hoja) {
+      return { titulo: "La hoja cambió de forma y no encuentro sus columnas.", consejo: "Revisa que la fila de títulos tenga la columna de Cédula como antes." };
+    }
+    if (/timed? ?out|tiempo de espera|\b5\d\d\b|unavailable|bad gateway|google respondi[oó]/i.test(t)) {
+      return { titulo: hoja ? "Google tardó demasiado en entregar la hoja." : "El servidor tardó en responder.",
+        consejo: "Espera unos segundos y vuelve a intentarlo." };
+    }
+    if (/filtro|no es una fecha|no es una cifra|columna no existe/i.test(t)) {
+      return { titulo: t.replace(/\.$/, "") + ".", consejo: "Revisa el filtro y prueba otra vez." };
+    }
+    return { titulo: hoja ? "Esta hoja no se pudo leer." : "Algo no salió bien.",
+      consejo: "Vuelve a intentarlo; si se repite, avísale a sistemas con el detalle técnico." };
+  }
+
+  // El aviso completo: qué pasó, qué hacer, «Reintentar» (si se puede) y el detalle técnico
+  // plegado. reintentar: función o null.
+  function avisoError(error, reintentar, donde) {
+    const x = explicarError(error, donde);
+    const tecnico = String((error && error.message) || error || "");
+    const caja = el("div", { class: "aviso aviso-error aviso-amable", role: "alert" },
+      el("span", { class: "aa-icono", "aria-hidden": "true", text: "!" }),
+      el("div", { class: "aa-textos" },
+        el("strong", { text: x.titulo }),
+        el("span", { text: x.consejo }),
+        tecnico && tecnico !== x.titulo ? el("details", { class: "aa-detalle" }, el("summary", { text: "Detalle técnico" }), el("code", { text: tecnico })) : null),
+      reintentar ? el("button", { class: "boton boton-chico aa-reintentar", type: "button", text: "↻ Reintentar",
+        onclick: (ev) => { ev.currentTarget.disabled = true; ev.currentTarget.textContent = "Intentando…"; reintentar(); } }) : null);
+    return caja;
+  }
+
+  // Una vibración corta en el celular al confirmar algo (copiar, guardar, chulear). En el
+  // computador no hace nada.
+  const tactil = window.matchMedia("(pointer: coarse)");
+  function vibrar(patron) {
+    try { if (tactil.matches && navigator.vibrate) navigator.vibrate(patron || 12); } catch (_) { /* sin vibración */ }
+  }
+
+  // Lo que cambia en pantalla, contado a los lectores de pantalla (región viva invisible).
+  const anuncio = el("div", { class: "solo-lectores", role: "status", "aria-live": "polite", "aria-atomic": "true" });
+  document.body.append(anuncio);
+  let temporizadorAnuncio = null;
+  function anunciar(texto) {
+    clearTimeout(temporizadorAnuncio);
+    anuncio.textContent = "";
+    // Un instante vacío para que el lector lo lea aunque el texto se repita.
+    temporizadorAnuncio = setTimeout(() => { anuncio.textContent = texto; }, 120);
+  }
+
   let temporizadorToast = null;
   function toast(texto) {
     const t = $("#toast");
@@ -125,6 +195,7 @@
         area.remove();
       }
       toast(mensaje || "Copiado.");
+      vibrar();
       if (boton) confirmarCopia(boton, /^Cédula/.test(mensaje || "") ? "Copiada" : "Copiado");
     } catch (_) {
       toast("No se pudo copiar.");
@@ -181,8 +252,10 @@
 
   // ------------------------------------------------------------------ movimiento
   // Detalles de animación (ver «MOVIMIENTO» en estilos.css). Con «reducir movimiento» en el
-  // sistema no se hace ninguno.
-  const sinMovimiento = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // sistema no se hace ninguno. Tampoco al repintar por una sincronización (quieto, ver
+  // «sincronizar con la Matriz»): lo que cambia de color no debe notarse como una carga.
+  let quieto = false;
+  const sinMovimiento = () => quieto || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // Una cifra como "$ 15,328,095" o "$ 17,333,333.33" sube desde cero hasta su valor.
   function contarHasta(nodo, texto) {
@@ -378,6 +451,7 @@
 
   function pintarEstado(est) {
     ultimoEstado = est;
+    if (!est.cargando) verVersion(est.matriz && est.matriz.version);
     if (!menu.hidden) pintarMenu();
     const zona = $("#fuentes");
     zona.replaceChildren();
@@ -396,7 +470,17 @@
       const casillaTablero = el("input", { type: "checkbox", id: "ver-tablero" });
       casillaTablero.checked = !ventanaTablero.hidden;
       casillaTablero.addEventListener("change", () => (casillaTablero.checked ? abrirTablero() : cerrarTablero()));
-      zona.append(el("span", { text: `☁️ Extractos: ${formatoMiles.format(m.filas)} filas · ${haceCuanto(m.hora)}` }),
+      // El punto vivo: los Extractos se ponen al día solos con la Matriz (ver «sincronizar
+      // con la Matriz»). Late una vez cuando llega un cambio; ámbar si no hay conexión.
+      const sinConexion = fallosSincronizar >= 2;
+      const punto = el("i", { class: "vivo-punto" + (sinConexion ? " vivo-ambar" : latidoVivo ? " vivo-latido" : ""), "aria-hidden": "true" });
+      latidoVivo = false;
+      zona.append(el("span", { class: "extractos-vivo", title: sinConexion
+          ? "No pude consultar la Matriz en los últimos minutos. Sigo intentando; lo que ves es la última copia."
+          : "Se pone al día sola con la Matriz cada 2 minutos y justo después de cada gestión" },
+        punto, `Extractos: ${formatoMiles.format(m.filas)} filas ·`,
+        el("span", { class: "vivo-texto", "data-hace": m.hora || "", "data-sin-conexion": sinConexion ? "1" : null,
+          text: sinConexion ? " sin conexión, reintentando" : " al día " + haceCuanto(m.hora) })),
         el("label", { class: "interruptor interruptor-tabla", title: "Muestra debajo los totales de Cartera: pagos por estado, por mes y por distrito, y los créditos en mora" },
           casillaTablero, " Tablero"),
         el("label", { class: "interruptor interruptor-tabla", title: "Muestra debajo los Extractos completos, tal cual la hoja, con filtros en los encabezados" },
@@ -428,19 +512,27 @@
       }));
     }
 
+    // Cada error de una hoja dice qué pasó y qué hacer (ver «errores que dicen qué hacer»);
+    // el texto técnico queda al pasar el mouse.
     const avisos = [];
-    if (m.error) avisos.push(["aviso-error", "Extractos: " + m.error]);
-    if (w && w.error) avisos.push(["aviso-ambar", "WhatsApp: " + w.error]);
-    if (m.aviso) avisos.push(["aviso-info", m.aviso]);
-    for (const [nombre, err] of Object.entries(l.errores || {})) avisos.push(["aviso-ambar", `Línea «${nombre}»: ${err}`]);
+    if (m.error) avisos.push(["aviso-error", "Extractos", m.error]);
+    if (w && w.error) avisos.push(["aviso-ambar", "WhatsApp", w.error]);
+    if (m.aviso) avisos.push(["aviso-info", "", m.aviso]);
+    for (const [nombre, err] of Object.entries(l.errores || {})) avisos.push(["aviso-ambar", `Línea «${nombre}»`, err]);
     if (avisos.length) {
       const caja = el("div", { class: "avisos-fuentes" });
-      for (const [clase, texto] of avisos) caja.append(el("p", { class: "aviso " + clase, text: texto }));
+      for (const [clase, hoja, texto] of avisos) {
+        if (!hoja) { caja.append(el("p", { class: "aviso " + clase, text: texto })); continue; }
+        const x = explicarError(texto, "hoja");
+        caja.append(el("p", { class: "aviso aviso-amable-linea " + clase, title: texto },
+          el("strong", { text: `${hoja}: ` }), `${x.titulo} `, el("span", { class: "aviso-consejo", text: x.consejo })));
+      }
       zona.append(caja);
       caja.style.flexBasis = "100%";
     }
 
     logoSegunEstado(est);
+    quizasRecorrido(est);
     if (est.cargando) programarSondeo();
     if (alTerminarCarga && (!est.cargando || est.parcial)) {
       // Una búsqueda quedó esperando a que cargaran los datos: se lanza apenas se puede
@@ -467,7 +559,7 @@
       toast(datos.mensaje);
       cargarEstado();
     } catch (e) {
-      toast(e.message);
+      toast(explicarError(e).titulo + " " + explicarError(e).consejo);
     }
   }
 
@@ -546,8 +638,12 @@
       cargarEstado();
     } catch (e) {
       quitarEsqueleto();
-      estadoBusqueda.className = "estado-busqueda error";
-      estadoBusqueda.textContent = "❌ " + e.message;
+      estadoBusqueda.className = "estado-busqueda";
+      estadoBusqueda.textContent = "";
+      zonaAsociado.replaceChildren();
+      barraResultados.hidden = true;
+      contenedor.replaceChildren(avisoError(e, () => { if (campo.value.trim() === termino) buscar(); else contenedor.replaceChildren(); }));
+      anunciar(explicarError(e).titulo);
     } finally {
       btnBuscar.disabled = false;
       btnBuscar.textContent = "Buscar";
@@ -556,9 +652,12 @@
 
   function pintarResultados() {
     contenedor.replaceChildren();
+    contenedor.classList.toggle("quieto", quieto);
+    zonaAsociado.classList.toggle("quieto", quieto);
     if (!busqueda) return;
     // Cascada solo en la pintada de una búsqueda nueva; al filtrar u ordenar, nada se mueve.
     contenedor.classList.toggle("resultados-nuevos", animarEntrada);
+    const animarEntradaAnterior = animarEntrada;
     clearTimeout(temporizadorEntrada);
     if (animarEntrada) temporizadorEntrada = setTimeout(() => contenedor.classList.remove("resultados-nuevos"), 2000);
     animarEntrada = false;
@@ -567,7 +666,15 @@
     // todas las líneas y su WhatsApp), arriba de la barra de resultados. Después, lo de siempre.
     zonaAsociado.replaceChildren();
     historiaAsociado = null;
-    if (busqueda.asociado) zonaAsociado.append(pintarAsociado(busqueda.asociado));
+    let fichaLeida = "";
+    if (busqueda.asociado) {
+      const ficha = pintarAsociado(busqueda.asociado);
+      zonaAsociado.append(ficha);
+      const frase = ficha.querySelector(".asociado-frase");
+      fichaLeida = `Ficha de ${nombrePropio(busqueda.asociado.nombre) || "la persona"}: ${frase ? frase.textoPlano : ""}. `;
+    }
+    // A los lectores de pantalla, solo en una búsqueda nueva (no al filtrar ni al sincronizar).
+    const contar = animarEntradaAnterior && !quieto;
 
     if (!busqueda.grupos.length) {
       barraResultados.hidden = true;
@@ -577,9 +684,11 @@
       if (busqueda.asociado) {
         // Se encontró a la persona (su ficha está arriba), solo que sin pagos: basta una línea.
         estadoBusqueda.replaceChildren(`No hay pagos en los Extractos para «${busqueda.termino}».`);
+        if (contar) anunciar(fichaLeida + "No hay pagos en los Extractos.");
       } else {
         estadoBusqueda.replaceChildren();
         contenedor.append(sinResultados(busqueda.termino, sugerencia));
+        if (contar) anunciar(`Nada encontrado para ${busqueda.termino}.${busqueda.sugerencia ? ` ¿Quisiste decir ${busqueda.sugerencia}?` : ""}`);
       }
       if (historiaAsociado) contenedor.append(historiaAsociado);
       return;
@@ -594,6 +703,7 @@
     }
     const n = busqueda.total;
     $("#resumen").textContent = `${formatoMiles.format(n)} resultado${n === 1 ? "" : "s"} para «${busqueda.termino}» en ${busqueda.grupos.length} fuente${busqueda.grupos.length === 1 ? "" : "s"}`;
+    if (contar) anunciar(fichaLeida + $("#resumen").textContent + ".");
 
     const textoFiltro = normalizar(filtro.value.trim());
     let visibles = 0;
@@ -693,24 +803,7 @@
     }
 
     const cuerpo = el("tbody");
-    let n = 0;
-    for (const f of filas) {
-      const coinciden = new Set(f.m);
-      // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
-      const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n++}` : null, onclick: (ev) => abrirDetalle(f.i, ev.currentTarget), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i, ev.currentTarget); } });
-      // data-label: en el celular cada fila se ve como una tarjeta, con el nombre de la
-      // columna al lado de cada dato (ver «celular» en estilos.css).
-      if (conEstado) {
-        tr.append(el("td", { class: "estado", "data-label": f.e ? ESTADOS[f.e] || f.e : "Sin gestionar" },
-          f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
-      }
-      for (const j of indicesCols) {
-        const v = f.v[j];
-        const clases = [coinciden.has(j) ? "coincide" : "", /^-?[\d,]+(\.\d+)?$/.test(v) ? "num" : "", v === "" ? "vacia" : ""].join(" ").trim();
-        tr.append(el("td", { class: clases || null, title: v.length > 30 ? v : null, text: v, "data-label": g.columnas[j] }));
-      }
-      cuerpo.append(tr);
-    }
+    filas.forEach((f, n) => cuerpo.append(filaResultado(g, f, indicesCols, conEstado, n)));
 
     const conteo = textoFiltro
       ? `${formatoMiles.format(filas.length)} de ${formatoMiles.format(g.total)}`
@@ -720,6 +813,28 @@
       el("div", { class: "tabla-envoltura" }, el("table", null, el("thead", null, cabecera), cuerpo)),
       g.recortado ? el("p", { class: "recorte", text: `Se muestran ${formatoMiles.format(g.filas.length)} de ${formatoMiles.format(g.total)}. «Exportar a Excel» trae todos.` }) : null,
     );
+  }
+
+  // Una fila de los resultados. tr.fila es su dato: la sincronización la encuentra así para
+  // ponerla al día sin repintar la tabla.
+  function filaResultado(g, f, indicesCols, conEstado, n) {
+    const coinciden = new Set(f.m);
+    // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
+    const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n}` : null, onclick: (ev) => abrirDetalle(f.i, ev.currentTarget), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i, ev.currentTarget); } });
+    tr.fila = f;
+    tr.rehacer = () => filaResultado(g, f, indicesCols, conEstado, n);
+    // data-label: en el celular cada fila se ve como una tarjeta, con el nombre de la
+    // columna al lado de cada dato (ver «celular» en estilos.css).
+    if (conEstado) {
+      tr.append(el("td", { class: "estado", "data-label": f.e ? ESTADOS[f.e] || f.e : "Sin gestionar" },
+        f.e ? el("span", { class: "punto e-" + f.e, title: ESTADOS[f.e] || f.e }) : null));
+    }
+    for (const j of indicesCols) {
+      const v = f.v[j];
+      const clases = [coinciden.has(j) ? "coincide" : "", /^-?[\d,]+(\.\d+)?$/.test(v) ? "num" : "", v === "" ? "vacia" : ""].join(" ").trim();
+      tr.append(el("td", { class: clases || null, title: v.length > 30 ? v : null, text: v, "data-label": g.columnas[j] }));
+    }
+    return tr;
   }
 
   async function exportar() {
@@ -742,7 +857,7 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
-      toast("No se pudo exportar: " + e.message);
+      toast("No se pudo exportar: " + explicarError(e).titulo);
     } finally {
       boton.disabled = false;
     }
@@ -814,7 +929,7 @@
   async function abrirDetalleDe(url, origen) {
     const pedido = apiJson(url).then((r) => ({ datos: r.datos }), (error) => ({ error }));
     const pintar = (r) => (r.error
-      ? cuerpoDetalle.replaceChildren(el("p", { class: "aviso aviso-error", text: r.error.message }))
+      ? cuerpoDetalle.replaceChildren(avisoError(r.error, () => abrirDetalleDe(url, origen)))
       : pintarDetalle(r.datos));
     if (dialogo.open && !dialogo.classList.contains("cerrando")) {
       cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
@@ -870,12 +985,14 @@
     const mostrarEstado = (e) => {
       estado.style.display = e ? "" : "none";
       if (e) { estado.style.background = e.color; estado.textContent = `${e.icono} ${e.etiqueta}`; }
-      // Cuando cambia después de abrir (se gestionó el pago), un pulso para que se note.
+      // Cuando cambia después de abrir (se gestionó el pago), un pulso para que se note, y
+      // lo de atrás se pone al día: enseguida la fila de donde se abrió, luego todo lo demás.
       if (!estadoInicial && e) {
         estado.classList.remove("estado-cambio");
         void estado.offsetWidth;   // reinicia la animación
         estado.classList.add("estado-cambio");
       }
+      if (!estadoInicial) trasGestionar(origenDetalle, e);
       estadoInicial = false;
     };
     mostrarEstado(d.estado_pago);
@@ -1193,7 +1310,7 @@
         p.nota_cartera ? ["Nota de Cartera", p.nota_cartera] : null,
         p.nota_recaudo ? ["Nota de Recaudo", p.nota_recaudo] : null,
       ].filter(Boolean);
-      return el("li", { class: "tl-item" + (p.e ? " tl-" + p.e : "") },
+      const li = el("li", { class: "tl-item" + (p.e ? " tl-" + p.e : "") },
         el("span", { class: "tl-punto", "aria-hidden": "true", style: `background:${colorEstado(p.e || "sin")}` }),
         el("time", { text: ev.fecha ? fechaCorta(ev.fecha) : "Sin fecha" }),
         el("button", { type: "button", class: "tl-cuerpo tl-pago", title: "Ver el detalle de este pago",
@@ -1203,6 +1320,8 @@
             el("span", { class: "tl-estado", text: NOMBRES_ESTADO[p.e || "sin"] })),
           el("span", { class: "gris", text: [p.detalle, p.banco].filter(Boolean).join(" · ") }),
           ...notas.map(([etiqueta, texto]) => el("span", { class: "tl-nota" }, el("em", { text: etiqueta + ": " }), texto))));
+      li.evento = ev;
+      return li;
     };
 
     // --i: los movimientos entran uno tras otro (ver «gráficos vivos» en estilos.css).
@@ -1232,6 +1351,37 @@
         ? el("button", { type: "button", class: "boton boton-chico tl-mas", text: `Ver los ${eventos.length} movimientos`,
             onclick: (ev) => { lista.replaceChildren(...items(eventos)); ev.currentTarget.remove(); } })
         : "");
+    };
+    // Tras sincronizar: los mismos pagos, con su estado y sus notas al día, en su lugar (el
+    // mes elegido y lo desplegado siguen igual). Si llegaron o se fueron pagos devuelve
+    // false sin tocar nada: entonces se repinta la ficha entera.
+    nodo.ponerAlDia = (nuevos) => {
+      const llave = (p) => [p.fecha, p.valor, p.tipo, p.detalle, p.banco].join("\u001f");
+      if (nuevos.length !== pagos.length) return false;
+      const libres = new Map();
+      for (const p of nuevos) {
+        if (!libres.has(llave(p))) libres.set(llave(p), []);
+        libres.get(llave(p)).push(p);
+      }
+      const pares = [];
+      for (const p of pagos) {
+        const n = (libres.get(llave(p)) || []).shift();
+        if (!n) return false;
+        pares.push([p, n]);
+      }
+      const cambiados = new Set();
+      for (const [p, n] of pares) {
+        if (p.e !== n.e || p.rws !== n.rws || p.nota_cartera !== n.nota_cartera || p.nota_recaudo !== n.nota_recaudo) cambiados.add(p);
+        Object.assign(p, n);   // el mismo objeto que usan los eventos: lo que se pinte después ya sale al día
+      }
+      for (const li of lista.querySelectorAll(".tl-item")) {
+        if (!li.evento || !cambiados.has(li.evento.pago)) continue;
+        const nuevo = item(li.evento);
+        nuevo.style.cssText = li.style.cssText;
+        nuevo.classList.add("quieto");
+        li.replaceWith(nuevo);
+      }
+      return true;
     };
     // Para imprimir la ficha: todos los movimientos, sin filtro de mes.
     nodo.mostrarTodo = () => {
@@ -1324,14 +1474,63 @@
     const grafico = graficoPagos(pagos, elegirMes);
     const tiempo = lineaDeTiempo(pagos, todos, () => { mesElegido = null; if (grafico) grafico.marcarMes(null); });
     historiaAsociado = grafico || tiempo ? el("div", { class: "ficha-historia" }, grafico, tiempo) : null;
+    // Los pagos de la persona tras sincronizar (ver ponerAlDiaResultados).
+    a.ponerAlDiaPagos = (nuevos) => (tiempo ? tiempo.ponerAlDia(nuevos) : !nuevos.length);
     if (historiaAsociado) animarAlVer(historiaAsociado);
-    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera,
+    // La persona en una frase, arriba de todo (ver fraseAsociado). Tras sincronizar se vuelve
+    // a escribir con los pagos al día.
+    let frase = fraseAsociado(todos, pagos);
+    a.repintarFrase = () => { const nueva = fraseAsociado(todos, pagos); frase.replaceWith(nueva); frase = nueva; };
+    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera, frase,
       el("div", { class: "asociado-resumen" },
         el("h3", { class: "asociado-titulo" }, titulo),
         enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null,
         alDia && enMora ? el("span", { class: "asociado-dia", text: `🟢 ${alDia} al día` }) : null,
         barra),
       a.total_creditos ? creditos : null, pie);
+  }
+
+  // La persona en una frase, para entenderla de un vistazo antes de leer las tarjetas:
+  // «En mora en Libre Inversión (3 meses) · al día en los otros 2 · última consignación hace
+  // 12 días ($ 250.000) · 1 pago en gestión de Cartera». Sale de los mismos datos de la ficha.
+  function fraseAsociado(todos, pagos) {
+    const partes = [];
+    const nombreCredito = (x) => (x.e.tipo_credito && x.e.tipo_credito !== x.linea ? nombrePropio(x.e.tipo_credito) : x.linea);
+    const mora = todos.filter((x) => x.estado.mora);
+    const dia = todos.filter((x) => x.estado.mora === false);
+    if (!todos.length) {
+      partes.push(["", "Sin créditos activos"]);
+    } else if (mora.length) {
+      const meses = (x) => { const n = parseInt(x.e.meses_mora, 10); return n > 0 ? ` (${plural(n, "mes", "meses")})` : ""; };
+      const nombres = mora.slice(0, 2).map((x) => nombreCredito(x) + meses(x));
+      const resto = mora.length - nombres.length;
+      partes.push(["af-mora", `En mora en ${nombres.join(resto ? ", " : " y ")}${resto ? ` y ${resto} más` : ""}`]);
+      if (dia.length) partes.push(["af-dia", dia.length === 1 ? "al día en el otro" : `al día en los otros ${dia.length}`]);
+    } else if (dia.length) {
+      partes.push(["af-dia", dia.length === 1 ? "Al día en su crédito" : `Al día en sus ${dia.length} créditos`]);
+    } else {
+      partes.push(["", plural(todos.length, "crédito activo", "créditos activos")]);
+    }
+    const ultimo = pagos.find((p) => p.fecha);
+    if (ultimo) {
+      const f = aFecha(ultimo.fecha);
+      const dias = f ? Math.round((new Date().setHours(0, 0, 0, 0) - f.getTime()) / 86400000) : null;
+      const cuando = dias === null ? "" : dias <= 0 ? "hoy" : dias === 1 ? "ayer" : dias < 60 ? `hace ${dias} días` : dias < 730 ? `hace ${Math.round(dias / 30.4)} meses` : `hace ${Math.round(dias / 365)} años`;
+      partes.push([dias !== null && dias > 90 ? "af-ojo" : "", `última consignación ${cuando}${ultimo.valor ? ` (${pesos(ultimo.valor)})` : ""}`]);
+    } else {
+      partes.push(["af-ojo", "sin consignaciones en los Extractos"]);
+    }
+    const contar = (clave) => pagos.filter((p) => p.e === clave).length;
+    const cartera = contar("gestion_cartera"), recaudo = contar("pendiente_recaudo"), referencia = contar("referencia_erronea");
+    if (cartera) partes.push(["af-ojo", `${plural(cartera, "pago", "pagos")} en gestión de Cartera`]);
+    if (recaudo) partes.push(["af-mora", `${plural(recaudo, "pago pendiente", "pagos pendientes")} de Recaudo`]);
+    if (referencia) partes.push(["af-ojo", `${plural(referencia, "pago", "pagos")} con referencia no encontrada`]);
+    const nodo = el("p", { class: "asociado-frase" },
+      el("span", { class: "af-chispa", "aria-hidden": "true" }),
+      ...partes.flatMap(([clase, texto], i) => [i ? el("span", { class: "af-sep", "aria-hidden": "true", text: " · " }) : null,
+        el("span", { class: clase || null, text: texto })]).filter(Boolean));
+    nodo.textoPlano = partes.map(([, t]) => t).join(", ");
+    return nodo;
   }
 
   // Al papel va solo la ficha: la persona y sus créditos, en una hoja. Los pagos por mes y la
@@ -1579,21 +1778,30 @@
     await cargarTablero();
   }
 
-  async function cargarTablero() {
+  // enSilencio: tras una sincronización, sin animaciones y sin mover la página.
+  async function cargarTablero(enSilencio) {
     try {
       const { datos } = await apiJson("/api/tablero");
       if (ventanaTablero.hidden) return;
-      firmaTablero = `${datos.hora}|${datos.hora_lineas}|${datos.parcial}`;
-      pintarTablero(datos);
+      firmaTablero = `${datos.version}|${datos.hora_lineas}|${datos.parcial}`;
+      const y = window.scrollY;
+      quieto = Boolean(enSilencio);
+      try { pintarTablero(datos); } finally { quieto = false; }
+      if (enSilencio) window.scrollTo({ top: y, behavior: "instant" });
     } catch (e) {
-      if (!ventanaTablero.hidden) ventanaTablero.replaceChildren(cabeceraTablero(null), el("p", { class: "aviso aviso-error tc-nota", text: "❌ " + e.message }));
+      if (!ventanaTablero.hidden) ventanaTablero.replaceChildren(cabeceraTablero(null), el("div", { class: "tc-nota" }, avisoError(e, () => cargarTablero())));
     }
   }
 
-  // Al terminar de cargar las líneas (o tras «Refrescar»), el tablero se pone al día solo.
+  // Al terminar de cargar las líneas (o tras «Refrescar»), el tablero se pone al día solo. Si
+  // solo cambiaron los Extractos (una sincronización), en silencio.
   function refrescarTableroSiCambio(est) {
-    const firma = `${est.matriz.hora}|${est.lineas.hora}|${est.parcial}`;
-    if (firmaTablero && firma !== firmaTablero && !est.cargando) { firmaTablero = firma; cargarTablero(); }
+    const firma = `${est.matriz.version}|${est.lineas.hora}|${est.parcial}`;
+    if (!firmaTablero || firma === firmaTablero || est.cargando) return;
+    const resto = (f) => f.slice(f.indexOf("|"));
+    const soloExtractos = resto(firma) === resto(firmaTablero);
+    firmaTablero = firma;
+    cargarTablero(soloExtractos);
   }
 
   function cerrarTablero() {
@@ -1735,6 +1943,7 @@
       }
     }
 
+    ventanaTablero.classList.toggle("quieto", quieto);
     ventanaTablero.replaceChildren(cabeceraTablero(d.hora), cifras, el("div", { class: "tb-rejilla" }, ...tarjetas));
     // Las cifras cuentan desde cero y los gráficos crecen al llegar a la pantalla.
     animarAlVer(cifras, () => {
@@ -1867,7 +2076,7 @@
       pintarFilasTabla();
     } catch (e) {
       if (version !== tc.version) return;
-      cuerpo.replaceChildren(el("p", { class: "aviso aviso-error tc-nota", text: "❌ " + e.message }));
+      cuerpo.replaceChildren(el("div", { class: "tc-nota" }, avisoError(e, () => recargarTabla(primeraVez || !tc.columnas.length))));
     }
   }
 
@@ -2067,7 +2276,7 @@
       tc.tramos.set(n, datos.filas);
       programarPintado();
     } catch (e) {
-      if (version === tc.version) toast("No se pudieron traer más filas: " + e.message);
+      if (version === tc.version) toast("No se pudieron traer más filas. " + explicarError(e).consejo);
     } finally {
       if (version === tc.version) tc.pidiendo.delete(n);
     }
@@ -2248,10 +2457,185 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
-      toast("No se pudo exportar: " + e.message);
+      toast("No se pudo exportar: " + explicarError(e).titulo);
     } finally {
       boton.disabled = false;
       boton.textContent = "Exportar a Excel";
+    }
+  }
+
+  // ------------------------------------------------------------------ sincronizar con la Matriz
+  // Cuando alguien gestiona un pago en la Matriz (o José sube pagos nuevos), el color cambia
+  // en la hoja. Cada pocos minutos, sin que se note, el servidor vuelve a bajar solo los
+  // Extractos (ver sincronizar_extractos en web/servicio.py) y, si cambiaron, lo que está en
+  // pantalla se pone al día en su lugar: el color de las filas, la línea de tiempo, la tabla
+  // de todos los pagos y el tablero. Sin avisos ni animaciones: la ventana abierta, el
+  // filtro, el orden y el lugar de la página siguen igual.
+  const MS_SINCRONIZAR = 2 * 60000;
+  const MS_TRAS_GESTIONAR = 3000;   // lo que se espera para que Google tenga la hoja al día
+  let versionExtractos = null;
+  let ultimaSincronizacion = Date.now();
+  let sincronizando = false;
+  let otraVez = false;              // se pidió una forzada mientras había otra en curso
+  let ultimaTecla = 0;
+  let fallosSincronizar = 0;        // seguidos; con 2 o más el punto vivo se pone ámbar
+  let latidoVivo = false;           // llegó un cambio: el punto vivo late una vez
+
+  async function sincronizar(forzar) {
+    if (sincronizando) { otraVez = otraVez || forzar; return; }
+    if (!ultimoEstado || !ultimoEstado.listo || ultimoEstado.cargando || !ultimoEstado.matriz.filas) return;
+    sincronizando = true;
+    ultimaSincronizacion = Date.now();
+    try {
+      const { datos } = await apiJson("/api/sincronizar" + (forzar ? "?forzar=1" : ""), { method: "POST" });
+      const habiaFallos = fallosSincronizar >= 2;
+      fallosSincronizar = 0;
+      // El estado trae la versión nueva (y el «hace X min» de los Extractos): pintarEstado
+      // llama a verVersion.
+      if (datos.version !== null && datos.version !== undefined) await cargarEstado();
+      else if (habiaFallos && ultimoEstado) pintarEstado(ultimoEstado);
+    } catch (_) {
+      // Sin conexión o Google no respondió: se intenta en la próxima vuelta. Tras dos
+      // fallos seguidos el punto vivo se pone ámbar (ver pintarEstado).
+      fallosSincronizar++;
+      if (fallosSincronizar === 2 && ultimoEstado) pintarEstado(ultimoEstado);
+    } finally {
+      sincronizando = false;
+      if (otraVez) { otraVez = false; sincronizar(true); }
+    }
+  }
+
+  function verVersion(v) {
+    if (v === null || v === undefined) return;
+    if (versionExtractos === null) { versionExtractos = v; return; }
+    if (v === versionExtractos) return;
+    versionExtractos = v;
+    latidoVivo = true;
+    ponerAlDia();
+  }
+
+  // «al día hace 3 min» se va contando solo, sin repintar la zona.
+  setInterval(() => {
+    for (const n of document.querySelectorAll(".vivo-texto[data-hace]")) {
+      if (!n.dataset.sinConexion && n.dataset.hace) n.textContent = " al día " + haceCuanto(n.dataset.hace);   // el espacio: ver pintarEstado
+    }
+  }, 30000);
+
+  // Cada 15 s se mira si ya toca. No con la pestaña oculta (al volver a ella, sí) ni
+  // mientras se escribe.
+  document.addEventListener("keydown", () => { ultimaTecla = Date.now(); }, true);
+  const tocaSincronizar = () => !document.hidden && Date.now() - ultimaSincronizacion >= MS_SINCRONIZAR && Date.now() - ultimaTecla > 4000;
+  setInterval(() => { if (tocaSincronizar()) sincronizar(false); }, 15000);
+  document.addEventListener("visibilitychange", () => { if (tocaSincronizar()) sincronizar(false); });
+
+  // Se acaba de gestionar un pago desde su detalle: la fila (o el movimiento) de donde se
+  // abrió toma el color nuevo enseguida, y unos segundos después se sincroniza todo lo demás.
+  function trasGestionar(origen, e) {
+    const clave = e ? e.clave : null;
+    const tr = origen && origen.closest ? origen.closest("tr") : null;
+    if (tr && tr.fila) {
+      tr.fila.e = clave;
+      tr.replaceWith(rehacerQuieto(tr));
+    } else if (tr && tr.dataset.p) {
+      for (const filas of tc.tramos.values()) for (const f of filas) if (String(f.p) === tr.dataset.p) f.e = clave;
+      tc.pintada = "";
+      pintarFilasTabla();
+    }
+    setTimeout(() => sincronizar(true), MS_TRAS_GESTIONAR);
+  }
+
+  function rehacerQuieto(tr) {
+    const nuevo = tr.rehacer();
+    nuevo.classList.add("quieto");
+    nuevo.removeAttribute("style");
+    return nuevo;
+  }
+
+  async function ponerAlDia() {
+    ponerAlDiaTabla();
+    if (!busqueda) return;
+    const actual = busqueda;
+    let nuevo;
+    try {
+      const { status, datos } = await apiJson("/api/buscar?q=" + encodeURIComponent(actual.termino));
+      if (status !== 200) return;
+      nuevo = datos;
+    } catch (_) {
+      return;
+    }
+    // Mientras tanto se hizo otra búsqueda: esa ya trae los datos nuevos.
+    if (busqueda !== actual || btnBuscar.disabled) return;
+    if (ponerAlDiaResultados(actual, nuevo)) return;
+    // Llegaron o se fueron filas: se repinta todo, en silencio y sin mover la página.
+    const y = window.scrollY;
+    busqueda = nuevo;
+    quieto = true;
+    try { pintarResultados(); } finally { quieto = false; }
+    window.scrollTo({ top: y, behavior: "instant" });
+  }
+
+  // Los mismos resultados con sus datos al día, cada fila en su lugar (por su llave 'k',
+  // que no cambia al gestionar el pago). Devuelve false sin tocar nada si no son los mismos.
+  function ponerAlDiaResultados(viejo, nuevo) {
+    if (viejo.grupos.length !== nuevo.grupos.length || Boolean(viejo.asociado) !== Boolean(nuevo.asociado)) return false;
+    const pares = [];
+    for (let g = 0; g < viejo.grupos.length; g++) {
+      const a = viejo.grupos[g], b = nuevo.grupos[g];
+      if (a.fuente !== b.fuente || a.total !== b.total || a.filas.length !== b.filas.length
+        || a.columnas.join("\u001f") !== b.columnas.join("\u001f")) return false;
+      // Aparece o se va la columna del estado, o cambian las columnas vacías que se ocultan.
+      if (a.filas.some((f) => f.e) !== b.filas.some((f) => f.e)) return false;
+      const vacias = (filas) => a.columnas.map((_, j) => filas.every((f) => f.v[j] === "")).join();
+      if (ocultarVacias.checked && vacias(a.filas) !== vacias(b.filas)) return false;
+      const libres = new Map();
+      for (const f of b.filas) {
+        if (!libres.has(f.k)) libres.set(f.k, []);
+        libres.get(f.k).push(f);
+      }
+      for (const f of a.filas) {
+        const n = (libres.get(f.k) || []).shift();
+        if (!n) return false;
+        pares.push([f, n]);
+      }
+    }
+    if (nuevo.asociado && viejo.asociado.ponerAlDiaPagos && !viejo.asociado.ponerAlDiaPagos(nuevo.asociado.pagos || [])) return false;
+    if (viejo.asociado && viejo.asociado.repintarFrase) viejo.asociado.repintarFrase();
+
+    const cambiadas = new Set();
+    for (const [f, n] of pares) {
+      if (f.e !== n.e || f.v.join("\u001f") !== n.v.join("\u001f")) cambiadas.add(f);
+      Object.assign(f, n);   // también su posición 'i' en la búsqueda nueva
+    }
+    viejo.id = nuevo.id;     // el detalle se abre ya de la búsqueda nueva
+    for (const tr of contenedor.querySelectorAll("tbody tr")) {
+      if (tr.fila && cambiadas.has(tr.fila)) tr.replaceWith(rehacerQuieto(tr));
+    }
+    return true;
+  }
+
+  // La tabla de todos los pagos: los mismos tramos que ya estaban, traídos otra vez, sin
+  // mover el desplazamiento.
+  async function ponerAlDiaTabla() {
+    if (ventanaTabla.hidden || !tc.columnas.length || tc.menu) return;
+    const version = ++tc.version;
+    const tramos = tc.tramos.size ? [...tc.tramos.keys()] : [0];
+    try {
+      const respuestas = await Promise.all(tramos.map((n) =>
+        apiJson(urlTabla("/api/tabla", { desde: n * TRAMO_TABLA, cuantas: TRAMO_TABLA })).then((r) => [n, r.datos])));
+      if (version !== tc.version) return;
+      tc.tramos.clear();
+      tc.pidiendo.clear();
+      for (const [n, d] of respuestas) {
+        tc.tramos.set(n, d.filas);
+        tc.total = d.total;
+        tc.filtradas = d.filtradas;
+        tc.hora = d.hora;
+      }
+      tc.pintada = "";
+      pintarBarraTabla();
+      pintarFilasTabla();
+    } catch (_) {
+      /* la próxima vuelta */
     }
   }
 
@@ -2562,6 +2946,10 @@
       { icono: "A", titulo: "Letra más grande", claves: "tamaño zoom aumentar", accion: () => toast(`Tamaño de la letra: ${cambiarLetra(1)} %`) },
       { icono: "a", titulo: "Letra más pequeña", claves: "tamaño zoom reducir", accion: () => toast(`Tamaño de la letra: ${cambiarLetra(-1)} %`) },
       { icono: "◌", titulo: "Ocultar la pantalla", detalle: "Ctrl+Shift+H · la sesión sigue abierta", claves: "privacidad tapar esconder bloquear", accion: mostrarVelo },
+      { icono: "✦", titulo: "Recorrido de bienvenida", detalle: "Lo principal de Axio en cinco pasos", claves: "recorrido ayuda tutorial bienvenida guia", accion: () => setTimeout(abrirRecorrido, 60) },
+      preferencia(CLAVE_SIN_ENFOQUE)
+        ? { icono: "◎", titulo: "Encender el modo enfoque", detalle: "Atenúa el tablero y la tabla mientras trabajas una ficha", claves: "enfoque concentracion atenuar", accion: () => { recordarPreferencia(CLAVE_SIN_ENFOQUE, false); toast("Modo enfoque encendido."); } }
+        : { icono: "◎", titulo: "Apagar el modo enfoque", detalle: "Que el tablero y la tabla no se atenúen", claves: "enfoque concentracion atenuar", accion: () => { recordarPreferencia(CLAVE_SIN_ENFOQUE, true); ponerEnfoque(false); toast("Modo enfoque apagado."); } },
     ].filter(Boolean);
   }
 
@@ -3341,7 +3729,10 @@
           [["N"], "Siguiente cédula sin gestionar"], [["G"], "Marcar la de pantalla como gestionada y pasar a la siguiente"]]),
         conVisor ? grupo("En el visor de hojas", [
           [["Ctrl", "C"], "Copiar"], [["Ctrl", "V"], "Pegar"], [["Ctrl", "Z"], "Deshacer"], [["Ctrl", "F"], "Buscar en la hoja"],
-          [["Enter"], "Escribir en la celda"], [["Alt", "↑ ↓"], "Cambiar de pestaña"], [["Ctrl", "rueda"], "Acercar o alejar"]]) : null));
+          [["Enter"], "Escribir en la celda"], [["Alt", "↑ ↓"], "Cambiar de pestaña"], [["Ctrl", "rueda"], "Acercar o alejar"]]) : null),
+      el("div", { class: "atajos-pie" },
+        el("button", { class: "boton boton-chico", type: "button", text: "✦ Ver el recorrido de bienvenida",
+          onclick: () => { dialogoAtajos.close(); setTimeout(abrirRecorrido, 60); } })));
     if (!dialogoAtajos.open) dialogoAtajos.showModal();
   }
 
@@ -3555,7 +3946,11 @@
     f.hecha = valor;
     if (valor) anotarAccion({ tipo: "lista", texto: "Gestionada en la lista de trabajo" }, f.cedula);
     cambioLista();
-    if (valor && lista.filas.every((x) => x.hecha)) toast("🎉 ¡Lista terminada! Todas las cédulas quedaron gestionadas.");
+    if (valor) vibrar();
+    if (valor && lista.filas.every((x) => x.hecha)) {
+      const n = lista.filas.length;
+      celebrar(`Lista completa · ${n} de ${n} gestionadas`, panelLista.hidden ? null : panelLista);
+    }
   }
 
   function irAFila(f) {
@@ -3650,8 +4045,9 @@
     ocultar.checked = Boolean(lista.ocultarHechas);
     ocultar.addEventListener("change", () => { lista.ocultarHechas = ocultar.checked; cambioLista(); });
     const visibles = filas.filter((f) => !lista.ocultarHechas || !f.hecha || f.cedula === lista.actual);
-    const ul = el("ul", { class: "pl-filas" }, ...visibles.map((f) => el("li", {
+    const ul = el("ul", { class: "pl-filas" }, ...visibles.map((f) => conDeslizar(el("li", {
       class: "pl-fila lista-" + claseFilaLista(f) + (f.cedula === lista.actual ? " actual" : "") + (f.hecha ? " hecha" : ""),
+      title: tactil.matches ? "Desliza a la derecha para marcarla como gestionada" : null,
       "aria-current": f.cedula === lista.actual ? "true" : null },
     casillaGestionada(f),
     el("button", { class: "pl-ir", type: "button", title: "Ver a esta persona", onclick: () => irAFila(f) },
@@ -3659,7 +4055,7 @@
       el("span", { class: "pl-sub" },
         f.nombre ? formatoMiles.format(Number(f.cedula)) + " · " : "",
         el("span", { class: "lista-estado", text: f.textoEstado || "Buscando…" }))),
-    f.vista && !f.hecha && f.cedula !== lista.actual ? el("span", { class: "pl-vista", title: "Ya la abriste", text: "👁" }) : null)));
+    f.vista && !f.hecha && f.cedula !== lista.actual ? el("span", { class: "pl-vista", title: "Ya la abriste", text: "👁" }) : null), f)));
     if (!visibles.length) ul.append(el("li", { class: "pl-vacia", text: "🎉 Todas gestionadas" }));
     const actual = filas.find((f) => f.cedula === lista.actual);
     panelLista.replaceChildren(
@@ -3683,6 +4079,9 @@
     const enPantalla = ul.querySelector(".actual");
     if (enPantalla) enPantalla.scrollIntoView({ block: "nearest" });
   }
+
+  // Cada fila del panel se puede deslizar en el celular (ver «deslizar para chulear»).
+  const conDeslizar = (li, f) => { deslizable(li, f); return li; };
 
   function tsvLista(filas) {
     const lineas = [["Cédula", "Nombre", "Estado", "Créditos en mora", "Saldo en mora", "Último pago", "Gestionada"].join("\t")];
@@ -3777,6 +4176,300 @@
   if (zonaUsuario) {
     zonaUsuario.before(el("button", { class: "boton boton-texto boton-velo", type: "button", title: "Ocultar la pantalla (Ctrl+Shift+H)",
       "aria-label": "Ocultar la pantalla", onclick: mostrarVelo }, ojoTachado, el("span", { class: "boton-velo-texto", text: "Ocultar" })));
+  }
+
+  // ------------------------------------------------------------------ celebración
+  // Al terminar algo grande (la lista de trabajo completa): chispas doradas suben desde donde
+  // se trabajó y se juntan en los tres puntos del logo, que destellan; abajo, un cartel corto.
+  // Es la despedida al revés: la marca recoge el trabajo hecho.
+  function celebrar(texto, desde) {
+    vibrar([14, 60, 14, 60, 28]);
+    const cartel = el("div", { class: "celebracion", role: "status" },
+      el("span", { class: "cel-puntos", "aria-hidden": "true" }, el("i"), el("i"), el("i")),
+      el("strong", { text: texto }));
+    document.body.append(cartel);
+    setTimeout(() => { cartel.classList.add("saliendo"); setTimeout(() => cartel.remove(), 450); }, 3400);
+    if (sinMovimiento() || !logoBarra || !logoBarra.getClientRects().length) return;
+    const d = logoBarra.getBoundingClientRect();
+    const k = d.width / 64;
+    const destinos = [[41, 9], [50, 13], [55.5, 22]].map(([x, y]) => [d.left + x * k, d.top + y * k]);
+    const r = (desde && desde.isConnected && desde.getClientRects().length ? desde : cartel).getBoundingClientRect();
+    const lienzo = el("canvas", { class: "despedida", "aria-hidden": "true" });
+    const escala = Math.min(2, window.devicePixelRatio || 1);
+    lienzo.width = Math.round(window.innerWidth * escala);
+    lienzo.height = Math.round(window.innerHeight * escala);
+    document.body.append(lienzo);
+    const ctx = lienzo.getContext("2d");
+    ctx.scale(escala, escala);
+    const dentro = (v, a, b) => Math.min(Math.max(v, a), b);
+    const chispas = Array.from({ length: 36 }, (_, i) => {
+      const x0 = dentro(r.left + Math.random() * r.width, 8, window.innerWidth - 8);
+      const y0 = dentro(r.top + Math.random() * r.height, 8, window.innerHeight - 8);
+      const [x1, y1] = destinos[i % 3];
+      // Una curva suave: el punto de control se aparta de la recta, hacia un lado al azar.
+      const lado = (Math.random() - .5) * 2;
+      return { x0, y0, x1, y1, cx: (x0 + x1) / 2 + (y1 - y0) * .35 * lado, cy: (y0 + y1) / 2 - (x1 - x0) * .2 * lado,
+        demora: Math.random() * 260, dura: 850 + Math.random() * 350, tam: 1 + Math.random() * 1.8 };
+    });
+    const inicio = performance.now();
+    const total = Math.max(...chispas.map((c) => c.demora + c.dura));
+    const suave = (t) => 1 - Math.pow(1 - t, 3);
+    function cuadro(ahora) {
+      const pasado = ahora - inicio;
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      for (const c of chispas) {
+        const t = Math.max(0, Math.min(1, (pasado - c.demora) / c.dura));
+        if (t <= 0 || t >= 1) continue;
+        const u = suave(t);
+        const x = (1 - u) * (1 - u) * c.x0 + 2 * (1 - u) * u * c.cx + u * u * c.x1;
+        const y = (1 - u) * (1 - u) * c.y0 + 2 * (1 - u) * u * c.cy + u * u * c.y1;
+        const radio = c.tam * (4.5 - 2.5 * u);
+        const brillo = ctx.createRadialGradient(x, y, 0, x, y, radio);
+        brillo.addColorStop(0, `rgba(255, 220, 120, ${Math.min(1, t * 3)})`);
+        brillo.addColorStop(1, "rgba(252, 180, 0, 0)");
+        ctx.fillStyle = brillo;
+        ctx.fillRect(x - radio, y - radio, radio * 2, radio * 2);
+      }
+      if (pasado < total) { requestAnimationFrame(cuadro); return; }
+      lienzo.remove();
+      logoBarra.classList.remove("destello");
+      void logoBarra.offsetWidth;
+      logoBarra.classList.add("destello");
+      setTimeout(() => logoBarra.classList.remove("destello"), 1400);
+    }
+    requestAnimationFrame(cuadro);
+  }
+
+  // ------------------------------------------------------------------ modo enfoque
+  // Mientras se trabaja la ficha de una persona (el mouse sobre ella un momento), lo demás
+  // de la página (tablero, tabla de todos los pagos) se atenúa. Al salir de la ficha o con
+  // Esc vuelve todo. Solo con mouse; se apaga desde la paleta de comandos.
+  const CLAVE_SIN_ENFOQUE = "axio.sinEnfoque";
+  const conMouse = window.matchMedia("(hover: hover) and (pointer: fine)");
+  let temporizadorEnfoque = null;
+  function ponerEnfoque(si) {
+    clearTimeout(temporizadorEnfoque);
+    document.body.classList.toggle("modo-enfoque", si);
+  }
+  function quiereEnfoque() {
+    return conMouse.matches && !preferencia(CLAVE_SIN_ENFOQUE) && Boolean(busqueda && busqueda.asociado)
+      && (!ventanaTablero.hidden || !ventanaTabla.hidden);
+  }
+  for (const zona of [zonaAsociado, contenedor]) {
+    zona.addEventListener("pointerenter", () => {
+      clearTimeout(temporizadorEnfoque);
+      if (!quiereEnfoque() || document.body.classList.contains("modo-enfoque")) return;
+      temporizadorEnfoque = setTimeout(() => ponerEnfoque(true), 700);
+    });
+    zona.addEventListener("pointerleave", () => {
+      clearTimeout(temporizadorEnfoque);
+      if (document.body.classList.contains("modo-enfoque")) temporizadorEnfoque = setTimeout(() => ponerEnfoque(false), 250);
+    });
+  }
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") ponerEnfoque(false); });
+  document.addEventListener("focusin", (ev) => {
+    if (ev.target.closest && ev.target.closest(".tablero, .tabla-completa")) ponerEnfoque(false);
+  });
+
+  // ------------------------------------------------------------------ celular: la lupa a mano
+  // Al bajar por los resultados en el celular, el buscador queda lejos del pulgar: aparece
+  // una lupa redonda abajo a la derecha que vuelve arriba y deja listo para escribir.
+  const lupaFlotante = el("button", { class: "lupa-flotante", type: "button", title: "Buscar otra persona", "aria-label": "Ir al buscador",
+    onclick: () => {
+      window.scrollTo({ top: 0, behavior: sinMovimiento() ? "instant" : "smooth" });
+      setTimeout(() => { campo.focus({ preventScroll: true }); campo.select(); }, sinMovimiento() ? 0 : 380);
+    } });
+  {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 64 64");
+    svg.setAttribute("aria-hidden", "true");
+    for (const [etiqueta, atributos] of [
+      ["circle", { cx: "28", cy: "28", r: "13", fill: "none", stroke: "#fff", "stroke-width": "6" }],
+      ["path", { d: "M38 38l12 12", stroke: "#fff", "stroke-width": "7", "stroke-linecap": "round" }],
+      ["circle", { cx: "41", cy: "9", r: "2.6", fill: "#FCB400" }], ["circle", { cx: "50", cy: "13", r: "4.5", fill: "#FCB400" }],
+      ["circle", { cx: "55.5", cy: "22", r: "2.6", fill: "#FCB400" }]]) {
+      const n = document.createElementNS(ns, etiqueta);
+      for (const [k, v] of Object.entries(atributos)) n.setAttribute(k, v);
+      svg.append(n);
+    }
+    lupaFlotante.append(svg);
+  }
+  document.body.append(lupaFlotante);
+  if ("IntersectionObserver" in window && $(".panel-busqueda")) {
+    new IntersectionObserver(([e]) => {
+      lupaFlotante.classList.toggle("visible", !e.isIntersecting && document.body.classList.contains("con-busqueda"));
+    }, { threshold: 0 }).observe($(".panel-busqueda"));
+  }
+
+  // ------------------------------------------------------------------ celular: deslizar para chulear
+  // En el panel de la lista de trabajo, deslizar una persona a la derecha la marca como
+  // gestionada (o la desmarca), con una vibración corta. El toque normal la sigue abriendo.
+  let ultimoDeslizamiento = 0;
+  function deslizable(li, f) {
+    let x0 = null, y0 = 0, dx = 0, activo = false;
+    li.addEventListener("pointerdown", (ev) => {
+      if (ev.pointerType !== "touch") return;
+      x0 = ev.clientX; y0 = ev.clientY; dx = 0; activo = false;
+    });
+    li.addEventListener("pointermove", (ev) => {
+      if (x0 === null) return;
+      dx = ev.clientX - x0;
+      if (!activo && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(ev.clientY - y0) * 1.5) {
+        activo = true;
+        try { li.setPointerCapture(ev.pointerId); } catch (_) { /* sin captura */ }
+        li.classList.add("deslizando");
+      }
+      if (!activo) return;
+      const d = Math.max(0, Math.min(dx, 130));
+      li.style.transform = `translateX(${d}px)`;
+      const listo = d > 80;
+      if (listo && !li.classList.contains("deslizar-listo")) vibrar(8);
+      li.classList.toggle("deslizar-listo", listo);
+    });
+    const fin = () => {
+      if (x0 === null) return;
+      x0 = null;
+      if (!activo) return;
+      ultimoDeslizamiento = Date.now();
+      li.classList.remove("deslizando", "deslizar-listo");
+      li.style.transform = "";
+      if (dx > 80) { vibrar(); marcarGestionada(f, !f.hecha); }
+    };
+    li.addEventListener("pointerup", fin);
+    li.addEventListener("pointercancel", fin);
+  }
+  // El toque que termina un deslizamiento no abre a la persona.
+  panelLista.addEventListener("click", (ev) => {
+    if (Date.now() - ultimoDeslizamiento < 400) { ev.stopPropagation(); ev.preventDefault(); }
+  }, true);
+
+  // ------------------------------------------------------------------ recorrido de bienvenida
+  // La primera vez, la lupa presenta la página en cinco pasos: un foco que se mueve de una
+  // parte a otra y una tarjeta que cuenta para qué sirve. Se puede saltar, no vuelve a salir
+  // sola, y se repite desde la paleta (Ctrl+K) o desde los atajos («?»). Lo único que se
+  // guarda en el navegador es que ya se vio (sin datos de nadie), por eso va en un
+  // almacenamiento que dura: si no, en la versión de navegador saldría en cada sesión.
+  const CLAVE_RECORRIDO = "axio.recorrido";
+  const almacenFijo = (() => { try { return window.localStorage; } catch (_) { return null; } })();
+  const recorridoVisto = () => { try { return !almacenFijo || Boolean(almacenFijo.getItem(CLAVE_RECORRIDO)); } catch (_) { return true; } };
+  const marcarRecorridoVisto = () => { try { if (almacenFijo) almacenFijo.setItem(CLAVE_RECORRIDO, "1"); } catch (_) { /* sin almacenamiento */ } };
+  const PASOS_RECORRIDO = [
+    { sel: ".caja-busqueda", titulo: "Todo empieza aquí",
+      texto: "Escribe una cédula, un nombre, un recibo o un monto. Con una cédula ves la ficha de la persona: un resumen en una frase, sus créditos y sus pagos." },
+    { sel: "#recientes", titulo: "Tus búsquedas, a la mano",
+      texto: "Aquí quedan las últimas que hiciste. «Buscar varias cédulas» (tecla V) arma una lista de trabajo para ir de una en una y chulear las gestionadas." },
+    { sel: "#fuentes", titulo: "Siempre al día",
+      texto: "El punto verde dice que los Extractos siguen a la Matriz: se ponen al día solos cada 2 minutos y después de cada gestión. Desde aquí abres el tablero de cartera o todos los pagos." },
+    { sel: ".usuario", titulo: "Tu cuenta, a tu gusto",
+      texto: "Tema claro u oscuro, tamaño de la letra y las hojas conectadas. «Tu día» (tecla D) junta a quién buscaste hoy y qué hiciste." },
+    { sel: ".boton-velo", titulo: "Si alguien se acerca",
+      texto: "«Ocultar» tapa la pantalla sin cerrar la sesión (Ctrl+Shift+H). Para todo lo demás, Ctrl+K abre la paleta de comandos y «?» muestra los atajos." },
+  ];
+  const dialogoRecorrido = el("dialog", { class: "recorrido", "aria-labelledby": "rc-titulo", "aria-describedby": "rc-texto" });
+  document.body.append(dialogoRecorrido);
+  let recorridoProgramado = false;
+
+  function visible(n) {
+    return Boolean(n && n.getClientRects().length && !n.closest("[hidden]") && getComputedStyle(n).visibility !== "hidden");
+  }
+
+  function abrirRecorrido() {
+    if (dialogoRecorrido.open) return;
+    const pasos = PASOS_RECORRIDO.filter((p) => visible($(p.sel)));
+    if (!pasos.length) return;
+    abrirMenu(false);
+    let i = 0;
+    const foco = el("div", { class: "rc-foco", "aria-hidden": "true" });
+    const marca = el("span", { class: "rc-marca", "aria-hidden": "true" });
+    const svgLogo = document.querySelector(".logo-barra svg");
+    if (svgLogo) marca.append(svgLogo.cloneNode(true));
+    const paso = el("span", { class: "rc-paso" });
+    const titulo = el("h2", { id: "rc-titulo" });
+    const texto = el("p", { id: "rc-texto", class: "rc-texto" });
+    const puntos = el("span", { class: "rc-puntos", "aria-hidden": "true" }, ...pasos.map(() => el("i")));
+    const saltar = el("button", { class: "boton boton-texto boton-chico", type: "button", text: "Saltar", onclick: () => cerrar() });
+    const atras = el("button", { class: "boton boton-chico", type: "button", text: "←", "aria-label": "Paso anterior", onclick: () => ir(i - 1) });
+    const siguiente = el("button", { class: "boton boton-principal boton-chico", type: "button", onclick: () => (i < pasos.length - 1 ? ir(i + 1) : cerrar(true)) });
+    const tarjeta = el("div", { class: "rc-tarjeta" },
+      el("div", { class: "rc-cabecera" }, marca, paso),
+      titulo, texto,
+      el("div", { class: "rc-pie" }, puntos, el("span", { class: "rc-botones" }, saltar, atras, siguiente)));
+    dialogoRecorrido.replaceChildren(foco, tarjeta);
+
+    const objetivo = () => $(pasos[i].sel);
+    function ubicar() {
+      const n = objetivo();
+      if (!visible(n)) return;
+      const r = n.getBoundingClientRect();
+      const m = 8;
+      Object.assign(foco.style, { left: `${r.left - m}px`, top: `${r.top - m}px`, width: `${r.width + 2 * m}px`, height: `${r.height + 2 * m}px` });
+      const ancho = tarjeta.offsetWidth, alto = tarjeta.offsetHeight;
+      const abajo = r.bottom + m + 14;
+      const arriba = r.top - m - 14 - alto;
+      const y = abajo + alto <= window.innerHeight - 12 ? abajo : arriba >= 12 ? arriba : Math.max(12, window.innerHeight - alto - 12);
+      const x = Math.min(Math.max(12, r.left + r.width / 2 - ancho / 2), window.innerWidth - ancho - 12);
+      Object.assign(tarjeta.style, { left: `${x}px`, top: `${y}px` });
+    }
+    function ir(j) {
+      if (j < 0 || j >= pasos.length) return;
+      i = j;
+      const p = pasos[i];
+      paso.textContent = `Paso ${i + 1} de ${pasos.length}`;
+      titulo.textContent = p.titulo;
+      texto.textContent = p.texto;
+      [...puntos.children].forEach((x, k) => x.classList.toggle("actual", k === i));
+      atras.disabled = i === 0;
+      siguiente.textContent = i === pasos.length - 1 ? "¡Empezar!" : "Siguiente →";
+      tarjeta.classList.remove("rc-cambia");
+      void tarjeta.offsetWidth;
+      tarjeta.classList.add("rc-cambia");
+      const n = objetivo();
+      if (n && !n.closest(".barra")) n.scrollIntoView({ block: "center", behavior: sinMovimiento() ? "instant" : "smooth" });
+      ubicar();
+      setTimeout(ubicar, 420);
+      siguiente.focus();
+    }
+    const alMover = () => requestAnimationFrame(ubicar);
+    function cerrar(terminado) {
+      marcarRecorridoVisto();
+      window.removeEventListener("scroll", alMover, true);
+      window.removeEventListener("resize", alMover);
+      const fin = () => {
+        dialogoRecorrido.close();
+        dialogoRecorrido.classList.remove("cerrando");
+        if (terminado) {
+          campo.focus();
+          if (logoBarra && !sinMovimiento()) { logoBarra.classList.add("destello"); setTimeout(() => logoBarra.classList.remove("destello"), 1400); }
+        }
+      };
+      if (sinMovimiento()) { fin(); return; }
+      dialogoRecorrido.classList.add("cerrando");
+      setTimeout(fin, 260);
+    }
+    dialogoRecorrido.onkeydown = (ev) => {
+      if (ev.key === "ArrowRight") { ev.preventDefault(); if (i < pasos.length - 1) ir(i + 1); }
+      else if (ev.key === "ArrowLeft") { ev.preventDefault(); ir(i - 1); }
+    };
+    dialogoRecorrido.oncancel = (ev) => { ev.preventDefault(); cerrar(); };
+    window.addEventListener("scroll", alMover, true);
+    window.addEventListener("resize", alMover);
+    dialogoRecorrido.showModal();
+    ir(0);
+  }
+
+  // La primera vez: cuando las hojas ya cargaron, sin ventanas abiertas y antes de la
+  // primera búsqueda (si alguien ya está trabajando, no se le interrumpe).
+  function quizasRecorrido(est) {
+    if (recorridoProgramado || recorridoVisto() || !est || !est.listo || est.cargando) return;
+    recorridoProgramado = true;
+    const intentar = (n) => {
+      const ocupado = document.body.classList.contains("cargando-app") || document.querySelector("dialog[open]") || document.hidden || !menu.hidden;
+      if (document.body.classList.contains("con-busqueda")) return;   // ya está trabajando: otro día
+      if (ocupado) { if (n < 60) setTimeout(() => intentar(n + 1), 1500); return; }
+      abrirRecorrido();
+    };
+    setTimeout(() => intentar(0), 1400);
   }
 
   // ------------------------------------------------------------------ eventos

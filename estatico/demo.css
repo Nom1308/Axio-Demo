@@ -287,6 +287,23 @@ select.gestion-entrada option { color: #0B1A5C; background: #fff; }
   35% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--destello) 35%, transparent); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
+/* «Deshacer» tras guardar: una barrita dorada se va vaciando mientras se puede deshacer. */
+.gestion-estado .gestion-deshacer {
+  position: relative; overflow: hidden; margin-left: auto; flex: none; color: var(--texto);
+  animation: deshacer-entra .3s cubic-bezier(.2, .9, .25, 1.2) both;
+}
+.gestion-deshacer-tiempo {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--dorado); transform-origin: left;
+  animation: deshacer-tiempo linear both;
+}
+.gestion-deshacer.saliendo { animation: deshacer-sale .25s ease both; }
+@keyframes deshacer-entra { from { opacity: 0; transform: translateX(8px); } }
+@keyframes deshacer-sale { to { opacity: 0; transform: translateX(6px); } }
+@keyframes deshacer-tiempo { to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .gestion-estado .gestion-deshacer, .gestion-deshacer.saliendo { animation: none; }
+  .gestion-deshacer-tiempo { animation: none; opacity: .6; }
+}
 
 @keyframes celda-ok { 0% { box-shadow: inset 0 0 0 2px #34a853; background: #e6f4ea; } 100% { box-shadow: none; } }
 
