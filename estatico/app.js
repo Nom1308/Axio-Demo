@@ -3102,8 +3102,8 @@
   // minuto antes y luego se cierra la sesión: en el servidor, el mismo «Salir»; en la
   // versión de navegador, window.axioCerrarSesion (devuelve el token y borra la memoria).
   // Dentro de la jornada (data-jornada, «08:00-16:30», hora del equipo) no se cierra por
-  // inactividad: la sesión sigue abierta toda la jornada y se cierra sola al terminar.
-  // Fuera de la jornada vale la regla de los minutos sin uso.
+  // inactividad: la sesión sigue abierta toda la jornada. Al terminar NO se cierra sola;
+  // fuera de la jornada vale la regla de los minutos sin uso.
   // Se mide con la hora y no con un temporizador largo: con la pestaña en segundo plano el
   // navegador frena los temporizadores, y al volver se cierra en el acto si ya venció.
   const MINUTOS_INACTIVIDAD = Number(document.body.dataset.inactividad || 0);
@@ -3131,7 +3131,6 @@
     const LIMITE = MINUTOS_INACTIVIDAD * 60000;
     let ultimaActividad = Date.now();
     let aviso = null;
-    let enJornada = quedaJornada() !== null;
 
     const cerrarSesion = (motivo) => {
       olvidarDia();
@@ -3162,32 +3161,15 @@
       aviso.querySelector(".aviso-inactividad-texto").textContent = texto;
     };
 
-    let avisoJornadaVisto = false;
-    let diaAlCierre = false;
+    // Dentro de la jornada la inactividad no cuenta. Al terminar, la sesión NO se cierra
+    // (pedido de quienes la usan): sigue abierta y desde ese momento vale la regla de los
+    // minutos sin uso, contados desde el fin de la jornada (ultimaActividad se puso al día
+    // hasta el último instante de la jornada, también con la pestaña en segundo plano).
     const revisar = () => {
-      const jornada = quedaJornada();
-      if (jornada !== null) {
-        enJornada = true;
-        ultimaActividad = Date.now();   // dentro de la jornada no cuenta la inactividad
-        // Diez minutos antes del cierre, «Tu día»: para copiarlo antes de que se borre. Con la
-        // pantalla oculta se espera (no se muestran nombres encima del velo).
-        if (jornada <= 10 * 60000 && !diaAlCierre && !velo.open) {
-          diaAlCierre = true;
-          const d = leerDia();
-          if (d.personas.length || d.otras.length) {
-            mostrarTuDia(`La jornada termina a las ${JORNADA.texto} y la sesión se cerrará sola. Copia el resumen si lo necesitas: al cerrar se borra.`);
-          }
-        }
-        if (jornada > 60000) { avisoJornadaVisto = false; if (aviso && aviso.dataset.tipo !== "Fin de la jornada") quitarAviso(); return; }
-        if (!avisoJornadaVisto || aviso) {
-          avisoJornadaVisto = true;
-          avisar("Fin de la jornada",
-            `La jornada termina a las ${JORNADA.texto}: la sesión se cerrará en ${Math.ceil(jornada / 1000)} s.`, false);
-        }
+      if (quedaJornada() !== null) {
+        ultimaActividad = Date.now();
+        if (aviso) quitarAviso();
         return;
-      }
-      if (enJornada) {   // la jornada acaba de terminar (o terminó con la pestaña dormida)
-        clearInterval(reloj); quitarAviso(); cerrarSesion("jornada"); return;
       }
       if (MINUTOS_INACTIVIDAD <= 0) return;
       const quedan = LIMITE - (Date.now() - ultimaActividad);
