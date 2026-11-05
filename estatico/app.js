@@ -841,6 +841,7 @@
     const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n}` : null, onclick: (ev) => abrirDetalle(f.i, ev.currentTarget), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i, ev.currentTarget); } });
     tr.fila = f;
     tr.columnas = g.columnas;   // para hallar la cédula de la fila (clic derecho, vista previa)
+    tr.fuente = g.fuente;       // las de Extractos son pagos: se pueden gestionar en la Matriz
     tr.rehacer = () => filaResultado(g, f, indicesCols, conEstado, n);
     // data-label: en el celular cada fila se ve como una tarjeta, con el nombre de la
     // columna al lado de cada dato (ver «celular» en estilos.css).
@@ -948,7 +949,7 @@
   async function abrirDetalleDe(url, origen) {
     const pedido = apiJson(url).then((r) => ({ datos: r.datos }), (error) => ({ error }));
     const pintar = (r) => (r.error
-      ? cuerpoDetalle.replaceChildren(avisoError(r.error, () => abrirDetalleDe(url, origen)))
+      ? (gestionarAlAbrir = false, cuerpoDetalle.replaceChildren(avisoError(r.error, () => abrirDetalleDe(url, origen))))
       : pintarDetalle(r.datos));
     if (dialogo.open && !dialogo.classList.contains("cerrando")) {
       cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
@@ -992,6 +993,7 @@
   }
 
   let ultimoDetalle = null;   // el pago abierto, para volver a él desde una obligación
+  let gestionarAlAbrir = false;   // el próximo detalle abre ya el formulario de la Matriz
 
   function pintarDetalle(d) {
     ultimoDetalle = d;
@@ -1020,9 +1022,18 @@
     // La versión de navegador (con sesión de Google) agrega aquí cómo gestionar el pago en
     // la Matriz_Nube: RWS, nota de Cartera, crédito, nota de Recaudo. En el servidor no
     // aparece nada.
+    // Desde el clic derecho («Gestionar el pago en la Matriz») el formulario llega ya abierto.
+    const gestionarYa = gestionarAlAbrir;
+    gestionarAlAbrir = false;
     if (typeof window.axioGestionPago === "function") {
       const gestion = window.axioGestionPago(d, mostrarEstado);
-      if (gestion) partes.push(gestion);
+      if (gestion) {
+        partes.push(gestion);
+        const boton = gestionarYa && gestion.querySelector(".gestion-cabecera button");
+        if (boton) boton.click();
+      } else if (gestionarYa) {
+        toast("Este pago no se puede gestionar aquí: hace falta la sesión de Google y que venga de Extractos.");
+      }
     }
 
     // Encargado de Cartera: lo primero que se quiere ver.
@@ -4911,11 +4922,11 @@
   // Lo que se sabe de una fila (de los resultados, de la tabla completa o de la lista de trabajo).
   function datosDeFila(nodo) {
     if (nodo.fila && nodo.columnas) {
-      return { cedula: cedulaDeValores(nodo.columnas, nodo.fila.v), columnas: nodo.columnas, valores: nodo.fila.v, abrir: () => nodo.click() };
+      return { cedula: cedulaDeValores(nodo.columnas, nodo.fila.v), columnas: nodo.columnas, valores: nodo.fila.v, pago: nodo.fuente === "Extractos", abrir: () => nodo.click() };
     }
     if (nodo.dataset.p !== undefined && nodo.closest(".tc-tabla")) {
       const valores = [...nodo.cells].slice(1).map((td) => td.textContent);
-      return { cedula: cedulaDeValores(tc.columnas, valores), columnas: tc.columnas, valores, abrir: () => nodo.click() };
+      return { cedula: cedulaDeValores(tc.columnas, valores), columnas: tc.columnas, valores, pago: true, abrir: () => nodo.click() };
     }
     if (nodo.dataset.cedula) {
       const f = lista && lista.filas.find((x) => x.cedula === nodo.dataset.cedula);
@@ -4969,6 +4980,10 @@
     const titulo = el("p", { class: "mc-titulo", text: c ? "CC " + formatoMiles.format(Number(c)) : "Fila" });
     const items = [
       datos.abrir ? item("👁", "Ver el detalle", datos.abrir, "Enter") : null,
+      // Solo en la versión con Google (la que escribe en la Matriz) y en filas de Extractos:
+      // abre el detalle con el formulario de gestión ya desplegado.
+      datos.pago && datos.abrir && typeof window.axioGestionPago === "function"
+        ? item("✏️", "Gestionar el pago en la Matriz", () => { gestionarAlAbrir = true; datos.abrir(); }) : null,
       c ? item("👤", "Abrir la ficha de la persona", () => { campo.value = c; buscar(); }) : null,
       c ? separador() : null,
       c ? item("📞", "Modo llamada", () => conPersona(c, abrirLlamada)) : null,
