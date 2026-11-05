@@ -904,8 +904,8 @@
   }
 
   // Lo que hay que mover para que la ventana quede encima del elemento de origen.
-  function haciaOrigen(origen) {
-    const o = origen.getBoundingClientRect(), f = dialogo.getBoundingClientRect();
+  function haciaOrigen(origen, ventana = dialogo) {
+    const o = origen.getBoundingClientRect(), f = ventana.getBoundingClientRect();
     return `translate(${o.left - f.left}px, ${o.top - f.top}px) scale(${Math.max(.05, o.width / f.width)}, ${Math.max(.05, o.height / f.height)})`;
   }
 
@@ -949,7 +949,7 @@
   async function abrirDetalleDe(url, origen) {
     const pedido = apiJson(url).then((r) => ({ datos: r.datos }), (error) => ({ error }));
     const pintar = (r) => (r.error
-      ? (gestionarAlAbrir = false, cuerpoDetalle.replaceChildren(avisoError(r.error, () => abrirDetalleDe(url, origen))))
+      ? cuerpoDetalle.replaceChildren(avisoError(r.error, () => abrirDetalleDe(url, origen)))
       : pintarDetalle(r.datos));
     if (dialogo.open && !dialogo.classList.contains("cerrando")) {
       cuerpoDetalle.replaceChildren(el("p", { class: "gris", text: "Cargando…" }));
@@ -993,7 +993,6 @@
   }
 
   let ultimoDetalle = null;   // el pago abierto, para volver a él desde una obligación
-  let gestionarAlAbrir = false;   // el próximo detalle abre ya el formulario de la Matriz
 
   function pintarDetalle(d) {
     ultimoDetalle = d;
@@ -1022,18 +1021,9 @@
     // La versión de navegador (con sesión de Google) agrega aquí cómo gestionar el pago en
     // la Matriz_Nube: RWS, nota de Cartera, crédito, nota de Recaudo. En el servidor no
     // aparece nada.
-    // Desde el clic derecho («Gestionar el pago en la Matriz») el formulario llega ya abierto.
-    const gestionarYa = gestionarAlAbrir;
-    gestionarAlAbrir = false;
     if (typeof window.axioGestionPago === "function") {
       const gestion = window.axioGestionPago(d, mostrarEstado);
-      if (gestion) {
-        partes.push(gestion);
-        const boton = gestionarYa && gestion.querySelector(".gestion-cabecera button");
-        if (boton) boton.click();
-      } else if (gestionarYa) {
-        toast("Este pago no se puede gestionar aquí: hace falta la sesión de Google y que venga de Extractos.");
-      }
+      if (gestion) partes.push(gestion);
     }
 
     // Encargado de Cartera: lo primero que se quiere ver.
@@ -2571,18 +2561,23 @@
 
   // Se acaba de gestionar un pago desde su detalle: la fila (o el movimiento) de donde se
   // abrió toma el color nuevo enseguida, y unos segundos después se sincroniza todo lo demás.
+  // Devuelve la fila nueva (la vieja se reemplaza), para quien la siga necesitando.
   function trasGestionar(origen, e) {
     const clave = e ? e.clave : null;
     const tr = origen && origen.closest ? origen.closest("tr") : null;
+    let nueva = null;
     if (tr && tr.fila) {
       tr.fila.e = clave;
-      tr.replaceWith(rehacerQuieto(tr));
+      nueva = rehacerQuieto(tr);
+      tr.replaceWith(nueva);
     } else if (tr && tr.dataset.p) {
       for (const filas of tc.tramos.values()) for (const f of filas) if (String(f.p) === tr.dataset.p) f.e = clave;
       tc.pintada = "";
       pintarFilasTabla();
+      nueva = document.querySelector(`.tc-tabla tbody tr[data-p="${CSS.escape(tr.dataset.p)}"]`);
     }
     setTimeout(() => sincronizar(true), MS_TRAS_GESTIONAR);
+    return nueva;
   }
 
   function rehacerQuieto(tr) {
@@ -4922,11 +4917,14 @@
   // Lo que se sabe de una fila (de los resultados, de la tabla completa o de la lista de trabajo).
   function datosDeFila(nodo) {
     if (nodo.fila && nodo.columnas) {
-      return { cedula: cedulaDeValores(nodo.columnas, nodo.fila.v), columnas: nodo.columnas, valores: nodo.fila.v, pago: nodo.fuente === "Extractos", abrir: () => nodo.click() };
+      return { cedula: cedulaDeValores(nodo.columnas, nodo.fila.v), columnas: nodo.columnas, valores: nodo.fila.v, nodo,
+        pago: nodo.fuente === "Extractos" && busqueda ? `/api/detalle/${encodeURIComponent(busqueda.id)}/${nodo.fila.i}` : null,
+        abrir: () => nodo.click() };
     }
     if (nodo.dataset.p !== undefined && nodo.closest(".tc-tabla")) {
       const valores = [...nodo.cells].slice(1).map((td) => td.textContent);
-      return { cedula: cedulaDeValores(tc.columnas, valores), columnas: tc.columnas, valores, pago: true, abrir: () => nodo.click() };
+      return { cedula: cedulaDeValores(tc.columnas, valores), columnas: tc.columnas, valores, nodo,
+        pago: `/api/tabla/detalle/${nodo.dataset.p}`, abrir: () => nodo.click() };
     }
     if (nodo.dataset.cedula) {
       const f = lista && lista.filas.find((x) => x.cedula === nodo.dataset.cedula);
@@ -4982,8 +4980,7 @@
       datos.abrir ? item("👁", "Ver el detalle", datos.abrir, "Enter") : null,
       // Solo en la versión con Google (la que escribe en la Matriz) y en filas de Extractos:
       // abre el detalle con el formulario de gestión ya desplegado.
-      datos.pago && datos.abrir && typeof window.axioGestionPago === "function"
-        ? item("✏️", "Gestionar el pago en la Matriz", () => { gestionarAlAbrir = true; datos.abrir(); }) : null,
+      gestionable(datos) ? item("✏️", "Gestionar el pago en la Matriz", () => abrirGestionRapida(datos)) : null,
       c ? item("👤", "Abrir la ficha de la persona", () => { campo.value = c; buscar(); }) : null,
       c ? separador() : null,
       c ? item("📞", "Modo llamada", () => conPersona(c, abrirLlamada)) : null,
@@ -5027,6 +5024,197 @@
       if (conocida) conocida.promesa.then(ponerNombre, () => {});
       else personaDe(c).then(ponerNombre, () => {});
     }
+    // Mientras se elige, ya se va trayendo lo que necesita «Gestionar el pago».
+    precargarGestion(datos);
+  }
+
+  // ------------------------------------------------------------------ gestionar un pago (panel rápido)
+  // Clic derecho en un pago → «Gestionar el pago en la Matriz»: una ventana chica solo con el
+  // pago y sus cuatro casillas (sin todo el detalle). Lo que tarda —el detalle del pago y la
+  // Matriz— se empieza a traer al abrir el menú. La ventana sale de la fila al instante con
+  // un esqueleto de las casillas; cuando terminó de crecer entra el formulario con un fundido
+  // y la ventana ajusta su alto con suavidad. El cursor queda en la primera casilla.
+  const gestionable = (datos) => Boolean(datos && datos.pago && typeof window.axioGestionPago === "function"
+    && (!window.axioGestionPago.disponible || window.axioGestionPago.disponible()));
+
+  const detallesPago = new Map();   // url → { hora, promesa }: lo traído al abrir el menú
+  function detallePago(url) {
+    const previo = detallesPago.get(url);
+    if (previo && Date.now() - previo.hora < 60000) return previo.promesa;
+    const promesa = apiJson(url).then((r) => r.datos);
+    promesa.catch(() => detallesPago.delete(url));
+    detallesPago.set(url, { hora: Date.now(), promesa });
+    return promesa;
+  }
+  function precargarGestion(datos) {
+    if (!gestionable(datos)) return;
+    detallePago(datos.pago).catch(() => {});
+    if (window.axioGestionPago.precargar) window.axioGestionPago.precargar();
+  }
+
+  // Fecha, valor, banco y detalle del pago, tomados de la fila (están desde el primer instante).
+  function resumenPago(columnas, valores) {
+    const dato = (re) => {
+      const j = columnas.findIndex((c) => re.test(String(c).trim().toUpperCase()));
+      return j >= 0 ? String(valores[j] ?? "").trim() : "";
+    };
+    let valor = dato(/^(VALOR|CREDIT|MONTO)/);
+    const numero = Number(valor.replace(/[$\s,]/g, ""));
+    if (valor && Number.isFinite(numero) && /^[$\s\d,.-]+$/.test(valor)) valor = "$ " + formatoMiles.format(numero);
+    return [["📅", dato(/^FECHA/), "Fecha"], ["💲", valor, "Valor"], ["🏦", dato(/BANCO/), "Banco"], ["📝", dato(/^(DETALLE|DESCRIP)/), "Detalle"]]
+      .filter(([, t]) => t && !/^(nan|none)$/i.test(t));
+  }
+
+  function esqueletoGestion() {
+    return el("div", { class: "dg-esqueleto", "aria-hidden": "true" },
+      el("span", { class: "esqueleto-linea dg-esq-linea" }),
+      el("div", { class: "gestion-casillas" }, ...[0, 1, 2, 3].map((i) => el("span", { class: "esqueleto-bloque dg-esq-casilla", style: `--i:${i}` }))),
+      el("p", { class: "dg-nota gris" }));
+  }
+
+  const dialogoGestion = el("dialog", { class: "dialogo-axio dialogo-gestion", "aria-labelledby": "dg-titulo" });
+  document.body.append(dialogoGestion);
+  let gestionActual = null;   // { origen, observador, avisado }
+  let turnoGestion = 0;       // para que un cierre a medias no cierre una ventana que se reabrió
+  dialogoGestion.addEventListener("click", (ev) => { if (ev.target === dialogoGestion || ev.target.closest("[data-cerrar]")) cerrarGestion(); });
+  dialogoGestion.addEventListener("cancel", (ev) => { ev.preventDefault(); cerrarGestion(); });
+
+  const sinGuardarGestion = () => {
+    const linea = dialogoGestion.querySelector(".gestion-estado.ambar");
+    return Boolean(linea && /^Sin guardar/.test(linea.textContent));
+  };
+
+  async function abrirGestionRapida(datos) {
+    if (!gestionable(datos)) { toast("Para gestionar en la Matriz hace falta la sesión de Google."); return; }
+    ocultarPrevia();
+    const turno = ++turnoGestion;
+    const pedido = detallePago(datos.pago);
+    if (window.axioGestionPago.precargar) window.axioGestionPago.precargar();
+    const columnas = datos.columnas || [], valores = datos.valores || [];
+    const jNombre = columnas.findIndex((c) => String(c).trim().toUpperCase() === "NOMBRE");
+    const nombre = jNombre >= 0 ? String(valores[jNombre] || "").trim() : "";
+    const sub = [nombre && !/^#/.test(nombre) ? nombrePropio(nombre) : "", datos.cedula ? "CC " + formatoMiles.format(Number(datos.cedula)) : ""]
+      .filter(Boolean).join(" · ") || "Pago de los Extractos";
+
+    const estado = el("span", { class: "dg-estado", hidden: true });
+    const cuerpo = el("div", { class: "gestion-cuerpo dg-formulario" }, esqueletoGestion());
+    const alto = el("div", { class: "dg-alto" }, cuerpo);
+    const g = { origen: datos.nodo, observador: null, avisado: false };
+    gestionActual = g;
+    dialogoGestion.replaceChildren(
+      el("div", { class: "dialogo-axio-cabecera" },
+        el("div", null, el("h2", { id: "dg-titulo", text: "Gestionar el pago" }), el("span", { class: "dialogo-axio-sub", text: sub })),
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
+      el("div", { class: "dialogo-axio-cuerpo dg-cuerpo" },
+        el("div", { class: "dg-resumen" },
+          ...resumenPago(columnas, valores).map(([icono, texto, que]) => el("span", { class: "dg-dato", title: que },
+            el("span", { class: "dg-dato-icono", "aria-hidden": "true", text: icono }), el("span", { class: "dg-dato-texto", text: texto }))),
+          estado),
+        alto),
+      el("div", { class: "dialogo-axio-pie" },
+        el("span", null, el("kbd", { text: "Esc" }), " cierra"),
+        el("button", { class: "boton boton-chico", type: "button", text: "Ver el detalle completo",
+          onclick: () => { const origen = g.origen; cerrarGestion(true, true); abrirDetalleDe(datos.pago, origen); } })));
+
+    // El alto sigue al formulario con una transición (sin saltos al pasar del esqueleto a
+    // las casillas, ni al aparecer un aviso o la confirmación de «Guardado»).
+    let primero = true;
+    g.observador = new ResizeObserver(() => {
+      const h = cuerpo.offsetHeight;
+      if (primero || sinMovimiento()) {
+        alto.style.transition = "none";
+        alto.style.height = h + "px";
+        void alto.offsetHeight;
+        alto.style.transition = "";
+        primero = false;
+        return;
+      }
+      alto.style.height = h + "px";
+    });
+    g.observador.observe(cuerpo);
+
+    // Cuando el esqueleto da paso al formulario: fundido de entrada y cursor en la primera casilla.
+    const llegada = new MutationObserver(() => {
+      if (cuerpo.querySelector(".dg-esqueleto")) return;
+      llegada.disconnect();
+      cuerpo.classList.add("dg-llega");
+      setTimeout(() => cuerpo.classList.remove("dg-llega"), 900);
+      const primera = cuerpo.querySelector(".gestion-entrada:not(:disabled)");
+      if (primera && !window.matchMedia("(pointer: coarse)").matches) primera.focus({ preventScroll: true });
+    });
+    llegada.observe(cuerpo, { childList: true });
+
+    // Sale de la fila, igual que el detalle, pero sin desenfocar el fondo (más liviano).
+    let crecer = Promise.resolve();
+    dialogoGestion.getAnimations().forEach((a) => a.cancel());
+    dialogoGestion.classList.remove("cerrando");
+    const desdeOrigen = enPantalla(g.origen) && !sinMovimiento() && Boolean(dialogoGestion.animate);
+    dialogoGestion.classList.toggle("desde-origen", desdeOrigen);
+    if (!dialogoGestion.open) dialogoGestion.showModal();
+    if (desdeOrigen) {
+      crecer = dialogoGestion.animate([
+        { transform: haciaOrigen(g.origen, dialogoGestion), borderRadius: "14px", opacity: .35 },
+        { transform: "none", borderRadius: "24px", opacity: 1 },
+      ], { duration: 360, easing: "cubic-bezier(.2, .85, .25, 1)" }).finished.catch(() => {});
+    }
+
+    let inicial = true;
+    const mostrarEstado = (e) => {
+      estado.hidden = !e;
+      if (e) { estado.style.setProperty("--color", e.color); estado.textContent = `${e.icono} ${e.etiqueta}`; }
+      if (!inicial) {
+        estado.classList.remove("estado-cambio");
+        void estado.offsetWidth;
+        estado.classList.add("estado-cambio");
+        detallesPago.delete(datos.pago);
+        const nueva = trasGestionar(g.origen, e);
+        if (nueva) g.origen = nueva;
+      }
+      inicial = false;
+    };
+
+    try {
+      const [d] = await Promise.all([pedido, crecer]);
+      if (turno !== turnoGestion) return;
+      mostrarEstado(d.estado_pago);
+      if (d.fuente !== "Extractos") throw new Error("este movimiento no es un pago de los Extractos");
+      await window.axioGestionPago.formularioEn(d, cuerpo, mostrarEstado);
+    } catch (e) {
+      if (turno !== turnoGestion) return;
+      cuerpo.replaceChildren(avisoError(e, () => { detallesPago.delete(datos.pago); abrirGestionRapida(datos); }));
+    }
+  }
+
+  // forzar: cerrar aunque haya cambios sin guardar. seguido: se abre otra ventana enseguida
+  // (el detalle completo), así que esta se va sin volver a la fila.
+  function cerrarGestion(forzar, seguido) {
+    const g = gestionActual;
+    if (!dialogoGestion.open || dialogoGestion.classList.contains("cerrando")) return;
+    if (!forzar && g && !g.avisado && sinGuardarGestion()) {
+      g.avisado = true;
+      toast("Tienes cambios sin guardar en la Matriz. Cierra otra vez para descartarlos.");
+      const pie = dialogoGestion.querySelector(".gestion-pie");
+      if (pie) { pie.classList.remove("dg-sacudir"); void pie.offsetWidth; pie.classList.add("dg-sacudir"); }
+      return;
+    }
+    gestionActual = null;
+    const turno = ++turnoGestion;
+    if (g && g.observador) g.observador.disconnect();
+    const origen = g && g.origen;
+    const terminar = () => {
+      if (turno !== turnoGestion) return;
+      dialogoGestion.close();
+      dialogoGestion.classList.remove("cerrando", "desde-origen");
+      dialogoGestion.getAnimations().forEach((a) => a.cancel());
+      dialogoGestion.replaceChildren();
+      if (!seguido && origen && origen.isConnected) origen.focus({ preventScroll: true });
+    };
+    if (seguido || sinMovimiento() || !dialogoGestion.animate) { terminar(); return; }
+    dialogoGestion.classList.add("cerrando");
+    const final = enPantalla(origen)
+      ? [{ transform: "none", opacity: 1 }, { transform: haciaOrigen(origen, dialogoGestion), borderRadius: "14px", opacity: 0 }]
+      : [{ transform: "none", opacity: 1 }, { transform: "translateY(10px) scale(.97)", opacity: 0 }];
+    dialogoGestion.animate(final, { duration: 260, easing: "cubic-bezier(.4, 0, .6, 1)", fill: "forwards" }).finished.then(terminar, terminar);
   }
 
   document.addEventListener("contextmenu", (ev) => {

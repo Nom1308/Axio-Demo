@@ -2310,3 +2310,58 @@ body.modo-enfoque .tablero, body.modo-enfoque .tabla-completa { opacity: .28; fi
 @media (prefers-reduced-motion: reduce) {
   .vista-previa.visible, .menu-contexto:popover-open, .cs-tarjeta, .boton-avisame { animation: none; }
 }
+
+/* ==========================================================================
+   Gestionar un pago (clic derecho → «Gestionar el pago en la Matriz»)
+   Ventana chica y liviana: el fondo solo se oscurece (sin desenfoque, que es lo que más
+   cuesta mientras algo se anima), el alto cambia con transición y el formulario entra
+   con un fundido corto cuando la ventana ya terminó de crecer.
+   ========================================================================== */
+.dialogo-gestion { width: min(640px, calc(100vw - 28px)); will-change: transform; }
+.dialogo-gestion.desde-origen[open] { animation: none; }
+.dialogo-gestion::backdrop {
+  background: rgba(3, 10, 36, .5); -webkit-backdrop-filter: none; backdrop-filter: none;
+  animation: dg-fondo-entra .3s ease both;
+}
+.dialogo-gestion.cerrando::backdrop { animation: dg-fondo-sale .26s ease both; }
+@keyframes dg-fondo-entra { from { background-color: rgba(3, 10, 36, 0); } }
+@keyframes dg-fondo-sale { to { background-color: rgba(3, 10, 36, 0); } }
+.dialogo-gestion.cerrando .dg-cuerpo, .dialogo-gestion.cerrando .dialogo-axio-pie { opacity: 0; transition: opacity .12s ease; }
+.dialogo-gestion .dialogo-axio-pie kbd { margin-right: 4px; }
+
+.dg-cuerpo { gap: 14px; }
+.dg-resumen { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dg-dato {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 12px; border-radius: 99px;
+  font-size: 13px; font-weight: 600; background: var(--campo); border: 1px solid var(--borde);
+}
+.dg-dato-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dg-estado {
+  display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 99px; font-size: 13px; font-weight: 700; color: #fff;
+  background: var(--color, var(--campo)); text-shadow: 0 1px 2px rgba(0, 0, 0, .25); animation: dg-entra .3s ease both;
+}
+.dg-estado.estado-cambio { animation: estado-cambio .9s cubic-bezier(.2, .8, .2, 1); }
+
+/* El alto acompaña al contenido. El margen negativo deja ver el aro de foco de las casillas. */
+.dg-alto { box-sizing: content-box; margin: -4px; padding: 4px; overflow: hidden; transition: height .34s cubic-bezier(.2, .8, .2, 1); }
+.dg-formulario.gestion-cuerpo { margin-top: 0; }
+.dg-esqueleto { display: grid; gap: 12px; }
+.dg-esq-linea { width: 46%; height: 14px; }
+.dg-esq-casilla { min-height: 96px; animation-delay: calc(var(--i, 0) * 90ms); }
+.dg-nota { margin: 0; font-size: 12.5px; min-height: 1em; }
+.dg-nota:empty { display: none; }
+
+.dg-llega > * { animation: dg-entra .32s cubic-bezier(.2, .8, .2, 1) both; }
+.dg-llega .gestion-casilla { animation: dg-entra .32s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--n, 0) * 45ms); }
+.dg-llega .gestion-casilla:nth-child(2) { --n: 1; }
+.dg-llega .gestion-casilla:nth-child(3) { --n: 2; }
+.dg-llega .gestion-casilla:nth-child(4) { --n: 3; }
+@keyframes dg-entra { from { opacity: 0; transform: translateY(6px); } }
+
+.dg-sacudir { animation: dg-sacudir .4s cubic-bezier(.36, .07, .19, .97); }
+@keyframes dg-sacudir { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .dg-alto { transition: none; }
+  .dg-llega > *, .dg-llega .gestion-casilla, .dg-estado, .dg-sacudir, .dialogo-gestion::backdrop, .dialogo-gestion.cerrando::backdrop { animation: none; }
+}

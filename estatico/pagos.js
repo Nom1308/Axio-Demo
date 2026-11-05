@@ -168,6 +168,7 @@
       matriz = {
         id, sheetId: hoja.sheetId, titulo: hoja.title, canEdit: Boolean(archivo.capabilities && archivo.capabilities.canEdit),
         encabezado, nombres: filas[encabezado] || [], columnas, filas, leida: Date.now(),
+        porCedula: indicePorCedula(filas, encabezado), opciones: null,
       };
       return matriz;
     })();
@@ -198,10 +199,44 @@
   }
   const minimo = (h) => Math.max(3, Math.ceil(h.valores.length * 0.7));
 
+  // Cédula → filas donde aparece, mirando solo las columnas que se llaman «CEDULA». Así
+  // encontrar un pago no exige comparar todas las celdas de miles de filas (eso congelaba
+  // la pantalla un instante justo mientras se abría la ventana).
+  function indicePorCedula(filas, encabezado) {
+    const cols = (filas[encabezado] || []).map((n, j) => (/CEDULA/.test(mayus(n)) && !/NOMBRE/.test(mayus(n)) ? j : -1)).filter((j) => j >= 0);
+    if (!cols.length) return null;
+    const indice = new Map();
+    for (let i = encabezado + 1; i < filas.length; i++) {
+      const fila = filas[i] || [];
+      for (const j of cols) {
+        const c = limpiarCedula(fila[j] ?? "");
+        if (!c) continue;
+        const lista = indice.get(c);
+        if (!lista) indice.set(c, [i]);
+        else if (lista[lista.length - 1] !== i) lista.push(i);
+      }
+    }
+    return indice;
+  }
+
   // Las filas (número de fila de la hoja, desde 1) que mejor coinciden con el pago.
   function buscarFilas(m, h) {
+    const candidatas = h.cedula && m.porCedula && m.porCedula.get(h.cedula);
+    if (candidatas) {
+      const filas = mejores(m, h, candidatas);
+      if (filas.length) return filas;
+    }
     let mejor = 0, filas = [];
     for (let i = m.encabezado + 1; i < m.filas.length; i++) {
+      const p = puntaje(m.filas[i], h);
+      if (p > mejor) { mejor = p; filas = [i + 1]; }
+      else if (p === mejor && p > 0) filas.push(i + 1);
+    }
+    return mejor >= minimo(h) ? filas : [];
+  }
+  function mejores(m, h, indices) {
+    let mejor = 0, filas = [];
+    for (const i of indices) {
       const p = puntaje(m.filas[i], h);
       if (p > mejor) { mejor = p; filas = [i + 1]; }
       else if (p === mejor && p > 0) filas.push(i + 1);
@@ -229,8 +264,16 @@
   // Las opciones de la lista desplegable de CREDITO, leídas de la validación de la propia
   // celda: si alguien agrega un crédito a la lista de la Matriz, aparece aquí solo.
   const cacheListas = new Map();
+  // La lista suele ser la misma en toda la columna: se lee una vez (de la primera fila de
+  // datos) por cada lectura de la Matriz, y solo si esa no trae lista se pregunta por la fila.
   async function opcionesCredito(m, fila) {
     if (m.columnas.credito === null) return null;
+    if (!m.opciones) m.opciones = opcionesDeFila(m, m.encabezado + 2).catch(() => null);
+    const deColumna = await m.opciones;
+    if (deColumna && deColumna.length) return deColumna;
+    return opcionesDeFila(m, fila);
+  }
+  async function opcionesDeFila(m, fila) {
     const rango = `${comillas(m.titulo)}!${letra(m.columnas.credito)}${fila}`;
     const r = await apiGoogle(`${SHEETS}${m.id}?ranges=${encodeURIComponent(rango)}&fields=${encodeURIComponent("sheets.data.rowData.values.dataValidation")}`);
     const validacion = ((((((r.sheets || [])[0] || {}).data || [])[0] || {}).rowData || [])[0] || {}).values;
@@ -268,16 +311,33 @@
     return tarjeta;
   };
 
+  // Para el panel rápido de app.js (clic derecho → «Gestionar el pago en la Matriz»).
+  const conectado = () => Boolean(google() && google().conectado());
+  window.axioGestionPago.disponible = conectado;
+  // Al abrir el menú: la Matriz (y la lista de créditos) se van leyendo mientras se elige.
+  window.axioGestionPago.precargar = () => {
+    if (!conectado()) return;
+    leerMatriz(false).then((m) => { opcionesCredito(m, m.encabezado + 2).catch(() => {}); }, () => {});
+  };
+  // Llena «cuerpo» con el formulario, sin el «Buscando…» (el panel ya muestra su esqueleto).
+  window.axioGestionPago.formularioEn = (d, cuerpo, mostrarEstado) => abrir(d, cuerpo, mostrarEstado, { sinCargando: true });
+
   // forzar: volver a leer la Matriz completa aunque la copia sea reciente (se sabe que cambió).
-  async function abrir(d, cuerpo, mostrarEstado, { aviso, forzar } = {}) {
-    cuerpo.replaceChildren(nodo("p", { class: "gris", text: "⏳ Buscando el pago en la Matriz…" }));
+  async function abrir(d, cuerpo, mostrarEstado, { aviso, forzar, sinCargando } = {}) {
+    if (!sinCargando) cuerpo.replaceChildren(nodo("p", { class: "gris", text: "⏳ Buscando el pago en la Matriz…" }));
     let m, filas;
     const h = huella(d);
     try {
       m = await leerMatriz(Boolean(forzar));
       filas = buscarFilas(m, h);
       // Con la copia de hace unos minutos no apareció: puede que José haya movido filas.
-      if (filas.length !== 1 && Date.now() - m.leida > 5000) { m = await leerMatriz(true); filas = buscarFilas(m, h); }
+      if (filas.length !== 1 && Date.now() - m.leida > 5000) {
+        if (sinCargando) {
+          const p = cuerpo.querySelector(".dg-nota");
+          if (p) p.textContent = "Buscando la versión más reciente de la Matriz…";
+        }
+        m = await leerMatriz(true); filas = buscarFilas(m, h);
+      }
     } catch (e) {
       cuerpo.replaceChildren(nodo("p", { class: "aviso aviso-error", text: "No se pudo leer la Matriz: " + e.message + "." }));
       return;
