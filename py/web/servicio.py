@@ -585,6 +585,14 @@ class MotorWeb:
             'pagos': pagos,
         }
 
+    def persona(self, cedula):
+        """La ficha de una persona por su cédula, sin hacer una búsqueda (vista previa al
+        pasar el mouse, menú del clic derecho). False si los datos todavía no están; None si
+        la cédula no aparece en ningún lado."""
+        if not self.listo or self.df_global is None:
+            return False
+        return self._asociado(str(cedula))
+
     # Cuántos pagos de una persona trae su ficha (los más recientes). Alcanza para varios
     # años de una persona que paga cada mes; el resto está en la tabla de los Extractos.
     MAX_PAGOS_FICHA = 240

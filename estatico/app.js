@@ -56,6 +56,9 @@
   let sondeo = null;
   let alTerminarCarga = null;   // búsqueda a lanzar apenas se pueda buscar
   let alCompletarCarga = null;  // búsqueda hecha a medias, a repetir cuando termine todo
+  // La agenda del equipo: compromisos de pago, notas por asociado y fijados de esta persona
+  // (ver «agenda del equipo»). Va aquí arriba porque la usan la ficha y los recientes.
+  let agenda = { cargada: false, configurada: true, compartida: true, yo: "", hoja: "", compromisos: [], notas: [], fijados: [] };
 
   // ------------------------------------------------------------------ utilidades
   function el(etiqueta, props, ...hijos) {
@@ -532,6 +535,12 @@
     }
 
     logoSegunEstado(est);
+    // El avance también en la pestaña del navegador (ver «avisos en la pestaña»).
+    if (est.cargando && est.fuentes && est.fuentes.length) {
+      avanceCarga(est.fuentes.filter((f) => f.estado !== "pendiente").length, est.fuentes.length);
+    } else if (!est.cargando) {
+      finCarga(false);
+    }
     quizasRecorrido(est);
     if (est.cargando) programarSondeo();
     if (alTerminarCarga && (!est.cargando || est.parcial)) {
@@ -577,6 +586,15 @@
     const lista = leerRecientes();
     zona.replaceChildren();
     zona.hidden = false;
+    // Primero los fijados (★): las personas que se están siguiendo, siempre a mano.
+    if (agenda.fijados.length) {
+      zona.append(el("div", { class: "fijados-fila" },
+        el("span", { text: "Fijados:" }),
+        ...agenda.fijados.map((f) => el("button", { type: "button", class: "chip-fijado", title: `CC ${formatoMiles.format(Number(f.cedula))} · clic derecho para quitarlo`,
+          onclick: () => { campo.value = f.cedula; buscar(); },
+          oncontextmenu: (ev) => { ev.preventDefault(); alternarFijado(f.cedula, f.nombre); } },
+        el("span", { class: "chip-estrella", "aria-hidden": "true", text: "★" }), nombrePropio(f.nombre) || "CC " + formatoMiles.format(Number(f.cedula))))));
+    }
     if (lista.length) zona.append(el("span", { text: "Recientes:" }));
     for (const t of lista) {
       zona.append(el("button", { type: "button", text: t, onclick: () => { campo.value = t; buscar(); } }));
@@ -822,6 +840,7 @@
     // La fila entera va del color de su estado de pago, igual que en la Matriz_Nube.
     const tr = el("tr", { class: f.e ? "fila-" + f.e : null, tabindex: "0", style: n < 40 ? `--i:${n}` : null, onclick: (ev) => abrirDetalle(f.i, ev.currentTarget), onkeydown: (ev) => { if (ev.key === "Enter") abrirDetalle(f.i, ev.currentTarget); } });
     tr.fila = f;
+    tr.columnas = g.columnas;   // para hallar la cédula de la fila (clic derecho, vista previa)
     tr.rehacer = () => filaResultado(g, f, indicesCols, conEstado, n);
     // data-label: en el celular cada fila se ve como una tarjeta, con el nombre de la
     // columna al lado de cada dato (ver «celular» en estilos.css).
@@ -1418,7 +1437,11 @@
         a.whatsapp ? whatsappConPlantillas(a, todos) : null,
         el("button", { class: "boton boton-chico", type: "button", text: "🖨️ Imprimir ficha",
           title: "Imprime solo esta ficha. En la ventana de impresión se puede elegir «Guardar como PDF».",
-          onclick: imprimirFicha })));
+          onclick: imprimirFicha }),
+        botonFijar(a),
+        el("button", { class: "boton boton-chico", type: "button", text: "🔗 Enlace",
+          title: "Copia un enlace directo a esta ficha para mandárselo a un compañero. Quien lo abra entra con su propia cuenta.",
+          onclick: (ev) => copiar(enlacePersona(a.cedula_limpia), "Enlace copiado: quien lo abra entra con su cuenta y llega a esta ficha.", ev.currentTarget) })));
 
     const creditos = el("div", { class: "asociado-creditos" },
       ...todos.map((x) => pintarCredito(x.linea, x.e, true)));
@@ -1481,7 +1504,14 @@
     // a escribir con los pagos al día.
     let frase = fraseAsociado(todos, pagos);
     a.repintarFrase = () => { const nueva = fraseAsociado(todos, pagos); frase.replaceWith(nueva); frase = nueva; };
-    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera, frase,
+    // Notas y compromisos del equipo sobre la persona (ver «agenda del equipo»). Se repintan
+    // solos cuando la agenda cambia.
+    const notasYCompromisos = bloqueAgenda(a);
+    a.repintarAgenda = () => {
+      notasYCompromisos.repintar();
+      cabecera.querySelectorAll(".boton-fijar").forEach((b) => b.repintar());
+    };
+    return el("section", { class: "asociado" + (enMora ? " asociado-con-mora" : "") }, membrete, cabecera, frase, notasYCompromisos,
       el("div", { class: "asociado-resumen" },
         el("h3", { class: "asociado-titulo" }, titulo),
         enMora ? el("span", { class: "asociado-mora", text: `🔴 ${enMora} en mora` }) : null,
@@ -2699,6 +2729,7 @@
       opcionPortapapeles(),
       el("div", { class: "menu-pie menu-atajos" },
         el("button", { class: "boton boton-chico", type: "button", text: "🗓 Tu día", onclick: () => { abrirMenu(false); mostrarTuDia(); } }),
+        el("button", { class: "boton boton-chico", type: "button", text: "🤝 Agenda", onclick: () => { abrirMenu(false); mostrarAgenda(); } }),
         el("button", { class: "boton boton-chico", type: "button", text: "⌨ Atajos", onclick: () => { abrirMenu(false); mostrarAtajos(); } }),
         ES_ADMIN ? el("button", { class: "boton boton-chico", type: "button", text: "↻ Refrescar datos", disabled: Boolean(est.cargando),
           onclick: refrescar }) : null));
@@ -2940,6 +2971,11 @@
       tema !== "sistema" ? { icono: "◐", titulo: "Tema del sistema", detalle: "Claro u oscuro, como el equipo", accion: () => elegirTema("sistema") } : null,
       ES_ADMIN ? { icono: "↻", titulo: "Refrescar datos", detalle: "Vuelve a descargar todas las hojas", accion: refrescar } : null,
       { icono: "🗓", titulo: "Tu día", detalle: "A quién buscaste hoy y qué hiciste", claves: "resumen dia hoy actividad", accion: () => mostrarTuDia() },
+      { icono: "🤝", titulo: "Agenda de compromisos", detalle: "Tecla A · promesas de pago de hoy, vencidas y próximas", claves: "agenda compromisos promesas pago vencidas", accion: () => mostrarAgenda() },
+      a ? { icono: "★", titulo: estaFijado(a.cedula_limpia) ? `Quitar a ${nombrePropio(a.nombre) || "la persona"} de los fijados` : `Fijar a ${nombrePropio(a.nombre) || "la persona"}`,
+        detalle: "Tecla F · queda a mano debajo del buscador", claves: "fijar favorito estrella seguir", accion: () => alternarFijado(a.cedula_limpia, a.nombre) } : null,
+      a ? { icono: "🔗", titulo: `Copiar el enlace a la ficha de ${nombrePropio(a.nombre) || "la persona"}`, claves: "enlace compartir link url",
+        accion: () => copiar(enlacePersona(a.cedula_limpia), "Enlace copiado: quien lo abra entra con su cuenta y llega a esta ficha.") } : null,
       a ? { icono: "📞", titulo: `Modo llamada con ${nombrePropio(a.nombre) || "la persona"}`, claves: "llamar llamada telefono", accion: () => abrirLlamada(a) } : null,
       { icono: "🔎", titulo: "Buscar varias cédulas", detalle: "Tecla V · pega una lista y mira el estado de todas", claves: "lista masiva varias cedulas", accion: () => abrirBuscarVarias() },
       { icono: "⌨", titulo: "Atajos de teclado", detalle: "Tecla ?", claves: "teclas ayuda", accion: mostrarAtajos },
@@ -2961,6 +2997,11 @@
     if (personasPaleta.length) {
       grupos.push(["Personas", personasPaleta.map((p) => ({ persona: p, titulo: nombrePropio(p.nombre), detalle: detallePersona(p),
         accion: () => { campo.value = p.cedula_limpia; buscar(); } }))]);
+    }
+    const fijados = agenda.fijados.filter((f) => !normal || normalizar(f.nombre + f.cedula).includes(normal)).slice(0, texto ? 3 : 6);
+    if (fijados.length) {
+      grupos.push(["Fijados", fijados.map((f) => ({ icono: "★", titulo: nombrePropio(f.nombre) || "CC " + formatoMiles.format(Number(f.cedula)),
+        detalle: "CC " + formatoMiles.format(Number(f.cedula)), accion: () => { campo.value = f.cedula; buscar(); } }))]);
     }
     const recientes = leerRecientes().filter((t) => !normal || normalizar(t).includes(normal) && t !== texto).slice(0, texto ? 3 : 5);
     if (recientes.length) grupos.push(["Recientes", recientes.map((t) => ({ icono: "↺", titulo: t, accion: () => { campo.value = t; buscar(); } }))]);
@@ -3080,10 +3121,16 @@
     // «?»: los atajos; «D»: tu día; «V»: buscar varias cédulas; «L»: modo llamada con la persona en pantalla; con una
     // lista de trabajo, «N»: la siguiente sin gestionar y «G»: gestionada y siguiente.
     if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && !escribiendo(ev.target) && !ev.target.closest(".panel-llamada")) {
+      // «A»: agenda; «F»: fijar a la persona en pantalla; «J» / «K»: siguiente / anterior (en
+      // la lista de trabajo, o entre las filas de resultados); «X»: gestionada sí o no.
       const a = busqueda && busqueda.asociado;
       const accion = ev.key === "?" ? mostrarAtajos : ev.key === "d" ? () => mostrarTuDia() : ev.key === "l" && a ? () => abrirLlamada(a)
         : ev.key === "n" && lista ? () => moverEnLista(1, true) : ev.key === "g" && lista ? gestionadaYSiguiente
-        : ev.key === "v" ? () => abrirBuscarVarias() : null;
+        : ev.key === "v" ? () => abrirBuscarVarias() : ev.key === "a" ? () => mostrarAgenda()
+        : ev.key === "f" && a ? () => alternarFijado(a.cedula_limpia, a.nombre)
+        : ev.key === "j" ? () => (lista && !dentroDeTabla(ev.target) ? moverEnLista(1, false) : moverEntreFilas(1))
+        : ev.key === "k" ? () => (lista && !dentroDeTabla(ev.target) ? moverEnLista(-1, false) : moverEntreFilas(-1))
+        : ev.key === "x" && lista ? alternarGestionadaActual : null;
       if (accion) { ev.preventDefault(); accion(); return; }
     }
     const ctrlK = (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K");
@@ -3488,6 +3535,10 @@
       clearInterval(panel.reloj);
       const segundos = Math.round((Date.now() - inicio) / 1000);
       anotarAccion({ tipo: "llamada", resultado: clave, nota: nota.value.trim() || null, duracion: segundos, ...extra }, a.cedula_limpia);
+      // La promesa también queda en la agenda del equipo, para el día que vence.
+      const enAgenda = clave === "promesa" && extra.fecha
+        ? cambiarAgenda("compromiso", { cedula: a.cedula_limpia, nombre: a.nombre || "", monto: extra.monto, fecha: extra.fecha, nota: nota.value.trim() })
+        : null;
       const r = RESULTADOS_LLAMADA[clave];
       const plantillas = a.whatsapp ? plantillasWhatsapp(a, todos, clave === "promesa" ? extra : null) : [];
       const sugerida = clave === "no_contesto" ? plantillas.find((p) => p.titulo === "No logramos comunicarnos")
@@ -3499,13 +3550,29 @@
         el("div", { class: "ll-anotado" }, palomita("palomita ll-palomita"),
           el("div", null,
             el("strong", { text: `${r.icono} ${r.texto}` + (clave === "promesa" ? ": " + [extra.monto ? pesos(extra.monto) : null, extra.fecha ? "el " + fechaPromesa(extra.fecha) : null].filter(Boolean).join(" ") : "") }),
-            el("span", { text: `Anotado en «Tu día» · ${minutosSegundos(segundos)} de llamada` }))),
+            el("span", { class: "ll-donde", text: `Anotado en «Tu día»${enAgenda ? " y en la agenda" : ""} · ${minutosSegundos(segundos)} de llamada` }))),
         el("div", { class: "ll-acciones" },
           enviar,
           el("button", { class: "boton boton-chico", type: "button", text: "🗓 Ver tu día", onclick: () => mostrarTuDia() }),
           el("button", { class: "boton boton-chico", type: "button", text: "Cerrar", onclick: cerrarLlamada })));
       panel.focus({ preventScroll: true });
+      if (enAgenda) {
+        enAgenda.then((ok) => {
+          const donde = zonaResultado.querySelector(".ll-donde");
+          if (!ok && donde) donde.textContent = `Anotado en «Tu día» · no se pudo guardar en la agenda · ${minutosSegundos(segundos)} de llamada`;
+        });
+      }
     }
+
+    // Lo que el equipo ya sabe de la persona: promesas pendientes y notas.
+    const pendientesLlamada = compromisosDe(a.cedula_limpia).filter((c) => c.estado === "pendiente");
+    const notasLlamada = notasDe(a.cedula_limpia).slice(0, 3);
+    const previoLlamada = pendientesLlamada.length || notasLlamada.length
+      ? el("div", { class: "ll-equipo" },
+        ...pendientesLlamada.map((c) => el("p", { class: "ll-promesa-previa ag-" + estadoCompromiso(c) },
+          `🤝 Ya prometió ${c.monto ? pesos(c.monto) : "un pago"} el ${fechaPromesa(c.fecha)} `, el("strong", { text: "· " + cuandoCompromiso(c) }))),
+        ...notasLlamada.map((n) => el("p", { class: "ll-nota-previa" }, "📝 ", el("span", { text: n.texto }), el("small", { text: ` — ${autorDe(n)}` }))))
+      : null;
 
     const nombre = nombrePropio(a.nombre) || "CC " + a.cedula;
     const panel = el("aside", { class: "panel-llamada", role: "dialog", "aria-label": "Modo llamada con " + nombre, tabindex: "-1" },
@@ -3526,9 +3593,10 @@
             dato("Último pago", ultimo ? `${fechaCorta(aFecha(ultimo.fecha))}${ultimo.valor ? " · " + pesos(ultimo.valor) : ""}` : "Sin pagos en Extractos"))),
         el("p", { class: "ll-subtitulo", text: enMora.length ? `🔴 ${plural(enMora.length, "crédito en mora", "créditos en mora")}` : "Créditos" }),
         situacion,
+        previoLlamada,
         el("p", { class: "ll-subtitulo", text: "¿Cómo terminó la llamada?" }),
         zonaResultado,
-        el("p", { class: "ll-pie", text: "Solo se anota en «Tu día»: no cambia la Matriz ni ninguna hoja." })));
+        el("p", { class: "ll-pie", text: "Se anota en «Tu día»; las promesas, también en la agenda del equipo. No cambia la Matriz ni ninguna hoja." })));
     panel.reloj = setInterval(() => { reloj.textContent = minutosSegundos(Math.round((Date.now() - inicio) / 1000)); }, 1000);
     panel.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") { ev.preventDefault(); cerrarLlamada(); return; }
@@ -3703,11 +3771,16 @@
       el("div", { class: "dialogo-axio-cuerpo atajos-grupos" },
         grupo("En toda la página", [
           [["/"], "Ir al buscador"], [["Ctrl", "K"], "Paleta de comandos"], [["Ctrl", "Shift", "H"], "Ocultar la pantalla"],
-          [["D"], "Tu día"], [["V"], "Buscar varias cédulas"], [["?"], "Ver estos atajos"], [["Esc"], "Cerrar ventanas y menús"]]),
+          [["D"], "Tu día"], [["A"], "Agenda de compromisos"], [["V"], "Buscar varias cédulas"], [["?"], "Ver estos atajos"], [["Esc"], "Cerrar ventanas y menús"]]),
         grupo("Con una persona en pantalla", [
           [["L"], "Modo llamada"], [["1", "2", "3", "4"], "Resultado de la llamada (en el modo llamada)"],
+          [["F"], "Fijarla (o quitarla) de los accesos rápidos"],
           [["Enter"], "Buscar la cédula que copiaste (cuando Axio lo ofrece)"]]),
+        grupo("En las tablas de resultados", [
+          [["J"], "Bajar a la siguiente fila"], [["K"], "Subir a la fila anterior"], [["Enter"], "Abrir el detalle de la fila"],
+          [["Shift", "F10"], "Menú de acciones de la fila (o clic derecho)"]]),
         grupo("Con una lista de trabajo (Buscar varias cédulas)", [
+          [["J"], "Siguiente persona de la lista"], [["K"], "Persona anterior"], [["X"], "Marcar o desmarcar como gestionada"],
           [["N"], "Siguiente cédula sin gestionar"], [["G"], "Marcar la de pantalla como gestionada y pasar a la siguiente"]]),
         conVisor ? grupo("En el visor de hojas", [
           [["Ctrl", "C"], "Copiar"], [["Ctrl", "V"], "Pegar"], [["Ctrl", "Z"], "Deshacer"], [["Ctrl", "F"], "Buscar en la hoja"],
@@ -3816,13 +3889,16 @@
         if (tarea.cancelada) return;
         Object.assign(f, datos);
         cambioLista();
+        tituloAvance(filas.filter((x) => x.estado !== "pendiente").length, filas.length, "Buscando cédulas");
       }
     };
     Promise.all([siguiente(), siguiente(), siguiente()]).then(() => {
-      if (tarea.cancelada) return;
+      if (tarea.cancelada) { tituloNormal(); return; }
       tareaLista = null;
       anotarAccion({ tipo: "lista", texto: `Búsqueda por lista: ${plural(filas.length, "cédula", "cédulas")}` }, null);
       cambioLista();
+      const conMora = filas.filter((x) => x.mora > 0).length;
+      terminoAlgo("La lista está lista", `${plural(filas.length, "cédula buscada", "cédulas buscadas")} · ${plural(conMora, "con mora", "con mora")}.`);
     });
   }
 
@@ -3841,6 +3917,11 @@
       onclick: () => { nuevaLista(cedulasDeTexto(area.value).slice(0, MAXIMO_LISTA)); botonBuscar.textContent = "Buscar otra vez"; montarTablaLista(zona); } });
     area.addEventListener("input", actualizarContador);
     area.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); botonBuscar.click(); } });
+    // También desde un archivo (o arrastrándolo a cualquier parte de la página).
+    const elegirArchivo = el("input", { type: "file", accept: ".xlsx,.xlsm,.csv,.txt,.tsv", hidden: true,
+      onchange: (ev) => { usarArchivoCedulas(ev.target.files[0]); ev.target.value = ""; } });
+    const botonArchivo = el("button", { class: "boton boton-chico", type: "button", text: "📎 Desde un archivo",
+      title: "Un Excel (.xlsx) o CSV con una columna de cédulas. También puedes arrastrarlo a la página.", onclick: () => elegirArchivo.click() });
     const zona = el("div", { class: "lista-zona" });
     dialogoLista.pintar = null;
     dialogoLista.replaceChildren(
@@ -3850,7 +3931,7 @@
         el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
       el("div", { class: "dialogo-axio-cuerpo" },
         area,
-        el("div", { class: "lista-barra" }, contador, botonBuscar),
+        el("div", { class: "lista-barra" }, contador, el("div", { class: "fila-flex" }, botonArchivo, elegirArchivo, botonBuscar)),
         zona));
     actualizarContador();
     if (lista && !texto) montarTablaLista(zona);
@@ -4029,6 +4110,7 @@
     const visibles = filas.filter((f) => !lista.ocultarHechas || !f.hecha || f.cedula === lista.actual);
     const ul = el("ul", { class: "pl-filas" }, ...visibles.map((f) => conDeslizar(el("li", {
       class: "pl-fila lista-" + claseFilaLista(f) + (f.cedula === lista.actual ? " actual" : "") + (f.hecha ? " hecha" : ""),
+      "data-cedula": f.cedula,
       title: tactil.matches ? "Desliza a la derecha para marcarla como gestionada" : null,
       "aria-current": f.cedula === lista.actual ? "true" : null },
     casillaGestionada(f),
@@ -4454,6 +4536,830 @@
     setTimeout(() => intentar(0), 1400);
   }
 
+  // ------------------------------------------------------------------ agenda del equipo
+  // Compromisos de pago (la promesa del modo llamada, con valor y fecha), notas sobre cada
+  // persona («llamar después de las 3») y los fijados de cada quien. A diferencia de «Tu
+  // día», esto se guarda para todo el equipo: en el servidor, en agenda_web.json (ver
+  // web/agenda.py); en la versión de navegador, en una hoja de Google aparte (puente.js).
+  // Nada de esto escribe en la Matriz.
+  let cargandoAgenda = null;
+  let ultimaAgenda = 0;
+  const MS_REFRESCAR_AGENDA = 3 * 60000;
+
+  async function cargarAgenda() {
+    if (cargandoAgenda) return cargandoAgenda;
+    cargandoAgenda = (async () => {
+      try {
+        const { datos } = await apiJson("/api/agenda");
+        ponerAgenda(datos);
+      } catch (e) {
+        // Sin agenda todo lo demás sigue igual; la ficha dice por qué no están las notas (y
+        // se reintenta sola con el próximo refresco).
+        if (!agenda.cargada) { agenda.error = textoErrorAgenda(e); agendaCambio(); }
+      } finally { cargandoAgenda = null; ultimaAgenda = Date.now(); }
+    })();
+    return cargandoAgenda;
+  }
+
+  function ponerAgenda(d) {
+    if (!d || typeof d !== "object") return;
+    agenda = {
+      cargada: true, configurada: d.configurada !== false, compartida: d.compartida !== false, yo: d.yo || "", hoja: d.hoja || "",
+      compromisos: Array.isArray(d.compromisos) ? d.compromisos : [], notas: Array.isArray(d.notas) ? d.notas : [],
+      fijados: Array.isArray(d.fijados) ? d.fijados : [],
+    };
+    agendaCambio();
+  }
+
+  // Todo lo que muestra algo de la agenda se pone al día.
+  function agendaCambio() {
+    pintarRecientes();
+    const a = busqueda && busqueda.asociado;
+    if (a && a.repintarAgenda) a.repintarAgenda();
+    pintarBotonAgenda();
+    if (dialogoAgenda.open) pintarAgenda();
+    avisarAgenda();
+  }
+
+  // Quién anota: el nombre que se ve en la barra (la cuenta de Google en la versión de navegador).
+  const nombreQuien = () => (zonaUsuario.dataset.nombreCompleto || ($(".usuario-nombre") || {}).textContent || "").trim();
+
+  // accion: compromiso | estado | nota | borrar_nota | fijar | desfijar. Devuelve true si se
+  // guardó. mensaje: lo que dice el aviso al guardar (nada si se omite).
+  async function cambiarAgenda(accion, datos, mensaje) {
+    try {
+      const { datos: d } = await apiJson("/api/agenda", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion, autor_nombre: nombreQuien(), ...datos }),
+      });
+      ponerAgenda(d);
+      if (mensaje) toast(mensaje);
+      vibrar();
+      return true;
+    } catch (e) {
+      toast("No se pudo guardar en la agenda: " + textoErrorAgenda(e));
+      return false;
+    }
+  }
+  // Los errores de la agenda ya vienen en palabras de la gente («Solo quien escribió la nota
+  // la puede borrar», «pide permiso de edición»); los técnicos se traducen.
+  function textoErrorAgenda(e) {
+    const t = String((e && e.message) || "");
+    return t && !/fetch|network|^error \d|\b5\d\d\b/i.test(t) ? t.replace(/\.$/, "") : explicarError(e).titulo.replace(/\.$/, "");
+  }
+
+  const compromisosDe = (cedula) => agenda.compromisos.filter((c) => c.cedula === cedula)
+    .sort((x, y) => (x.estado === "pendiente" ? 0 : 1) - (y.estado === "pendiente" ? 0 : 1) || String(x.fecha).localeCompare(String(y.fecha)));
+  const notasDe = (cedula) => agenda.notas.filter((n) => n.cedula === cedula).sort((x, y) => String(y.creado).localeCompare(String(x.creado)));
+  const estaFijado = (cedula) => agenda.fijados.some((f) => f.cedula === cedula);
+  const autorDe = (x) => (x.autor && x.autor === agenda.yo ? "tú" : x.autor_nombre || x.autor || "alguien");
+
+  // Días que faltan para la fecha (negativo: ya pasó).
+  function diasHasta(iso) {
+    const f = aFecha(iso);
+    if (!f) return null;
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    return Math.round((f.getTime() - hoy.getTime()) / 86400000);
+  }
+  // pendiente → vencida | hoy | proxima; los resueltos, su estado.
+  function estadoCompromiso(c) {
+    if (c.estado !== "pendiente") return c.estado;
+    const d = diasHasta(c.fecha);
+    return d === null ? "proxima" : d < 0 ? "vencida" : d === 0 ? "hoy" : "proxima";
+  }
+  function cuandoCompromiso(c) {
+    if (c.estado === "cumplida") return "✓ cumplió";
+    if (c.estado === "incumplida") return "✗ no cumplió";
+    const d = diasHasta(c.fecha);
+    if (d === null) return "";
+    if (d < 0) return `venció hace ${plural(-d, "día", "días")}`;
+    if (d === 0) return "vence hoy";
+    if (d === 1) return "vence mañana";
+    return `vence en ${d} días`;
+  }
+
+  async function alternarFijado(cedula, nombre) {
+    const si = estaFijado(cedula);
+    await cambiarAgenda(si ? "desfijar" : "fijar", { cedula, nombre: nombre || "" },
+      si ? "Ya no está en tus fijados." : "★ Fijado: lo tienes a mano debajo del buscador.");
+  }
+
+  function botonFijar(a) {
+    const boton = el("button", { class: "boton boton-chico boton-fijar", type: "button", onclick: () => alternarFijado(a.cedula_limpia, a.nombre) });
+    boton.repintar = () => {
+      const si = estaFijado(a.cedula_limpia);
+      boton.textContent = si ? "★ Fijado" : "☆ Fijar";
+      boton.classList.toggle("activo", si);
+      boton.setAttribute("aria-pressed", String(si));
+      boton.title = si ? "Quitar de tus fijados (tecla F)" : "Tenerla a mano debajo del buscador (tecla F)";
+    };
+    boton.repintar();
+    return boton;
+  }
+
+  // Valor con puntos de mil mientras se escribe.
+  function campoValor(clase, etiqueta) {
+    const monto = el("input", { type: "text", inputmode: "numeric", class: clase, placeholder: "Valor, p. ej. 500.000", "aria-label": etiqueta });
+    monto.addEventListener("input", () => {
+      const n = soloDigitos(monto.value);
+      monto.value = n ? formatoMiles.format(Number(n)) : "";
+    });
+    return monto;
+  }
+  const isoDe = (f) => `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+
+  // Un compromiso: qué prometió, cuándo vence y quién lo anotó; si está pendiente, los botones
+  // para marcarlo. conPersona: se ve también a quién es (en la agenda); a: la ficha de la
+  // persona (para mirar si ya consignó después de prometer).
+  function tarjetaCompromiso(c, conPersona, a) {
+    const estado = estadoCompromiso(c);
+    const marcar = (nuevo, texto) => el("button", { class: "boton boton-chico ag-" + nuevo, type: "button", text: texto,
+      onclick: (ev) => { ev.currentTarget.disabled = true; cambiarAgenda("estado", { id: c.id, estado: nuevo }, nuevo === "cumplida" ? "✓ Marcado como cumplido." : nuevo === "incumplida" ? "Marcado como incumplido." : "Compromiso pendiente otra vez."); } });
+    // Si la persona consignó después de prometer, se avisa (no se marca solo: puede ser otro pago).
+    const desde = String(c.creado || "").slice(0, 10);
+    const pago = c.estado === "pendiente" && a ? (a.pagos || []).filter((p) => p.fecha && p.fecha >= desde).pop() : null;
+    const resuelto = c.estado !== "pendiente" && c.actualizado_por
+      ? ` · marcado por ${c.actualizado_por === agenda.yo ? "ti" : c.actualizado_por} ${haceCuanto(c.actualizado)}` : "";
+    return el("div", { class: "ag-compromiso ag-" + estado },
+      el("span", { class: "ag-icono", "aria-hidden": "true", text: estado === "cumplida" ? "✓" : estado === "incumplida" ? "✗" : "🤝" }),
+      el("div", { class: "ag-textos" },
+        conPersona ? el("button", { class: "ag-persona", type: "button", title: "Abrir la ficha",
+          onclick: () => { if (dialogoAgenda.open) dialogoAgenda.close(); campo.value = c.cedula; buscar(); } },
+        el("strong", { text: nombrePropio(c.nombre) || "Sin nombre" }), el("span", { text: "CC " + formatoMiles.format(Number(c.cedula)) })) : null,
+        el("span", { class: "ag-que" },
+          el("strong", { text: `${c.monto ? pesos(c.monto) : "Un pago"} el ${fechaPromesa(c.fecha)}` }),
+          el("span", { class: "ag-cuando", text: cuandoCompromiso(c) })),
+        c.nota ? el("span", { class: "ag-nota", text: "«" + c.nota + "»" }) : null,
+        pago ? el("span", { class: "ag-pista", text: `💡 Consignó ${pago.valor ? pesos(pago.valor) : ""} el ${fechaCorta(aFecha(pago.fecha))}: ¿es este pago?` }) : null,
+        el("span", { class: "ag-autor", text: `Anotó ${autorDe(c)} ${haceCuanto(c.creado)}${resuelto}` })),
+      el("div", { class: "ag-botones" },
+        ...(c.estado === "pendiente" ? [marcar("cumplida", "✓ Cumplió"), marcar("incumplida", "✗ No cumplió")] : [marcar("pendiente", "↺ Reabrir")])));
+  }
+
+  // En la ficha: las promesas y las notas del equipo sobre la persona, y para escribir una.
+  function bloqueAgenda(a) {
+    const caja = el("section", { class: "asociado-agenda", "aria-label": "Compromisos y notas del equipo" });
+    const nombre = nombrePropio(a.nombre) || "la persona";
+    // El formulario abierto es siempre el mismo nodo: si la agenda se pone al día sola
+    // mientras se llena, no se pierde lo escrito. Lo mismo el borrador de la nota.
+    let nodoForm = null;
+    let enfocarNota = false;
+    let borrador = "";
+    const cerrarForm = () => { nodoForm = null; caja.repintar(); };
+
+    function formularioCompromiso() {
+      const manana = new Date(Date.now() + 86400000);
+      const monto = campoValor("ag-monto", "Valor prometido");
+      const fecha = el("input", { type: "date", class: "ag-fecha", value: isoDe(manana), "aria-label": "Fecha prometida" });
+      const nota = el("input", { type: "text", class: "ag-nota-campo", maxlength: "200", placeholder: "Nota (opcional)", "aria-label": "Nota del compromiso" });
+      const guardar = el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Guardar compromiso",
+        onclick: async () => {
+          if (!fecha.value) { fecha.focus(); return; }
+          guardar.disabled = true;
+          const ok = await cambiarAgenda("compromiso", { cedula: a.cedula_limpia, nombre: a.nombre || "", monto: Number(soloDigitos(monto.value)) || null, fecha: fecha.value, nota: nota.value.trim() },
+            "🤝 Compromiso anotado en la agenda.");
+          if (ok) cerrarForm(); else guardar.disabled = false;
+        } });
+      for (const c of [monto, nota]) c.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); guardar.click(); } });
+      setTimeout(() => monto.focus(), 30);
+      return el("div", { class: "ag-form" },
+        el("label", null, el("span", { text: "Valor" }), monto),
+        el("label", null, el("span", { text: "Fecha" }), fecha),
+        el("label", { class: "ag-form-nota" }, el("span", { text: "Nota" }), nota),
+        el("div", { class: "ag-form-botones" },
+          el("button", { class: "boton boton-chico", type: "button", text: "Cancelar", onclick: cerrarForm }),
+          guardar));
+    }
+
+    caja.repintar = () => {
+      const compromisos = compromisosDe(a.cedula_limpia);
+      const pendientes = compromisos.filter((c) => c.estado === "pendiente");
+      // De los resueltos, solo el último (los demás están en la agenda).
+      const resuelto = compromisos.filter((c) => c.estado !== "pendiente").sort((x, y) => String(y.actualizado).localeCompare(String(x.actualizado)))[0];
+      const notas = notasDe(a.cedula_limpia);
+      const campoNota = el("input", { type: "text", class: "ag-campo-nota", maxlength: "500", value: borrador,
+        placeholder: `Una nota para el equipo sobre ${nombre} (Enter para guardar)…`, "aria-label": "Nueva nota sobre " + nombre });
+      campoNota.addEventListener("input", () => { borrador = campoNota.value; });
+      campoNota.addEventListener("keydown", async (ev) => {
+        if (ev.key !== "Enter" || !campoNota.value.trim()) return;
+        ev.preventDefault();
+        campoNota.disabled = true;
+        const ok = await cambiarAgenda("nota", { cedula: a.cedula_limpia, nombre: a.nombre || "", texto: campoNota.value.trim() }, "📝 Nota guardada: la ve todo el equipo.");
+        if (ok) { borrador = ""; enfocarNota = true; caja.repintar(); } else campoNota.disabled = false;
+      });
+      const listaNotas = notas.length
+        ? el("ul", { class: "ag-notas" }, ...notas.map((n) => el("li", { class: "ag-nota-item" },
+          el("span", { class: "ag-nota-texto", text: n.texto }),
+          el("span", { class: "ag-autor", text: `${autorDe(n)} · ${haceCuanto(n.creado)}` }),
+          n.autor === agenda.yo ? el("button", { class: "boton boton-texto ag-borrar", type: "button", title: "Borrar mi nota", "aria-label": "Borrar la nota",
+            text: "✕", onclick: (ev) => { ev.currentTarget.disabled = true; cambiarAgenda("borrar_nota", { id: n.id }, "Nota borrada."); } }) : null)))
+        : null;
+      const cuenta = [pendientes.length ? plural(pendientes.length, "compromiso", "compromisos") : null, notas.length ? plural(notas.length, "nota", "notas") : null].filter(Boolean).join(" · ");
+      const escribiaNota = document.activeElement && document.activeElement.classList.contains("ag-campo-nota") && caja.contains(document.activeElement);
+      caja.classList.toggle("ag-con-algo", Boolean(pendientes.length || notas.length));
+      // replaceChildren escribe «null» por cada hueco: se quitan antes.
+      caja.replaceChildren(...[
+        el("div", { class: "ag-cabecera" },
+          el("strong", { class: "ag-titulo", text: "📝 Notas y compromisos" }),
+          cuenta ? el("span", { class: "ag-cuenta", text: cuenta }) : null,
+          nodoForm ? null : el("button", { class: "boton boton-chico ag-nuevo", type: "button", text: "🤝 + Compromiso",
+            title: "Anota una promesa de pago: valor y fecha", onclick: () => { nodoForm = formularioCompromiso(); caja.repintar(); } })),
+        nodoForm,
+        ...pendientes.map((c) => tarjetaCompromiso(c, false, a)),
+        resuelto && !pendientes.length ? tarjetaCompromiso(resuelto, false, a) : null,
+        listaNotas,
+        campoNota,
+        !agenda.cargada ? (agenda.error
+          ? el("p", { class: "ag-pie ag-pie-ambar", text: `⚠️ No pude leer la agenda del equipo: ${agenda.error}. Lo vuelvo a intentar en unos minutos.` })
+          : el("p", { class: "ag-pie", text: "Cargando las notas del equipo…" }))
+          : !agenda.configurada ? el("p", { class: "ag-pie ag-pie-ambar", text: "Por ahora se guarda solo en esta pestaña: falta conectar la hoja de la agenda («url_agenda» en la configuración)." })
+            : el("p", { class: "ag-pie", text: "Lo ve todo el equipo. No cambia la Matriz." })].filter(Boolean));
+      if (enfocarNota || escribiaNota) {
+        enfocarNota = false;
+        campoNota.focus({ preventScroll: true });
+        campoNota.setSelectionRange(campoNota.value.length, campoNota.value.length);
+      }
+    };
+    caja.repintar();
+    return caja;
+  }
+
+  // ---- la ventana de la agenda (tecla A)
+  const dialogoAgenda = el("dialog", { class: "dialogo-axio dialogo-agenda", "aria-labelledby": "agenda-titulo" });
+  document.body.append(dialogoAgenda);
+  dialogoAgenda.addEventListener("click", (ev) => { if (ev.target === dialogoAgenda || ev.target.closest("[data-cerrar]")) dialogoAgenda.close(); });
+  let vistaAgenda = "mias";
+
+  function mostrarAgenda() {
+    pintarAgenda();
+    if (!dialogoAgenda.open) dialogoAgenda.showModal();
+    cargarAgenda();
+  }
+
+  function pintarAgenda() {
+    const mias = (c) => vistaAgenda === "todas" || c.autor === agenda.yo;
+    const todos = agenda.compromisos.filter(mias);
+    const pendientes = todos.filter((c) => c.estado === "pendiente").sort((x, y) => String(x.fecha).localeCompare(String(y.fecha)));
+    const grupos = [
+      ["Vencidas sin revisar", "vencida", pendientes.filter((c) => estadoCompromiso(c) === "vencida")],
+      ["Vencen hoy", "hoy", pendientes.filter((c) => estadoCompromiso(c) === "hoy")],
+      ["Próximos 7 días", "proxima", pendientes.filter((c) => { const d = diasHasta(c.fecha); return d > 0 && d <= 7; })],
+      ["Más adelante", "proxima", pendientes.filter((c) => diasHasta(c.fecha) > 7)],
+    ];
+    const resueltos = todos.filter((c) => c.estado !== "pendiente").sort((x, y) => String(y.actualizado).localeCompare(String(x.actualizado))).slice(0, 30);
+    const suma = (lista) => lista.reduce((s, c) => s + (Number(c.monto) || 0), 0);
+    const cifra = (n, etiqueta, detalle, clase) => el("div", { class: "dia-cifra " + (clase || "") + (n ? "" : " cero") },
+      el("strong", { text: String(n) }), el("span", { text: etiqueta }), detalle ? el("em", { text: detalle }) : null);
+    const segmento = (valor, texto) => el("button", { type: "button", role: "radio", "aria-checked": String(vistaAgenda === valor), class: vistaAgenda === valor ? "activo" : null, text: texto,
+      onclick: () => { vistaAgenda = valor; pintarAgenda(); } });
+    const cumplidas = resueltos.filter((c) => c.estado === "cumplida").length;
+    dialogoAgenda.replaceChildren(
+      el("div", { class: "dialogo-axio-cabecera" },
+        el("div", null,
+          el("h2", { id: "agenda-titulo", text: "Agenda de compromisos" }),
+          el("span", { class: "dialogo-axio-sub", text: "Las promesas de pago anotadas en el modo llamada o en la ficha" })),
+        el("div", { class: "segmentado ag-vista", role: "radiogroup", "aria-label": "De quién" }, segmento("mias", "Mías"), segmento("todas", "Del equipo")),
+        el("button", { class: "boton boton-texto boton-cerrar", type: "button", "aria-label": "Cerrar", "data-cerrar": "", text: "✕" })),
+      el("div", { class: "dialogo-axio-cuerpo" },
+        el("div", { class: "dia-cifras ag-cifras" },
+          cifra(grupos[0][2].length, "vencidas sin revisar", grupos[0][2].length ? pesos(suma(grupos[0][2])) : null, "ag-cifra-vencida"),
+          cifra(grupos[1][2].length, "vencen hoy", grupos[1][2].length ? pesos(suma(grupos[1][2])) : null, "ag-cifra-hoy"),
+          cifra(grupos[2][2].length + grupos[3][2].length, "por venir", null),
+          cifra(cumplidas, cumplidas === 1 ? "cumplida" : "cumplidas", resueltos.length ? `de ${resueltos.length} resueltas` : null)),
+        ...grupos.filter(([, , lista]) => lista.length).map(([titulo, clase, lista]) => el("section", { class: "ag-grupo ag-grupo-" + clase },
+          el("h3", null, titulo, el("span", { text: ` · ${lista.length}${suma(lista) ? " · " + pesos(suma(lista)) : ""}` })),
+          ...lista.map((c) => tarjetaCompromiso(c, true)))),
+        pendientes.length ? null : el("p", { class: "dia-vacio", text: !agenda.cargada ? "Cargando la agenda…"
+          : vistaAgenda === "mias" ? "No tienes compromisos pendientes. Las promesas que anotes en el modo llamada (tecla L) aparecen aquí." : "El equipo no tiene compromisos pendientes." }),
+        resueltos.length ? el("details", { class: "ag-grupo ag-resueltos" },
+          el("summary", null, `Resueltos hace poco · ${resueltos.length}`),
+          ...resueltos.map((c) => tarjetaCompromiso(c, true))) : null),
+      el("div", { class: "dialogo-axio-pie" },
+        el("span", { text: !agenda.configurada ? "⚠️ Solo en esta pestaña: falta conectar la hoja de la agenda («url_agenda» en la configuración)."
+          : agenda.hoja ? `Compartida con el equipo en la hoja «${agenda.hoja}».` : "Compartida con todo el equipo." }),
+        el("button", { class: "boton boton-chico", type: "button", text: "↻ Actualizar", onclick: () => cargarAgenda() })));
+  }
+
+  // ---- el botón de la barra, con cuántas vencen hoy o ya vencieron (las mías)
+  const cuentaAgenda = el("span", { class: "ba-cuenta", hidden: true });
+  const botonAgenda = el("button", { class: "boton boton-texto boton-agenda", type: "button", title: "Agenda de compromisos (tecla A)",
+    "aria-label": "Agenda de compromisos", onclick: () => mostrarAgenda() },
+  el("span", { class: "ba-icono", "aria-hidden": "true", text: "🤝" }), el("span", { class: "boton-velo-texto", text: "Agenda" }), cuentaAgenda);
+  (document.querySelector(".boton-velo") || zonaUsuario).before(botonAgenda);
+
+  const urgentesMias = () => agenda.compromisos.filter((c) => c.autor === agenda.yo && c.estado === "pendiente" && ["vencida", "hoy"].includes(estadoCompromiso(c)));
+  function pintarBotonAgenda() {
+    const n = urgentesMias().length;
+    cuentaAgenda.hidden = !n;
+    cuentaAgenda.textContent = n > 99 ? "99+" : String(n);
+    botonAgenda.setAttribute("aria-label", n ? `Agenda de compromisos: ${plural(n, "pendiente para hoy o vencido", "pendientes para hoy o vencidos")}` : "Agenda de compromisos");
+  }
+
+  // ---- al entrar: «hoy vencen 3 promesas», una vez al día por pestaña
+  const CLAVE_AVISO_AGENDA = "axio_agenda_aviso";
+  let avisoAgendaHecho = false;
+  const avisoAgenda = el("div", { class: "oferta-portapapeles aviso-agenda", role: "status", hidden: true });
+  document.body.append(avisoAgenda);
+  function avisarAgenda() {
+    if (avisoAgendaHecho || !agenda.cargada) return;
+    try { if (sessionStorage.getItem(CLAVE_AVISO_AGENDA) === hoyISO()) { avisoAgendaHecho = true; return; } } catch (_) { /* sin almacenamiento */ }
+    // Cuando la página ya está lista y sin ventanas encima.
+    if (document.body.classList.contains("cargando-app") || document.querySelector("dialog[open]")) { setTimeout(avisarAgenda, 2000); return; }
+    avisoAgendaHecho = true;
+    const urgentes = urgentesMias();
+    if (!urgentes.length) return;
+    try { sessionStorage.setItem(CLAVE_AVISO_AGENDA, hoyISO()); } catch (_) { /* sin almacenamiento */ }
+    const hoy = urgentes.filter((c) => estadoCompromiso(c) === "hoy").length;
+    const vencidas = urgentes.length - hoy;
+    const texto = [hoy ? `${plural(hoy, "promesa vence", "promesas vencen")} hoy` : null, vencidas ? `${plural(vencidas, "vencida", "vencidas")} sin revisar` : null].filter(Boolean).join(" y ");
+    const cerrar = () => { avisoAgenda.hidden = true; };
+    avisoAgenda.replaceChildren(
+      el("span", { class: "oferta-texto" }, "🤝 ", el("strong", { text: texto.charAt(0).toUpperCase() + texto.slice(1) })),
+      el("button", { class: "boton boton-principal boton-chico", type: "button", text: "Ver la agenda", onclick: () => { cerrar(); mostrarAgenda(); } }),
+      el("button", { class: "boton boton-texto oferta-cerrar", type: "button", "aria-label": "Cerrar", text: "✕", onclick: cerrar }));
+    avisoAgenda.hidden = false;
+    setTimeout(cerrar, 20000);
+  }
+
+  // La agenda se pone al día sola cada pocos minutos y al volver a la pestaña.
+  setInterval(() => { if (!document.hidden) cargarAgenda(); }, MS_REFRESCAR_AGENDA);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - ultimaAgenda > 60000) cargarAgenda(); });
+
+  // ------------------------------------------------------------------ una persona por su cédula
+  // Para la vista previa y el menú del clic derecho: la ficha de una cédula sin hacer una
+  // búsqueda (/api/persona). Se recuerda un par de minutos.
+  const COLUMNA_CEDULA = /c[eé]dula|^c\.?\s?c\.?$|identificaci|documento|^nit\b/i;
+  const personas = new Map();   // cédula -> { hora, promesa }
+  function personaDe(cedula) {
+    const guardada = personas.get(cedula);
+    if (guardada && Date.now() - guardada.hora < 120000) return guardada.promesa;
+    const promesa = apiJson("/api/persona?c=" + encodeURIComponent(cedula)).then(({ status, datos }) => {
+      if (status === 202) { personas.delete(cedula); throw new Error("Los datos todavía se están cargando."); }
+      return datos.asociado || null;
+    });
+    promesa.catch(() => personas.delete(cedula));
+    personas.set(cedula, { hora: Date.now(), promesa });
+    return promesa;
+  }
+  function cedulaDeValores(columnas, valores) {
+    const j = (columnas || []).findIndex((c) => COLUMNA_CEDULA.test(String(c).trim()));
+    if (j < 0) return "";
+    const d = soloDigitos(valores[j]);
+    return d.length >= 5 && d.length <= 12 ? d : "";
+  }
+  // Lo que se sabe de una fila (de los resultados, de la tabla completa o de la lista de trabajo).
+  function datosDeFila(nodo) {
+    if (nodo.fila && nodo.columnas) {
+      return { cedula: cedulaDeValores(nodo.columnas, nodo.fila.v), columnas: nodo.columnas, valores: nodo.fila.v, abrir: () => nodo.click() };
+    }
+    if (nodo.dataset.p !== undefined && nodo.closest(".tc-tabla")) {
+      const valores = [...nodo.cells].slice(1).map((td) => td.textContent);
+      return { cedula: cedulaDeValores(tc.columnas, valores), columnas: tc.columnas, valores, abrir: () => nodo.click() };
+    }
+    if (nodo.dataset.cedula) {
+      const f = lista && lista.filas.find((x) => x.cedula === nodo.dataset.cedula);
+      return { cedula: nodo.dataset.cedula, nombre: f && f.nombre, abrir: () => { const b = nodo.querySelector(".pl-ir"); if (b) b.click(); } };
+    }
+    return null;
+  }
+  const FILAS_CON_MENU = "#resultados tbody tr[tabindex], .tc-tabla tbody tr[data-p], .pl-fila[data-cedula]";
+
+  // ------------------------------------------------------------------ clic derecho
+  // Sobre una fila: lo que más se hace con esa persona sin abrir el detalle (ficha, llamada,
+  // WhatsApp, copiar, lista, fijar, enlace). También con la tecla de menú o Shift+F10.
+  let menuContexto = null;
+  function cerrarMenuContexto() {
+    if (!menuContexto) return;
+    try { menuContexto.hidePopover(); } catch (_) { /* ya cerrado */ }
+    menuContexto.remove();
+    menuContexto = null;
+  }
+
+  async function conPersona(cedula, hacer) {
+    try {
+      const a = await personaDe(cedula);
+      if (!a) { toast("Esa cédula no tiene ficha: no aparece en las líneas de crédito ni en WhatsApp."); return; }
+      anotarPersona(a);
+      hacer(a);
+    } catch (e) {
+      toast(explicarError(e).titulo);
+    }
+  }
+
+  function agregarALista(cedula) {
+    if (lista && lista.filas.some((f) => f.cedula === cedula)) { toast("Ya está en la lista de trabajo."); return; }
+    if (!lista) { nuevaLista([cedula]); toast("Lista de trabajo nueva con esta cédula."); return; }
+    lista.filas.push({ cedula, estado: "pendiente", hecha: false, vista: false });
+    lista.plegada = false;
+    cambioLista();
+    correrLista();
+    toast(`Agregada a la lista de trabajo (${lista.filas.length}).`);
+  }
+
+  function abrirMenuContexto(datos, x, y) {
+    cerrarMenuContexto();
+    ocultarPrevia();
+    const c = datos.cedula;
+    const conocida = c && personas.get(c);
+    const item = (icono, texto, accion, pista) => el("button", { class: "mc-item", type: "button", role: "menuitem",
+      onclick: () => { cerrarMenuContexto(); accion(); } },
+    el("span", { class: "mc-icono", "aria-hidden": "true", text: icono }), el("span", { class: "mc-texto", text: texto }), pista ? el("kbd", { text: pista }) : null);
+    const separador = () => el("div", { class: "mc-separador", role: "separator" });
+    const titulo = el("p", { class: "mc-titulo", text: c ? "CC " + formatoMiles.format(Number(c)) : "Fila" });
+    const items = [
+      datos.abrir ? item("👁", "Ver el detalle", datos.abrir, "Enter") : null,
+      c ? item("👤", "Abrir la ficha de la persona", () => { campo.value = c; buscar(); }) : null,
+      c ? separador() : null,
+      c ? item("📞", "Modo llamada", () => conPersona(c, abrirLlamada)) : null,
+      c ? item("💬", "Escribir por WhatsApp", () => conPersona(c, (a) => {
+        if (!a.whatsapp) { toast("No está en el directorio de WhatsApp."); return; }
+        const plantilla = plantillasWhatsapp(a, creditosDe(a))[0];
+        anotarAccion({ tipo: "whatsapp", plantilla: plantilla.titulo }, a.cedula_limpia);
+        window.open(enlaceWhatsapp(a.whatsapp, plantilla.texto), "_blank", "noopener");
+      })) : null,
+      c ? separador() : null,
+      c ? item("📋", "Copiar la cédula", () => copiar(c, "Cédula copiada, lista para pegar en Siasoft.")) : null,
+      datos.valores ? item("⧉", "Copiar la fila", () => copiar(datos.valores.join("\t"), "Fila copiada: pégala en Excel o en un correo.")) : null,
+      c ? item("🔗", "Copiar el enlace a la ficha", () => copiar(enlacePersona(c), "Enlace copiado: quien lo abra entra con su cuenta y llega a esta ficha.")) : null,
+      c ? separador() : null,
+      c && !(lista && lista.filas.some((f) => f.cedula === c)) ? item("➕", "Agregar a la lista de trabajo", () => agregarALista(c)) : null,
+      c ? item(estaFijado(c) ? "☆" : "★", estaFijado(c) ? "Quitar de mis fijados" : "Fijar (tenerla a mano)", async () => {
+        let nombre = datos.nombre || "";
+        if (!nombre) { try { nombre = ((await personaDe(c)) || {}).nombre || ""; } catch (_) { /* sin nombre */ } }
+        alternarFijado(c, nombre);
+      }) : null,
+    ].filter(Boolean);
+    if (!c) items.push(el("p", { class: "mc-nota", text: "Esta fila no tiene una columna de cédula." }));
+    menuContexto = el("div", { class: "menu-contexto", popover: "auto", role: "menu", "aria-label": "Acciones de la fila" }, titulo, ...items);
+    document.body.append(menuContexto);
+    menuContexto.addEventListener("toggle", (e) => { if (e.newState === "closed" && menuContexto && e.target === menuContexto) { menuContexto.remove(); menuContexto = null; } });
+    menuContexto.addEventListener("keydown", (e) => {
+      const botones = [...menuContexto.querySelectorAll(".mc-item")];
+      const k = botones.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); botones[(k + (e.key === "ArrowDown" ? 1 : -1) + botones.length) % botones.length].focus(); }
+      if (e.key === "Tab") { e.preventDefault(); cerrarMenuContexto(); }
+    });
+    menuContexto.showPopover();
+    const m = menuContexto.getBoundingClientRect();
+    menuContexto.style.left = Math.max(8, Math.min(window.innerWidth - m.width - 8, x)) + "px";
+    menuContexto.style.top = Math.max(8, y + m.height > window.innerHeight - 8 ? y - m.height : y) + "px";
+    const primero = menuContexto.querySelector(".mc-item");
+    if (primero) primero.focus({ preventScroll: true });
+    // El nombre llega después (si la persona no estaba ya en memoria).
+    if (c) {
+      const ponerNombre = (a) => { if (a && a.nombre && titulo.isConnected) titulo.replaceChildren(el("strong", { text: nombrePropio(a.nombre) }), " · CC " + formatoMiles.format(Number(c))); };
+      if (conocida) conocida.promesa.then(ponerNombre, () => {});
+      else personaDe(c).then(ponerNombre, () => {});
+    }
+  }
+
+  document.addEventListener("contextmenu", (ev) => {
+    if (ev.shiftKey || !ev.target.closest) return;   // Shift + clic derecho: el menú del navegador
+    const nodo = ev.target.closest(FILAS_CON_MENU);
+    if (!nodo || ev.target.closest("a, input, textarea, select")) return;
+    const datos = datosDeFila(nodo);
+    if (!datos) return;
+    ev.preventDefault();
+    // Con el teclado (tecla de menú o Shift+F10) no hay posición del mouse: debajo de la fila.
+    let x = ev.clientX, y = ev.clientY;
+    if (!x && !y) { const r = nodo.getBoundingClientRect(); x = r.left + 24; y = r.bottom; }
+    abrirMenuContexto(datos, x, y);
+  });
+  window.addEventListener("scroll", cerrarMenuContexto, { passive: true });
+  window.addEventListener("resize", cerrarMenuContexto);
+
+  // ------------------------------------------------------------------ vista previa al pasar el mouse
+  // Sobre una fila de pagos, después de un instante quieto: quién es la persona, su situación
+  // en una frase, el saldo en mora y lo que el equipo anotó. Solo con mouse (no en el celular).
+  const previa = el("div", { class: "vista-previa", role: "tooltip", hidden: true });
+  document.body.append(previa);
+  let filaPrevia = null;
+  let temporizadorPrevia = null;
+  let ratonX = 0, ratonY = 0;
+
+  function ocultarPrevia() {
+    clearTimeout(temporizadorPrevia);
+    filaPrevia = null;
+    previa.hidden = true;
+    previa.classList.remove("visible");
+  }
+
+  function ubicarPrevia(fila) {
+    const r = fila.getBoundingClientRect(), p = previa.getBoundingClientRect();
+    const x = Math.max(8, Math.min(window.innerWidth - p.width - 8, ratonX + 14));
+    const abajo = r.bottom + 8;
+    previa.style.left = x + "px";
+    previa.style.top = (abajo + p.height < window.innerHeight - 8 ? abajo : Math.max(8, r.top - p.height - 8)) + "px";
+  }
+
+  function pintarPrevia(a, cedula) {
+    if (!a) {
+      previa.replaceChildren(el("p", { class: "vp-nada" }, el("strong", { text: "CC " + formatoMiles.format(Number(cedula)) }), el("span", { text: "Sin ficha: no aparece en las líneas de crédito ni en WhatsApp." })));
+      return;
+    }
+    const todos = creditosDe(a);
+    const enMora = todos.filter((x) => x.estado.mora);
+    const saldoMora = enMora.reduce((s, x) => s + numeroDe(x.e.saldo_actual || x.e.saldo), 0);
+    const promesa = compromisosDe(a.cedula_limpia).find((c) => c.estado === "pendiente");
+    const notas = notasDe(a.cedula_limpia);
+    const frase = fraseAsociado(todos, a.pagos || []);
+    frase.classList.add("vp-frase");
+    previa.replaceChildren(
+      el("div", { class: "vp-cabecera" },
+        el("span", { class: "dia-avatar", "aria-hidden": "true", text: iniciales(nombrePropio(a.nombre)) }),
+        el("div", { class: "vp-quien" },
+          el("strong", { text: (estaFijado(a.cedula_limpia) ? "★ " : "") + (nombrePropio(a.nombre) || "Sin nombre") }),
+          el("span", { text: [`CC ${a.cedula}`, a.distrito ? `Distrito ${a.distrito}` : null].filter(Boolean).join(" · ") }))),
+      frase,
+      el("div", { class: "vp-chips" },
+        saldoMora ? el("span", { class: "vp-chip vp-mora", text: "Saldo en mora " + pesos(saldoMora) }) : null,
+        promesa ? el("span", { class: "vp-chip vp-promesa", text: `🤝 ${promesa.monto ? pesos(promesa.monto) : "Pago"} · ${cuandoCompromiso(promesa)}` }) : null,
+        notas.length ? el("span", { class: "vp-chip", text: "📝 " + plural(notas.length, "nota", "notas") }) : null),
+      notas.length ? el("p", { class: "vp-nota", text: "«" + notas[0].texto + "»" }) : "",
+      el("p", { class: "vp-pie", text: "Clic para el detalle · clic derecho para más acciones" }));
+  }
+
+  async function mostrarPrevia(fila, cedula) {
+    if (filaPrevia !== fila || !fila.isConnected || menuContexto || document.querySelector("dialog[open]")) return;
+    previa.replaceChildren(el("p", { class: "vp-cargando", text: "Buscando a la persona…" }));
+    previa.hidden = false;
+    ubicarPrevia(fila);
+    let a;
+    try { a = await personaDe(cedula); } catch (_) { ocultarPrevia(); return; }
+    if (filaPrevia !== fila) return;
+    pintarPrevia(a, cedula);
+    ubicarPrevia(fila);
+    previa.classList.add("visible");
+  }
+
+  // Con el movimiento del mouse (y no solo al entrar a la fila): así también sale si el mouse
+  // ya estaba sobre la fila cuando se cerró un menú o una ventana.
+  document.addEventListener("pointermove", (ev) => {
+    ratonX = ev.clientX;
+    ratonY = ev.clientY;
+    if (!conMouse.matches || ev.pointerType !== "mouse" || !ev.target.closest) return;
+    const fila = ev.target.closest("#resultados tbody tr[tabindex], .tc-tabla tbody tr[data-p]");
+    if (fila === filaPrevia) return;
+    ocultarPrevia();
+    if (!fila || menuContexto || document.querySelector("dialog[open]")) return;
+    const datos = datosDeFila(fila);
+    if (!datos || !datos.cedula) return;
+    // Si la persona ya está en pantalla (se buscó su cédula), sobra.
+    if (fila.closest("#resultados") && busqueda && busqueda.asociado && busqueda.asociado.cedula_limpia === datos.cedula) return;
+    filaPrevia = fila;
+    temporizadorPrevia = setTimeout(() => mostrarPrevia(fila, datos.cedula), 600);
+  }, { passive: true });
+  for (const evento of ["pointerdown", "keydown", "wheel"]) document.addEventListener(evento, ocultarPrevia, { capture: true, passive: true });
+  window.addEventListener("scroll", ocultarPrevia, { capture: true, passive: true });
+
+  // ------------------------------------------------------------------ J / K entre filas
+  const dentroDeTabla = (n) => Boolean(n && n.closest && n.closest("#resultados table, .tc-tabla"));
+  function moverEntreFilas(paso) {
+    const tabla = dentroDeTabla(document.activeElement) ? document.activeElement.closest("table") : null;
+    const filas = [...(tabla || contenedor).querySelectorAll("tbody tr[tabindex]")].filter((tr) => tr.offsetParent);
+    if (!filas.length) return;
+    const i = filas.indexOf(document.activeElement);
+    const j = i < 0 ? (paso > 0 ? 0 : filas.length - 1) : Math.max(0, Math.min(filas.length - 1, i + paso));
+    filas[j].focus({ preventScroll: true });
+    filas[j].scrollIntoView({ block: "nearest", behavior: sinMovimiento() ? "auto" : "smooth" });
+  }
+  function alternarGestionadaActual() {
+    const f = lista && lista.filas.find((x) => x.cedula === lista.actual);
+    if (!f) { toast("Primero abre una persona de la lista (J o N)."); return; }
+    marcarGestionada(f, !f.hecha);
+    toast(f.hecha ? "✓ Gestionada." : "Ya no está marcada como gestionada.");
+  }
+
+  // ------------------------------------------------------------------ arrastrar un Excel o CSV
+  // Soltar un archivo con cédulas en cualquier parte de la página arma la lista de trabajo.
+  // Se lee aquí mismo, en el navegador: el archivo no se sube a ningún lado.
+  const capaSoltar = el("div", { class: "capa-soltar", hidden: true, "aria-hidden": "true" },
+    el("div", { class: "cs-tarjeta" },
+      el("span", { class: "cs-icono", text: "📄" }),
+      el("strong", { text: "Suelta el archivo para armar la lista de trabajo" }),
+      el("span", { text: "Excel (.xlsx) o CSV con una columna de cédulas · se lee aquí, no se sube a ningún lado" })));
+  document.body.append(capaSoltar);
+  let arrastres = 0;
+  const conArchivos = (ev) => Boolean(ev.dataTransfer && [...(ev.dataTransfer.types || [])].includes("Files"));
+  const otraVentana = () => [...document.querySelectorAll("dialog[open]")].some((d) => d !== dialogoLista);
+  document.addEventListener("dragenter", (ev) => {
+    if (!conArchivos(ev) || otraVentana()) return;
+    arrastres++;
+    capaSoltar.hidden = false;
+    dialogoLista.classList.add("soltando");
+  });
+  document.addEventListener("dragover", (ev) => {
+    if (!conArchivos(ev) || otraVentana()) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "copy";
+  });
+  const quitarCapa = () => { arrastres = 0; capaSoltar.hidden = true; dialogoLista.classList.remove("soltando"); };
+  document.addEventListener("dragleave", () => { arrastres = Math.max(0, arrastres - 1); if (!arrastres) quitarCapa(); });
+  document.addEventListener("drop", (ev) => {
+    if (!conArchivos(ev) || otraVentana()) return;
+    ev.preventDefault();
+    quitarCapa();
+    usarArchivoCedulas(ev.dataTransfer.files[0]);
+  });
+
+  async function usarArchivoCedulas(archivo) {
+    if (!archivo) return;
+    try {
+      const cedulas = await cedulasDeArchivo(archivo);
+      if (!cedulas.length) { toast(`No encontré cédulas en «${archivo.name}».`); return; }
+      abrirBuscarVarias(cedulas.slice(0, MAXIMO_LISTA).join("\n"));
+      toast(`${plural(cedulas.length, "cédula", "cédulas")} de «${archivo.name}»${cedulas.length > MAXIMO_LISTA ? ` (se buscan las primeras ${MAXIMO_LISTA})` : ""}.`);
+    } catch (e) {
+      toast(e.message || "No se pudo leer el archivo.");
+    }
+  }
+
+  async function cedulasDeArchivo(archivo) {
+    const nombre = archivo.name.toLowerCase();
+    if (archivo.size > 15 * 1024 * 1024) throw new Error("El archivo es muy grande (máximo 15 MB).");
+    let filas;
+    if (/\.xls[xm]$/.test(nombre)) filas = await filasDeXlsx(archivo);
+    else if (/\.xls$/.test(nombre)) throw new Error("Ese es un Excel viejo (.xls): ábrelo y guárdalo como .xlsx o .csv.");
+    else if (/\.(csv|txt|tsv)$/.test(nombre) || /^text\//.test(archivo.type)) filas = filasDeTexto(await textoDeArchivo(archivo));
+    else throw new Error("Usa un Excel (.xlsx) o un CSV con una columna de cédulas.");
+    return cedulasDeFilas(filas);
+  }
+
+  async function textoDeArchivo(archivo) {
+    const bytes = new Uint8Array(await archivo.arrayBuffer());
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (_) { return new TextDecoder("windows-1252").decode(bytes); }
+  }
+
+  function filasDeTexto(texto) {
+    const lineas = texto.split(/\r?\n/);
+    const separador = ["\t", ";", ","].find((s) => lineas.slice(0, 5).some((l) => l.includes(s))) || ",";
+    return lineas.map((l) => l.split(separador).map((x) => x.replace(/^"|"$/g, "").trim()));
+  }
+
+  // La columna con «Cédula» (o «CC», «Documento»…) en el encabezado; si no hay encabezado, la
+  // columna con más valores que parecen una cédula. Así un monto (500000) no se cuela.
+  function cedulasDeFilas(filas) {
+    for (let i = 0; i < Math.min(8, filas.length); i++) {
+      const j = filas[i].findIndex((c) => COLUMNA_CEDULA.test(String(c || "").trim()));
+      if (j >= 0) return cedulasDeTexto(filas.slice(i + 1).map((f) => f[j] || "").join("\n"));
+    }
+    const ancho = Math.max(0, ...filas.map((f) => f.length));
+    let mejor = -1, cuantas = 0;
+    for (let j = 0; j < ancho; j++) {
+      const n = filas.filter((f) => /^\d{6,10}$/.test(String(f[j] || "").replace(/[.\s]/g, ""))).length;
+      if (n > cuantas) { mejor = j; cuantas = n; }
+    }
+    return mejor < 0 ? [] : cedulasDeTexto(filas.map((f) => f[mejor] || "").join("\n"));
+  }
+
+  // Un .xlsx es un zip de XML: se abre con lo que trae el navegador (DecompressionStream), sin
+  // librerías. Se lee la primera hoja del libro.
+  async function filasDeXlsx(archivo) {
+    if (typeof DecompressionStream === "undefined") throw new Error("Este navegador no puede abrir Excel: guárdalo como CSV.");
+    const buf = new Uint8Array(await archivo.arrayBuffer());
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const invalido = () => new Error(`«${archivo.name}» no parece un Excel (.xlsx) válido.`);
+    let fin = -1;
+    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { fin = i; break; }
+    }
+    if (fin < 0) throw invalido();
+    const entradas = new Map();
+    let p = dv.getUint32(fin + 16, true);
+    for (let k = 0, total = dv.getUint16(fin + 10, true); k < total && p + 46 <= buf.length; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const largoNombre = dv.getUint16(p + 28, true);
+      entradas.set(new TextDecoder().decode(buf.subarray(p + 46, p + 46 + largoNombre)),
+        { metodo: dv.getUint16(p + 10, true), comprimido: dv.getUint32(p + 20, true), local: dv.getUint32(p + 42, true) });
+      p += 46 + largoNombre + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    }
+    const leer = async (ruta) => {
+      const e = entradas.get(ruta);
+      if (!e) return null;
+      const inicio = e.local + 30 + dv.getUint16(e.local + 26, true) + dv.getUint16(e.local + 28, true);
+      const datos = buf.subarray(inicio, inicio + e.comprimido);
+      if (e.metodo === 0) return new TextDecoder().decode(datos);
+      if (e.metodo !== 8) throw new Error("Ese Excel usa una compresión que no reconozco: guárdalo como CSV.");
+      return new Response(new Blob([datos]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+    };
+    const xml = (t) => new DOMParser().parseFromString(t, "application/xml");
+    // La primera hoja del libro (workbook.xml → sus relaciones); si algo falta, sheet1.xml.
+    let ruta = "xl/worksheets/sheet1.xml";
+    try {
+      const libro = xml(await leer("xl/workbook.xml"));
+      const primera = libro.getElementsByTagName("sheet")[0];
+      const id = primera && (primera.getAttribute("r:id") || primera.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"));
+      const relaciones = xml(await leer("xl/_rels/workbook.xml.rels"));
+      const rel = [...relaciones.getElementsByTagName("Relationship")].find((r) => r.getAttribute("Id") === id);
+      if (rel) { const t = rel.getAttribute("Target"); ruta = t.startsWith("/") ? t.slice(1) : "xl/" + t; }
+    } catch (_) { /* se queda sheet1 */ }
+    const textoHoja = await leer(ruta) || await leer([...entradas.keys()].find((n) => /^xl\/worksheets\/[^/]+\.xml$/.test(n)) || "");
+    if (!textoHoja) throw invalido();
+    const compartidos = [];
+    const textoCompartidos = await leer("xl/sharedStrings.xml");
+    if (textoCompartidos) {
+      for (const si of xml(textoCompartidos).getElementsByTagName("si")) compartidos.push([...si.getElementsByTagName("t")].map((t) => t.textContent).join(""));
+    }
+    const filas = [];
+    for (const fila of xml(textoHoja).getElementsByTagName("row")) {
+      const valores = [];
+      for (const c of fila.getElementsByTagName("c")) {
+        const letras = ((c.getAttribute("r") || "").match(/^[A-Z]+/) || [""])[0];
+        let col = valores.length;
+        if (letras) { col = 0; for (const ch of letras) col = col * 26 + ch.charCodeAt(0) - 64; col -= 1; }
+        const tipo = c.getAttribute("t");
+        const v = c.getElementsByTagName("v")[0];
+        let texto = tipo === "s" ? compartidos[Number(v && v.textContent)] || ""
+          : tipo === "inlineStr" ? [...c.getElementsByTagName("t")].map((t) => t.textContent).join("") : v ? v.textContent : "";
+        // 1.0123456789E9 o 12345678.0: la cifra entera, como se ve en Excel.
+        if (/^\d+(\.\d+)?E\+?\d+$/i.test(texto) || /^\d+\.0+$/.test(texto)) texto = String(Math.round(Number(texto)));
+        valores[col] = texto;
+      }
+      filas.push(Array.from(valores, (x) => x || ""));
+    }
+    return filas;
+  }
+
+  // ------------------------------------------------------------------ avisos en la pestaña
+  // Mientras cargan las hojas o se busca una lista, el título de la pestaña lleva el avance
+  // («(4/7) Cargando · Axio»): se ve desde otra pestaña. Al terminar, si no se está mirando
+  // Axio, una notificación del navegador (si se dio el permiso) y «✓» en el título.
+  const TITULO_BASE = document.title || "Axio";
+  let tituloOcupado = false;
+  let tituloCargando = false;
+  function tituloAvance(hechas, total, que) {
+    tituloOcupado = true;
+    document.title = `(${hechas}/${total}) ${que} · ${TITULO_BASE}`;
+  }
+  function tituloNormal() {
+    tituloOcupado = false;
+    document.title = TITULO_BASE;
+  }
+  function terminoAlgo(titulo, cuerpo, conError) {
+    tituloOcupado = false;
+    if (!document.hidden) { document.title = TITULO_BASE; return; }
+    document.title = (conError ? "⚠ " : "✓ ") + TITULO_BASE;
+    try {
+      if ("Notification" in window && Notification.permission === "granted") {
+        const icono = document.querySelector('link[rel="icon"]');
+        const aviso = new Notification(titulo, { body: cuerpo, tag: "axio", icon: icono ? icono.href : undefined });
+        aviso.onclick = () => { window.focus(); aviso.close(); };
+      }
+    } catch (_) { /* sin notificaciones */ }
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !tituloOcupado) document.title = TITULO_BASE; });
+
+  // «🔔 Avísame cuando termine»: el navegador solo pide el permiso tras un clic.
+  const puedeNotificar = () => "Notification" in window && window.isSecureContext && Notification.permission === "default";
+  let avisoOfrecido = false;
+  const botonAvisame = el("button", { class: "boton-avisame", type: "button", hidden: true,
+    onclick: async () => {
+      botonAvisame.hidden = true;
+      try {
+        if (await Notification.requestPermission() === "granted") toast("Listo: te aviso cuando termine, aunque estés en otra ventana.");
+      } catch (_) { /* sin notificaciones */ }
+    } }, "🔔 Avísame cuando termine");
+  document.body.append(botonAvisame);
+
+  function avanceCarga(hechas, total) {
+    tituloCargando = true;
+    tituloAvance(hechas, total, "Cargando");
+    if (!avisoOfrecido && puedeNotificar()) {
+      avisoOfrecido = true;
+      setTimeout(() => { if (tituloCargando && puedeNotificar()) botonAvisame.hidden = false; }, 2500);
+    }
+  }
+  function finCarga(error) {
+    if (!tituloCargando) return;
+    tituloCargando = false;
+    botonAvisame.hidden = true;
+    terminoAlgo(error ? "Axio no pudo cargar todo" : "Axio está listo",
+      error ? "Algunas hojas no cargaron. Entra para ver el detalle." : "Ya cargaron las hojas: puedes buscar.", Boolean(error));
+  }
+  // La versión de navegador cuenta su propio avance (estatico/espera.js y puente.js).
+  window.addEventListener("axio-avance", (ev) => { if (ev.detail) avanceCarga(ev.detail.listas, ev.detail.total); });
+  window.addEventListener("axio-carga-fin", (ev) => finCarga(ev.detail && ev.detail.error));
+
+  // ------------------------------------------------------------------ enlace directo a una persona
+  // «🔗 Enlace» copia la dirección de Axio con #cc=<cédula>. Quien lo abre entra con su propia
+  // cuenta y Axio busca esa cédula. Lo que va después de # nunca viaja al servidor (ni queda
+  // en sus registros), y se borra de la barra de direcciones apenas se lee.
+  const enlacePersona = (cedula) => location.origin + location.pathname + location.search + "#cc=" + cedula;
+  function irAEnlace() {
+    let cedula = (/^#cc=(\d{5,12})$/.exec(location.hash) || [])[1] || "";
+    try {
+      // El inicio de sesión del servidor pierde el #: portada.js lo guarda antes de entrar.
+      if (!cedula) cedula = sessionStorage.getItem("axio_ir_a") || "";
+      sessionStorage.removeItem("axio_ir_a");
+    } catch (_) { /* sin almacenamiento */ }
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+    if (!/^\d{5,12}$/.test(cedula)) return;
+    campo.value = cedula;
+    buscar();
+  }
+  window.addEventListener("hashchange", irAEnlace);
+
   // ------------------------------------------------------------------ eventos
   form.addEventListener("submit", (ev) => { ev.preventDefault(); buscar(); });
   let temporizadorFiltro = null;
@@ -4474,4 +5380,6 @@
 
   pintarRecientes();
   cargarEstado();
+  cargarAgenda();
+  irAEnlace();
 })();

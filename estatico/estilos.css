@@ -2114,3 +2114,199 @@ body.modo-enfoque .tablero, body.modo-enfoque .tabla-completa { opacity: .28; fi
   .recorrido[open], .recorrido.cerrando, .rc-tarjeta.rc-cambia > * { animation: none; }
   .rc-foco, .rc-tarjeta, .lupa-flotante, .tablero, .tabla-completa, .pl-fila { transition: none; }
 }
+
+/* ==========================================================================
+   AGENDA DEL EQUIPO, FIJADOS, CLIC DERECHO, VISTA PREVIA, ARCHIVOS Y AVISOS
+   ========================================================================== */
+
+/* ---------- fijados (debajo del buscador) ---------- */
+.fijados-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; width: 100%; }
+.recientes .chip-fijado { display: inline-flex; align-items: center; gap: 6px; border-color: rgba(252, 180, 0, .38); }
+.recientes .chip-fijado:hover { border-color: rgba(252, 180, 0, .7); background: rgba(252, 180, 0, .1); }
+.chip-estrella { color: var(--dorado-texto); font-size: 12px; }
+.boton-fijar.activo { color: var(--dorado-texto); border-color: rgba(252, 180, 0, .55); background: rgba(252, 180, 0, .1); }
+
+/* ---------- notas y compromisos en la ficha ---------- */
+.asociado-agenda {
+  display: grid; gap: 8px; margin-top: 12px; padding: 12px 14px; border-radius: 14px;
+  background: var(--campo); border: 1px dashed var(--borde-fuerte);
+}
+.asociado-agenda.ag-con-algo { border-style: solid; background: linear-gradient(90deg, rgba(47, 125, 246, .06), transparent 70%), var(--campo); }
+.ag-cabecera { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ag-titulo { font-size: 13px; letter-spacing: .01em; }
+.ag-cuenta { font-size: 12px; color: var(--texto-2); }
+.ag-nuevo { margin-left: auto; }
+.ag-campo-nota { width: 100%; font-size: 13.5px; }
+.ag-pie { margin: 0; font-size: 11.5px; color: var(--texto-3); }
+.ag-pie-ambar { color: var(--ambar); }
+.ag-notas { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ag-nota-item {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 4px 10px; padding: 7px 8px 7px 12px;
+  border-radius: 10px; background: var(--vidrio-alto); border-left: 3px solid var(--celeste);
+}
+.ag-nota-texto { font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.ag-autor { font-size: 11.5px; color: var(--texto-3); white-space: nowrap; }
+.ag-borrar { padding: 0 6px; min-height: 0; font-size: 12px; opacity: .55; }
+.ag-nota-item:hover .ag-borrar, .ag-borrar:focus-visible { opacity: 1; }
+.ag-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-radius: 12px; background: var(--vidrio-alto); border: 1px solid rgba(252, 180, 0, .4); }
+.ag-form label { display: grid; gap: 4px; font-size: 11.5px; font-weight: 650; color: var(--texto-2); }
+.ag-form input { width: 100%; }
+.ag-form-nota { grid-column: 1 / -1; }
+.ag-form-botones { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 6px; }
+.ag-monto { font-variant-numeric: tabular-nums; }
+
+/* Un compromiso: pendiente (dorado), vence hoy (ámbar fuerte), vencido (rojo), resuelto. */
+.ag-compromiso {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 9px 10px 9px 12px;
+  border-radius: 12px; background: rgba(252, 180, 0, .07); border: 1px solid rgba(252, 180, 0, .32);
+}
+.ag-compromiso.ag-hoy { background: rgba(252, 180, 0, .14); border-color: rgba(252, 180, 0, .65); }
+.ag-compromiso.ag-vencida { background: rgba(255, 107, 107, .08); border-color: rgba(255, 107, 107, .45); }
+.ag-compromiso.ag-cumplida { background: rgba(52, 211, 153, .07); border-color: rgba(52, 211, 153, .35); }
+.ag-compromiso.ag-incumplida { background: var(--vidrio-alto); border-color: var(--borde); }
+.ag-icono { font-size: 18px; width: 26px; text-align: center; }
+.ag-cumplida .ag-icono { color: var(--verde); font-weight: 800; }
+.ag-incumplida .ag-icono { color: var(--rojo); font-weight: 800; }
+.ag-textos { display: grid; gap: 2px; min-width: 0; }
+.ag-que { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.ag-que strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.ag-cuando { font-size: 12px; font-weight: 700; color: var(--dorado-texto); }
+.ag-vencida .ag-cuando { color: var(--rojo); }
+.ag-cumplida .ag-cuando { color: var(--verde); }
+.ag-incumplida .ag-cuando { color: var(--texto-3); }
+.ag-nota { font-size: 12.5px; color: var(--texto-2); font-style: italic; overflow-wrap: anywhere; }
+.ag-pista { font-size: 12px; font-weight: 600; color: var(--verde); }
+.ag-botones { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ag-botones .ag-cumplida:hover { border-color: rgba(52, 211, 153, .7); }
+.ag-botones .ag-incumplida:hover { border-color: rgba(255, 107, 107, .6); }
+.ag-persona { display: flex; align-items: baseline; gap: 8px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ag-persona strong { font-size: 14.5px; }
+.ag-persona span { font-size: 11.5px; color: var(--texto-2); font-variant-numeric: tabular-nums; }
+.ag-persona:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- la ventana de la agenda ---------- */
+.dialogo-agenda { width: min(820px, calc(100vw - 28px)); }
+.dialogo-agenda .dialogo-axio-cabecera > div:first-child { flex: 1; }
+.ag-vista { grid-template-columns: repeat(2, auto); }
+.ag-vista button { padding: 6px 12px; }
+.ag-cifras { grid-template-columns: repeat(4, 1fr); }
+.ag-cifra-vencida:not(.cero) strong { color: var(--rojo); }
+.ag-cifra-hoy:not(.cero) strong { color: var(--dorado-texto); }
+.ag-grupo { display: grid; gap: 6px; }
+.ag-grupo h3 { margin: 4px 0 0; font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-2); }
+.ag-grupo h3 span { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--texto-3); }
+.ag-grupo-vencida h3 { color: var(--rojo); }
+.ag-grupo-hoy h3 { color: var(--dorado-texto); }
+.ag-resueltos summary { cursor: pointer; font-size: 12.5px; font-weight: 650; color: var(--texto-2); padding: 4px 0; }
+.ag-resueltos[open] summary { margin-bottom: 4px; }
+
+/* ---------- botón de la agenda en la barra ---------- */
+.boton-agenda { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.ba-icono { font-size: 15px; line-height: 1; }
+.ba-cuenta {
+  display: inline-grid; place-items: center; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 99px;
+  font-size: 11px; font-weight: 800; color: #1a1200; background: var(--dorado); box-shadow: 0 0 0 2px var(--fondo);
+  font-variant-numeric: tabular-nums;
+}
+.ba-cuenta[hidden] { display: none; }
+@media (max-width: 640px) { .boton-agenda .ba-cuenta { position: absolute; top: 0; right: -2px; } }
+
+/* ---------- modo llamada: lo que el equipo ya sabe ---------- */
+.ll-equipo { display: grid; gap: 5px; }
+.ll-promesa-previa, .ll-nota-previa { margin: 0; padding: 7px 10px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; }
+.ll-promesa-previa { background: rgba(252, 180, 0, .1); border: 1px solid rgba(252, 180, 0, .4); }
+.ll-promesa-previa.ag-vencida { background: rgba(255, 107, 107, .08); border-color: rgba(255, 107, 107, .4); }
+.ll-promesa-previa strong { color: var(--dorado-texto); }
+.ll-promesa-previa.ag-vencida strong { color: var(--rojo); }
+.ll-nota-previa { background: var(--campo); border-left: 3px solid var(--celeste); }
+.ll-nota-previa small { color: var(--texto-3); }
+
+/* ---------- menú del clic derecho ---------- */
+.menu-contexto {
+  position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 5px; display: grid; gap: 1px;
+  color: var(--texto); background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo);
+  border: 1px solid var(--borde-fuerte); border-radius: 14px; box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .7), var(--brillo);
+}
+.menu-contexto:popover-open { animation: aparecer-modal .14s ease both; }
+.mc-titulo { margin: 0 0 3px; padding: 6px 10px; font-size: 12px; color: var(--texto-2); font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--borde); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-titulo strong { color: var(--texto); }
+.mc-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 0; border-radius: 9px;
+  background: none; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+}
+.mc-item:hover, .mc-item:focus-visible { background: var(--resaltado-fuerte); outline: none; }
+.mc-icono { width: 20px; text-align: center; flex: none; }
+.mc-texto { flex: 1; }
+.mc-item kbd { font-size: 10.5px; }
+.mc-separador { height: 1px; margin: 3px 6px; background: var(--borde); }
+.mc-nota { margin: 4px 10px 6px; font-size: 12px; color: var(--texto-3); }
+
+/* ---------- vista previa al pasar el mouse ---------- */
+.vista-previa {
+  position: fixed; z-index: 60; width: min(360px, calc(100vw - 16px)); padding: 12px 14px; display: grid; gap: 8px;
+  pointer-events: none; color: var(--texto); background: linear-gradient(var(--vidrio-solido), var(--vidrio-solido)), var(--fondo);
+  border: 1px solid var(--borde-fuerte); border-radius: 16px; box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .75), var(--brillo);
+  opacity: .9;
+}
+.vista-previa[hidden] { display: none; }
+.vista-previa.visible { opacity: 1; animation: vp-entra .18s ease both; }
+@keyframes vp-entra { from { opacity: 0; transform: translateY(4px); } }
+.vp-cabecera { display: flex; align-items: center; gap: 10px; }
+.vp-quien { display: grid; min-width: 0; }
+.vp-quien strong { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vp-quien span { font-size: 11.5px; color: var(--texto-2); font-variant-numeric: tabular-nums; }
+.vista-previa .asociado-frase.vp-frase { margin: 0; padding: 8px 10px; font-size: 12.5px; animation: none; }
+.vp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.vp-chips:empty { display: none; }
+.vp-chip { padding: 3px 9px; border-radius: 99px; font-size: 11.5px; font-weight: 650; background: var(--vidrio-alto); border: 1px solid var(--borde); }
+.vp-mora { color: var(--rojo); border-color: rgba(255, 107, 107, .4); }
+.vp-promesa { color: var(--dorado-texto); border-color: rgba(252, 180, 0, .45); }
+.vp-nota { margin: 0; font-size: 12.5px; font-style: italic; color: var(--texto-2); overflow-wrap: anywhere; }
+.vp-pie, .vp-cargando { margin: 0; font-size: 11px; color: var(--texto-3); }
+.vp-nada { margin: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--texto-2); }
+.vp-nada strong { color: var(--texto); }
+
+/* ---------- soltar un archivo ---------- */
+.capa-soltar {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; pointer-events: none;
+  background: rgba(3, 10, 36, .55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.capa-soltar[hidden] { display: none; }
+.cs-tarjeta {
+  display: grid; justify-items: center; gap: 6px; padding: 30px 38px; max-width: calc(100vw - 32px); text-align: center;
+  border-radius: 24px; border: 2px dashed var(--dorado); background: var(--vidrio-solido); box-shadow: var(--sombra);
+  animation: aparecer-modal .2s ease both;
+}
+.cs-icono { font-size: 34px; }
+.cs-tarjeta strong { font-family: var(--fuente-titulo); font-size: 18px; }
+.cs-tarjeta span:last-child { font-size: 12.5px; color: var(--texto-2); }
+.dialogo-lista.soltando { outline: 2px dashed var(--dorado); outline-offset: -6px; }
+
+/* ---------- «Avísame cuando termine» ---------- */
+.boton-avisame {
+  position: fixed; right: 18px; bottom: 18px; z-index: 65; padding: 10px 16px; border-radius: 99px; cursor: pointer;
+  font: 650 13px var(--fuente); color: var(--texto); background: var(--vidrio-solido); border: 1px solid var(--borde-fuerte);
+  box-shadow: var(--sombra-chica); animation: avisame-entra .35s cubic-bezier(.2, .9, .25, 1.2) both;
+}
+.boton-avisame[hidden] { display: none; }
+.boton-avisame:hover { border-color: rgba(252, 180, 0, .6); }
+@keyframes avisame-entra { from { opacity: 0; transform: translateY(10px) scale(.96); } }
+
+.aviso-agenda[hidden] { display: none; }
+
+@media (max-width: 720px) {
+  .ag-cifras { grid-template-columns: repeat(2, 1fr); }
+  .ag-compromiso { grid-template-columns: auto 1fr; }
+  .ag-botones { grid-column: 1 / -1; justify-content: flex-start; }
+  .ag-nota-item { grid-template-columns: 1fr auto; }
+  .ag-nota-item .ag-autor { grid-column: 1; }
+  .ag-nota-item .ag-borrar { grid-row: 1; grid-column: 2; }
+  .ag-form { grid-template-columns: 1fr; }
+  .dialogo-agenda .dialogo-axio-cabecera { display: grid; grid-template-columns: 1fr auto; align-items: start; }
+  .dialogo-agenda .ag-vista { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .ag-cifras .dia-cifra:first-child { grid-column: auto; }
+}
+@media print { .asociado-agenda, .vista-previa, .menu-contexto, .boton-avisame { display: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .vista-previa.visible, .menu-contexto:popover-open, .cs-tarjeta, .boton-avisame { animation: none; }
+}

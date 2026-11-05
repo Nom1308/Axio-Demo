@@ -58,6 +58,8 @@
     if (!n) return;
     const listas = fuentes.filter((f) => f.estado === "lista").length;
     n.textContent = `${listas} de ${fuentes.length} hoja${fuentes.length === 1 ? "" : "s"} lista${listas === 1 ? "" : "s"}`;
+    // app.js lo lleva al título de la pestaña («(3/8) Cargando · Axio»).
+    window.dispatchEvent(new CustomEvent("axio-avance", { detail: { listas, total: fuentes.length } }));
   }
   // «Leyendo Libre Inversión Mayor…»; WhatsApp y los Extractos con sus propias palabras.
   function fraseDe(f) {

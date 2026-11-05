@@ -29,7 +29,7 @@
   // solo puede ver una hoja, no puede escribirle.
   const ALCANCE_HOJAS = "https://www.googleapis.com/auth/spreadsheets";
   const ALCANCES = "openid email profile https://www.googleapis.com/auth/drive.readonly " + ALCANCE_HOJAS;
-  const trabajador = new Worker("estatico/trabajador.js?v=2026-11-03-162645");
+  const trabajador = new Worker("estatico/trabajador.js?v=2026-11-05-093248");
   const pendientes = new Map();
   let siguienteId = 1;
   let motorListo = false;
@@ -156,6 +156,16 @@
 
   window.axioFetch = async function (url, opciones = {}) {
     const metodo = (opciones.method || "GET").toUpperCase();
+    // La agenda del equipo no depende de las hojas cargadas: va a su propia hoja de Google.
+    if (url === "/api/agenda") {
+      try {
+        let cuerpo = null;
+        if (metodo === "POST") { try { cuerpo = JSON.parse(opciones.body || "{}"); } catch (_) { cuerpo = {}; } }
+        return respuestaJson(await atenderAgenda(cuerpo));
+      } catch (e) {
+        return respuestaJson({ error: e.message || String(e) }, e.codigo || 500);
+      }
+    }
     if (metodo === "POST" && url === "/api/refrescar") {
       if (cargando) return respuestaJson({ iniciada: false, mensaje: "Ya hay una descarga en curso." });
       cargarDatos({ accion: "recargar" }, usuario ? tokenVigente : null);
@@ -253,6 +263,8 @@
       return;
     }
     urlRegistro = String(config.url_registro_gestiones || "").trim();
+    urlAgenda = String(config.url_agenda || "").trim();
+    hojaAgenda = null;
     // Las hojas que se van a cargar, en el orden en que se leen (para la pantalla de carga).
     const conUrl = (u) => Boolean(String(u || "").trim());
     fuentesConfig = [
@@ -286,7 +298,7 @@
     // app.js arranca al cargarse (pinta el estado y empieza a sondear), por eso entra
     // recién ahora y no con la página.
     const script = document.createElement("script");
-    script.src = "estatico/app.js?v=2026-11-03-162645";
+    script.src = "estatico/app.js?v=2026-11-05-093248";
     document.body.append(script);
   }
 
@@ -431,6 +443,206 @@
     return true;
   }
 
+  // ------------------------------------------------------------------ agenda del equipo
+  // Los compromisos de pago, las notas por asociado y los fijados de app.js (lo mismo que
+  // web/agenda.py en el servidor). Con «url_agenda» en el config, viven en esa hoja de Google
+  // (una hoja aparte, NO la Matriz), en tres pestañas que Axio crea si faltan: Compromisos,
+  // Notas y Fijados. Se escribe con la cuenta de cada persona: todos los que usan Axio
+  // necesitan permiso de edición en esa hoja. Sin la clave, la agenda vive solo en esta
+  // pestaña (sessionStorage) y app.js avisa que falta conectarla.
+  let urlAgenda = "";
+  let hojaAgenda = null;   // { id, titulo } una vez preparada
+  let colaAgenda = Promise.resolve();   // un cambio a la vez: las filas no se cruzan
+  const PESTANAS_AGENDA = {
+    Compromisos: ["ID", "Creado", "Correo", "Quién anotó", "Cédula", "Asociado", "Valor", "Fecha prometida", "Nota", "Estado", "Actualizado", "Actualizado por"],
+    Notas: ["ID", "Creado", "Correo", "Quién escribió", "Cédula", "Asociado", "Nota", "Borrada"],
+    Fijados: ["Correo", "Cédula", "Asociado", "Creado"],
+  };
+  const MAX_FIJADOS = 30;
+  const DIAS_RESUELTOS_VISIBLES = 90;
+  const CLAVE_AGENDA_LOCAL = "axio_agenda_local";
+
+  const errorAgenda = (mensaje, codigo) => Object.assign(new Error(mensaje), { codigo: codigo || 400 });
+  const dos = (n) => String(n).padStart(2, "0");
+  const ahoraLocal = () => { const d = new Date(); return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}T${dos(d.getHours())}:${dos(d.getMinutes())}:${dos(d.getSeconds())}`; };
+  const nuevoId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 11);
+  const limpio = (v, largo) => String(v == null ? "" : v).replace(/\s+/g, " ").trim().slice(0, largo);
+  function cedulaValida(v) {
+    const c = String(v == null ? "" : v).replace(/\D/g, "");
+    if (c.length < 5 || c.length > 12) throw errorAgenda("La cédula no es válida.");
+    return c;
+  }
+
+  // Lo que pide app.js, validado igual que en web/agenda.py.
+  function validarAgenda(p) {
+    const accion = p && p.accion;
+    if (accion === "compromiso") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.fecha || ""))) throw errorAgenda("La fecha del compromiso no es válida.");
+      const monto = p.monto === null || p.monto === undefined || p.monto === "" ? null : Math.round(Number(p.monto));
+      if (monto !== null && !(monto >= 0 && monto <= 1e12)) throw errorAgenda("El valor del compromiso no es válido.");
+      return { accion, cedula: cedulaValida(p.cedula), nombre: limpio(p.nombre, 120), monto, fecha: p.fecha, nota: limpio(p.nota, 500) };
+    }
+    if (accion === "estado") {
+      if (!["pendiente", "cumplida", "incumplida"].includes(p.estado)) throw errorAgenda("Estado inválido.");
+      return { accion, id: String(p.id || ""), estado: p.estado };
+    }
+    if (accion === "nota") {
+      const texto = limpio(p.texto, 500);
+      if (!texto) throw errorAgenda("La nota está vacía.");
+      return { accion, cedula: cedulaValida(p.cedula), nombre: limpio(p.nombre, 120), texto };
+    }
+    if (accion === "borrar_nota") return { accion, id: String(p.id || "") };
+    if (accion === "fijar" || accion === "desfijar") return { accion, cedula: cedulaValida(p.cedula), nombre: limpio(p.nombre, 120) };
+    throw errorAgenda("Acción desconocida.");
+  }
+
+  // La agenda como la espera app.js. todos: { compromisos, notas, fijados } con los de todos.
+  function agendaParaPagina(todos, yo, compartida) {
+    const limite = new Date(Date.now() - DIAS_RESUELTOS_VISIBLES * 86400000);
+    const desde = `${limite.getFullYear()}-${dos(limite.getMonth() + 1)}-${dos(limite.getDate())}`;
+    return {
+      configurada: compartida, compartida, yo, hoja: (hojaAgenda && hojaAgenda.titulo) || "",
+      compromisos: todos.compromisos.filter((c) => c.estado === "pendiente" || String(c.actualizado || c.creado || "").slice(0, 10) >= desde),
+      notas: todos.notas.filter((n) => !n.borrada),
+      fijados: todos.fijados.filter((f) => f.autor === yo).map(({ cedula, nombre, creado }) => ({ cedula, nombre, creado })),
+    };
+  }
+
+  // Aplica un cambio sobre listas en memoria (la agenda de prueba, sin hoja).
+  function aplicarEnMemoria(todos, p, yo, quien) {
+    if (p.accion === "compromiso") {
+      todos.compromisos.push({ id: nuevoId(), cedula: p.cedula, nombre: p.nombre, monto: p.monto, fecha: p.fecha, nota: p.nota, estado: "pendiente",
+        autor: yo, autor_nombre: quien, creado: ahoraLocal(), actualizado: null, actualizado_por: null });
+    } else if (p.accion === "estado") {
+      const c = todos.compromisos.find((x) => x.id === p.id);
+      if (!c) throw errorAgenda("Ese compromiso ya no existe.");
+      Object.assign(c, { estado: p.estado, actualizado: ahoraLocal(), actualizado_por: yo });
+    } else if (p.accion === "nota") {
+      todos.notas.push({ id: nuevoId(), cedula: p.cedula, nombre: p.nombre, texto: p.texto, autor: yo, autor_nombre: quien, creado: ahoraLocal() });
+    } else if (p.accion === "borrar_nota") {
+      const n = todos.notas.find((x) => x.id === p.id && !x.borrada);
+      if (!n) throw errorAgenda("Esa nota ya no existe.");
+      if (n.autor !== yo) throw errorAgenda("Solo quien escribió la nota la puede borrar.");
+      n.borrada = ahoraLocal();
+    } else if (p.accion === "fijar") {
+      const mios = todos.fijados.filter((f) => f.autor === yo);
+      if (mios.some((f) => f.cedula === p.cedula)) return;
+      if (mios.length >= MAX_FIJADOS) throw errorAgenda(`Puedes fijar hasta ${MAX_FIJADOS} personas. Quita alguna primero.`);
+      todos.fijados.unshift({ autor: yo, cedula: p.cedula, nombre: p.nombre, creado: ahoraLocal() });
+    } else if (p.accion === "desfijar") {
+      todos.fijados = todos.fijados.filter((f) => !(f.autor === yo && f.cedula === p.cedula));
+    }
+  }
+
+  function agendaLocal(peticion, yo, quien) {
+    let todos = { compromisos: [], notas: [], fijados: [] };
+    try { todos = { ...todos, ...JSON.parse(sessionStorage.getItem(CLAVE_AGENDA_LOCAL)) }; } catch (_) { /* vacía */ }
+    if (peticion) {
+      aplicarEnMemoria(todos, validarAgenda(peticion), yo, quien);
+      try { sessionStorage.setItem(CLAVE_AGENDA_LOCAL, JSON.stringify(todos)); } catch (_) { /* sin almacenamiento */ }
+    }
+    return agendaParaPagina(todos, yo, false);
+  }
+
+  // ---- la hoja de Google
+  async function pedirHoja(ruta, opciones = {}) {
+    const r = await fetch("https://sheets.googleapis.com/v4/spreadsheets/" + ruta, {
+      ...opciones, headers: { Authorization: "Bearer " + token, ...(opciones.body ? { "Content-Type": "application/json" } : {}) },
+    });
+    if (r.status === 403) throw errorAgenda(opciones.method ? "Tu cuenta no puede escribir en la hoja de la agenda: pide permiso de edición a quien la administra." : "Tu cuenta no tiene permiso para ver la hoja de la agenda.", 403);
+    if (r.status === 404) throw errorAgenda("No encuentro la hoja de la agenda («url_agenda»): puede que la hayan movido o borrado.", 404);
+    if (!r.ok) throw errorAgenda(`Google respondió ${r.status} con la hoja de la agenda.`, 502);
+    return r.json();
+  }
+
+  async function prepararAgenda() {
+    if (hojaAgenda) return hojaAgenda;
+    const id = (/\/spreadsheets\/d\/([\w-]{20,})/.exec(urlAgenda) || [])[1];
+    if (!id) throw errorAgenda("«url_agenda» no es la dirección de una hoja de Google.", 500);
+    const libro = await pedirHoja(`${id}?fields=${encodeURIComponent("properties.title,sheets.properties.title")}`);
+    const hay = new Set(libro.sheets.map((h) => h.properties.title));
+    const faltan = Object.keys(PESTANAS_AGENDA).filter((t) => !hay.has(t));
+    if (faltan.length) {
+      await pedirHoja(`${id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: faltan.map((title) => ({ addSheet: { properties: { title } } })) }) });
+      await pedirHoja(`${id}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW",
+        data: faltan.map((t) => ({ range: `'${t}'!A1`, values: [PESTANAS_AGENDA[t]] })) }) });
+    }
+    hojaAgenda = { id, titulo: libro.properties.title };
+    return hojaAgenda;
+  }
+
+  // Todo lo de la hoja, con el número de fila de cada cosa (para cambiarla después).
+  async function leerHojaAgenda() {
+    const { id } = await prepararAgenda();
+    const rangos = ["'Compromisos'!A2:L", "'Notas'!A2:H", "'Fijados'!A2:D"];
+    const r = await pedirHoja(`${id}/values:batchGet?valueRenderOption=UNFORMATTED_VALUE&` + rangos.map((x) => "ranges=" + encodeURIComponent(x)).join("&"));
+    const [c, n, f] = (r.valueRanges || []).map((v) => v.values || []);
+    const texto = (v) => (v === undefined || v === null ? "" : String(v));
+    const filas = (lista, hacer) => (lista || []).map((v, i) => (v && v.some((x) => texto(x) !== "") ? hacer(v, i + 2) : null)).filter(Boolean);
+    return {
+      compromisos: filas(c, (v, fila) => ({ fila, id: texto(v[0]), creado: texto(v[1]), autor: texto(v[2]), autor_nombre: texto(v[3]), cedula: texto(v[4]).replace(/\D/g, ""),
+        nombre: texto(v[5]), monto: v[6] === "" || v[6] === undefined ? null : Number(String(v[6]).replace(/[^\d.-]/g, "")) || null, fecha: texto(v[7]).slice(0, 10), nota: texto(v[8]),
+        estado: ["cumplida", "incumplida"].includes(texto(v[9])) ? texto(v[9]) : "pendiente", actualizado: texto(v[10]) || null, actualizado_por: texto(v[11]) || null })),
+      notas: filas(n, (v, fila) => ({ fila, id: texto(v[0]), creado: texto(v[1]), autor: texto(v[2]), autor_nombre: texto(v[3]), cedula: texto(v[4]).replace(/\D/g, ""),
+        nombre: texto(v[5]), texto: texto(v[6]), borrada: texto(v[7]) || null })),
+      fijados: filas(f, (v, fila) => ({ fila, autor: texto(v[0]), cedula: texto(v[1]).replace(/\D/g, ""), nombre: texto(v[2]), creado: texto(v[3]) })),
+    };
+  }
+
+  const agregarFilas = (id, pestana, filas) => pedirHoja(`${id}/values/${encodeURIComponent(`'${pestana}'!A1`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    { method: "POST", body: JSON.stringify({ values: filas }) });
+  const escribirRango = (id, rango, filas) => pedirHoja(`${id}/values:batchUpdate`,
+    { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data: [{ range: rango, values: filas }] }) });
+
+  async function cambiarHojaAgenda(p, yo, quien) {
+    const { id } = await prepararAgenda();
+    if (p.accion === "compromiso") {
+      await agregarFilas(id, "Compromisos", [[nuevoId(), ahoraLocal(), yo, quien, p.cedula, p.nombre, p.monto === null ? "" : p.monto, p.fecha, p.nota, "pendiente", "", ""]]);
+    } else if (p.accion === "nota") {
+      await agregarFilas(id, "Notas", [[nuevoId(), ahoraLocal(), yo, quien, p.cedula, p.nombre, p.texto, ""]]);
+    } else {
+      // Lo demás cambia una fila que ya existe: se lee primero para ubicarla.
+      const todos = await leerHojaAgenda();
+      if (p.accion === "estado") {
+        const c = todos.compromisos.find((x) => x.id === p.id);
+        if (!c) throw errorAgenda("Ese compromiso ya no existe.");
+        await escribirRango(id, `'Compromisos'!J${c.fila}:L${c.fila}`, [[p.estado, ahoraLocal(), yo]]);
+      } else if (p.accion === "borrar_nota") {
+        const n = todos.notas.find((x) => x.id === p.id && !x.borrada);
+        if (!n) throw errorAgenda("Esa nota ya no existe.");
+        if (n.autor !== yo) throw errorAgenda("Solo quien escribió la nota la puede borrar.");
+        await escribirRango(id, `'Notas'!H${n.fila}`, [[ahoraLocal()]]);
+      } else if (p.accion === "fijar") {
+        const mios = todos.fijados.filter((f) => f.autor === yo);
+        if (mios.some((f) => f.cedula === p.cedula)) return;
+        if (mios.length >= MAX_FIJADOS) throw errorAgenda(`Puedes fijar hasta ${MAX_FIJADOS} personas. Quita alguna primero.`);
+        await agregarFilas(id, "Fijados", [[yo, p.cedula, p.nombre, ahoraLocal()]]);
+      } else if (p.accion === "desfijar") {
+        const filas = todos.fijados.filter((f) => f.autor === yo && f.cedula === p.cedula).map((f) => `'Fijados'!A${f.fila}:D${f.fila}`);
+        if (filas.length) await pedirHoja(`${id}/values:batchClear`, { method: "POST", body: JSON.stringify({ ranges: filas }) });
+      }
+    }
+  }
+
+  // GET (peticion null) o POST (lo que manda app.js). Devuelve la agenda al día.
+  function atenderAgenda(peticion) {
+    const yo = (usuario && usuario.email) || "esta-pestana";
+    const quien = limpio((peticion && peticion.autor_nombre) || (usuario && usuario.name) || yo, 120);
+    if (!urlAgenda || !usuario) return Promise.resolve().then(() => agendaLocal(peticion, yo, quien));
+    const tarea = colaAgenda.then(async () => {
+      if (!token || Date.now() >= venceToken) {
+        // Leer sola cada pocos minutos nunca abre la ventana de Google; guardar sí (hubo un clic).
+        if (!peticion) throw errorAgenda("El permiso de Google venció: se renueva con tu próximo clic.", 503);
+        await tokenVigente();
+      }
+      if (peticion) await cambiarHojaAgenda(validarAgenda(peticion), yo, quien);
+      const todos = await leerHojaAgenda();
+      return agendaParaPagina(todos, yo, true);
+    });
+    colaAgenda = tarea.catch(() => {});
+    return tarea;
+  }
+
   // Lo que estatico/hojas.js necesita de la sesión, sin ver nada más de este módulo.
   window.axioGoogle = {
     conectado: () => Boolean(usuario && token),
@@ -502,6 +714,7 @@
     $(".usuario").dataset.correo = usuario.email || "";   // lo muestra el menú del usuario
     // El saludo de la portada y las fotos de la barra y el menú (app.js).
     $(".usuario").dataset.nombre = usuario.given_name || nombre;
+    $(".usuario").dataset.nombreCompleto = usuario.name || nombre;   // quién anota en la agenda
     if (/^https:\/\//.test(usuario.picture || "")) {
       $(".usuario").dataset.foto = usuario.picture;
       const foto = Object.assign(document.createElement("img"), { src: usuario.picture, alt: "", referrerPolicy: "no-referrer" });
@@ -540,7 +753,8 @@
   };
   function cerrarSesion(motivo) {
     saliendo = true;
-    try { sessionStorage.removeItem("axio_dia"); sessionStorage.removeItem("axio_lista"); } catch (_) { /* sin almacenamiento */ }   // «Tu día» y la lista de trabajo de app.js
+    // «Tu día», la lista de trabajo y la agenda de prueba (sin hoja configurada) de app.js.
+    try { for (const clave of ["axio_dia", "axio_lista", "axio_agenda_local", "axio_agenda_aviso"]) sessionStorage.removeItem(clave); } catch (_) { /* sin almacenamiento */ }
     if (AVISOS_CIERRE[motivo]) {
       try { sessionStorage.setItem(MARCA_INACTIVIDAD, motivo); } catch (_) { /* sin almacenamiento */ }
     }

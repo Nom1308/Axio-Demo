@@ -540,6 +540,16 @@ def atender(url):
         personas = _motor.sugerencias(parse_qs(partes.query).get('q', [''])[0])
         return _json({'personas': personas or [], 'cargando': personas is None})
 
+    # La ficha de una persona por su cédula (vista previa, clic derecho), igual que web/app.py.
+    if ruta == ['api', 'persona']:
+        cedula = re.sub(r'\D', '', parse_qs(partes.query).get('c', [''])[0])[:12]
+        if len(cedula) < 5:
+            return _json({'error': "Cédula inválida."}, 400)
+        asociado = _motor.persona(cedula)
+        if asociado is False:
+            return _json({'cargando': True, 'mensaje': "Cargando los datos..."}, 202)
+        return _json({'asociado': asociado})
+
     if len(ruta) == 4 and ruta[:2] == ['api', 'detalle'] and ruta[3].isdigit():
         detalle = _motor.detalle(ruta[2], int(ruta[3]), USUARIO)
         if detalle is None:

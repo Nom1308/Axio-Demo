@@ -17,6 +17,14 @@
 (function () {
   "use strict";
 
+  // Un enlace directo a una persona (…#cc=<cédula>, el botón «🔗 Enlace» de la ficha): al
+  // iniciar sesión en el servidor se pierde lo que va después de #, así que se guarda aquí
+  // y app.js lo busca al entrar (ver «enlace directo» en app.js). Solo cifras.
+  try {
+    const enlace = /^#cc=(\d{5,12})$/.exec(location.hash);
+    if (enlace) sessionStorage.setItem("axio_ir_a", enlace[1]);
+  } catch (_) { /* sin almacenamiento */ }
+
   const sinMovimiento = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const raiz = document.documentElement;
 

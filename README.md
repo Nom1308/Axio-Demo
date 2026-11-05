@@ -43,6 +43,19 @@ anotado en esa hoja: fecha y hora, correo, nombre, hoja, ubicación, cédula, co
   ediciones»), que también guarda el correo de quien escribió.
 - Sin la clave en el config, no se anota nada y todo funciona igual.
 
+## Agenda del equipo
+
+Los compromisos de pago (la promesa del modo llamada o «🤝 + Compromiso» en la ficha), las notas sobre cada
+persona y los fijados (★) se guardan en una hoja de Google aparte si el `config_axio.json` trae
+`"url_agenda": "https://docs.google.com/spreadsheets/d/…/edit"`. **No** debe ser la Matriz.
+
+- Basta una hoja vacía: Axio crea solo las pestañas **Compromisos**, **Notas** y **Fijados** con su encabezado.
+- Se escribe con la cuenta de cada persona: todos los que usan Axio necesitan **permiso de edición** en esa hoja.
+- Los fijados son de cada quien (Axio solo muestra los del correo con que se entró). Una nota borrada no se
+  borra de la hoja: queda la fecha en la columna «Borrada».
+- Sin la clave en el config, la agenda funciona solo en la pestaña (se pierde al cerrar la sesión) y Axio lo
+  avisa en la ficha y en la ventana de la agenda.
+
 ## Cierre por inactividad
 
 `data-inactividad="15"` en `index.html`: tras 15 minutos sin tocar la página, Axio avisa un minuto antes y luego
